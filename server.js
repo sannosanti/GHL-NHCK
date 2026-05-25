@@ -35,16 +35,23 @@ async function getConversationId(contactId) {
 }
 
 async function getLastMessage(conversationId) {
-  const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
-    headers: {
-      'Authorization': `Bearer ${GHL_KEY}`,
-      'Version': '2021-04-15'
-    }
-  });
-  const data = await res.json();
-  const messages = data.messages?.messages || [];
-  const lastInbound = messages.find(m => m.direction === 'inbound');
-  return lastInbound?.body || '';
+  try {
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
+      headers: {
+        'Authorization': `Bearer ${GHL_KEY}`,
+        'Version': '2021-04-15'
+      }
+    });
+    const data = await res.json();
+    console.log('MENSAJES:', JSON.stringify(data));
+    const messages = data.messages?.messages || data.messages || [];
+    if (!Array.isArray(messages) || messages.length === 0) return '';
+    const lastInbound = messages.find(m => m.direction === 'inbound');
+    return lastInbound?.body || messages[0]?.body || '';
+  } catch (err) {
+    console.error('Error getLastMessage:', err);
+    return '';
+  }
 }
 
 async function addTag(contactId, tag) {
