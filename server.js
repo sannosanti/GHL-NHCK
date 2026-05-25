@@ -237,9 +237,9 @@ REGLAS:
     }
 
     conversationHistory[conversationId].push({
-      role: 'assistant',
-      content: reply
-    });
+  role: 'assistant',
+  content: [{ type: 'text', text: reply }]
+});
 
     await humanDelay();
     await sendMessage(conversationId, reply);
