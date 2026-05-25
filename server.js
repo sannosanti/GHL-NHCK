@@ -66,7 +66,7 @@ async function addTag(contactId, tag) {
   });
 }
 
-async function sendMessage(conversationId, message) {
+async function sendMessage(conversationId, message, contactId) {
   const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
     method: 'POST',
     headers: {
@@ -77,6 +77,7 @@ async function sendMessage(conversationId, message) {
     body: JSON.stringify({
       type: 'WhatsApp',
       conversationId,
+      contactId,
       message
     })
   });
