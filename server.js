@@ -71,6 +71,7 @@ app.get('/', (req, res) => {
 
 app.post('/webhook/ghl', async (req, res) => {
   try {
+    console.log('BODY RECIBIDO:', JSON.stringify(req.body));
     const { contactId, conversationId } = req.body;
 
     if (!contactId || !conversationId) {
