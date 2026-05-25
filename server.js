@@ -43,7 +43,6 @@ async function getLastMessage(conversationId) {
       }
     });
     const data = await res.json();
-    console.log('MENSAJES:', JSON.stringify(data));
     const messages = data.messages?.messages || data.messages || [];
     if (!Array.isArray(messages) || messages.length === 0) return '';
     const lastInbound = messages.find(m => m.direction === 'inbound');
@@ -94,17 +93,17 @@ app.post('/webhook/ghl', async (req, res) => {
     console.log('BODY RECIBIDO:', JSON.stringify(req.body));
 
     const contactId = req.body.contactId || 
-                  req.body.customData?.contactId || 
-                  req.body.contact_id ||
-                  req.body.contact?.id;
+                      req.body.customData?.contactId || 
+                      req.body.contact_id ||
+                      req.body.contact?.id;
 
-const conversationId_raw = req.body.conversationId || 
-                           req.body.customData?.conversationId || '';
+    const conversationId_raw = req.body.conversationId || 
+                               req.body.customData?.conversationId || '';
 
-let conversationId = conversationId_raw;
+    let conversationId = conversationId_raw;
 
-const message = req.body.message?.body || 
-                req.body.customData?.message || '';
+    const message = req.body.message?.body || 
+                    req.body.customData?.message || '';
 
     if (!contactId) {
       return res.status(400).json({ error: 'Faltan datos' });
@@ -157,25 +156,27 @@ const message = req.body.message?.body ||
       conversationHistory[conversationId] = [];
     }
 
- conversationHistory[conversationId].push({
-  role: 'user',
-  content: [{ type: 'text', text: lastMessage }]
-});
+    conversationHistory[conversationId].push({
+      role: 'user',
+      content: [{ type: 'text', text: lastMessage }]
+    });
 
     if (conversationHistory[conversationId].length > 20) {
       conversationHistory[conversationId] = 
         conversationHistory[conversationId].slice(-20);
     }
 
-    const systemPrompt = `Eres Daniela, asesora de NHC Kids. Escribes por WhatsApp como una persona real — cálida, cercana y profesional.
+    const systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp como una persona real — cálida, cercana y profesional.
+
+IMPORTANTE: ${nombre} es el nombre del PADRE o MADRE, no del niño. Nunca digas "ayudar a ${nombre}" — di "ayudar a tu hijo/a".
 
 PERFIL DEL LEAD:
-- Nombre: ${nombre}
-- Principal dificultad: ${triaje1}
+- Nombre del padre/madre: ${nombre}
+- Principal dificultad del hijo/a: ${triaje1}
 - Tiempo observando: ${triaje2}
 - Lo que han intentado: ${triaje3}
-- Área más afectada: ${triaje4}
-- Nivel de compromiso: ${triaje5}
+- Área más afectada si no intervienen: ${triaje4}
+- Nivel de compromiso familiar: ${triaje5}
 
 SOBRE NHC KIDS:
 Centro especializado en comprensión integral del neurodesarrollo infantil. No etiquetamos — comprendemos. Ayudamos a familias a entender qué le pasa realmente a su hijo, intervenir con precisión y acompañar el proceso con coherencia.
@@ -235,19 +236,17 @@ REGLAS:
       await addTag(contactId, 'escalado nhck');
       await humanDelay();
       await sendMessage(conversationId,
-        'En un momento un asesor del área de ventas te va a ayudar con esto 🙌',contactId);
+        'En un momento un asesor del área de ventas te va a ayudar con esto 🙌', contactId);
       return res.json({ success: true, escalated: true });
     }
 
     conversationHistory[conversationId].push({
-  role: 'assistant',
-  content: [{ type: 'text', text: reply }]
-});
+      role: 'assistant',
+      content: [{ type: 'text', text: reply }]
+    });
 
     await humanDelay();
-    console.log('CONTACT ID:', contactId);
-console.log('CONVERSATION ID:', conversationId);
-    await sendMessage(conversationId, reply,contactId);
+    await sendMessage(conversationId, reply, contactId);
 
     res.json({ success: true, reply });
 
