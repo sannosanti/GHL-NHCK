@@ -67,7 +67,7 @@ async function addTag(contactId, tag) {
 }
 
 async function sendMessage(conversationId, message) {
-  await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+  const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${GHL_KEY}`,
@@ -80,6 +80,8 @@ async function sendMessage(conversationId, message) {
       message
     })
   });
+  const data = await res.json();
+  console.log('SEND MESSAGE RESPONSE:', JSON.stringify(data));
 }
 
 app.get('/', (req, res) => {
