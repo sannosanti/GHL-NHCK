@@ -235,7 +235,7 @@ REGLAS:
       await addTag(contactId, 'escalado nhck');
       await humanDelay();
       await sendMessage(conversationId,
-        'En un momento un asesor del área de ventas te va a ayudar con esto 🙌');
+        'En un momento un asesor del área de ventas te va a ayudar con esto 🙌',contactId);
       return res.json({ success: true, escalated: true });
     }
 
@@ -245,7 +245,9 @@ REGLAS:
 });
 
     await humanDelay();
-    await sendMessage(conversationId, reply);
+    console.log('CONTACT ID:', contactId);
+console.log('CONVERSATION ID:', conversationId);
+    await sendMessage(conversationId, reply,contactId);
 
     res.json({ success: true, reply });
 
