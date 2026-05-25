@@ -7,6 +7,54 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GHL_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
 
+const conversationHistory = {};
+
+// Delay humano aleatorio entre 2 y 6 segundos
+const humanDelay = () => new Promise(resolve => 
+  setTimeout(resolve, Math.floor(Math.random() * 4000) + 2000)
+);
+
+// Obtener contacto desde GHL
+async function getContact(contactId) {
+  const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+    headers: {
+      'Authorization': `Bearer ${GHL_KEY}`,
+      'Version': '2021-04-15'
+    }
+  });
+  return await res.json();
+}
+
+// Agregar etiqueta al contacto en GHL
+async function addTag(contactId, tag) {
+  await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${GHL_KEY}`,
+      'Version': '2021-04-15',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ tags: [tag] })
+  });
+}
+
+// Enviar mensaje por WhatsApp via GHL
+async function sendMessage(conversationId, message) {
+  await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${GHL_KEY}`,
+      'Version': '2021-04-15',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      type: 'WhatsApp',
+      conversationId,
+      message
+    })
+  });
+}
+
 app.get('/', (req, res) => {
   res.send('Servidor NHC Kids activo ✓');
 });
@@ -19,6 +67,97 @@ app.post('/webhook/ghl', async (req, res) => {
       return res.status(400).json({ error: 'Faltan datos' });
     }
 
+    // Obtener contacto y sus etiquetas
+    const contactData = await getContact(contactId);
+    const contact = contactData.contact || {};
+    const tags = contact.tags || [];
+
+    // Verificar etiquetas
+    const terminoTriaje = tags.includes('terminó triaje nhck');
+    const escalado = tags.includes('escalado nhck');
+
+    // Si no terminó el triaje o ya está escalado → ignorar
+    if (!terminoTriaje || escalado) {
+      return res.json({ success: true, skipped: true });
+    }
+
+    // Obtener campos de triaje
+    const customFields = contact.customFields || [];
+    const getField = (key) => {
+      const field = customFields.find(f => f.fieldKey === key);
+      return field ? field.value : 'No respondido';
+    };
+
+    const nombre = contact.firstName || 'Hola';
+    const triaje1 = getField('triaje_nhc__principal_dificultad');
+    const triaje2 = getField('triaje_nhc__tiempo_observando');
+    const triaje3 = getField('triaje_nhc__intentos_previos');
+    const triaje4 = getField('triaje_nhc__rea_ms_afectada');
+    const triaje5 = getField('triaje_nhc__nivel_de_compromiso');
+
+    // Inicializar historial
+    if (!conversationHistory[conversationId]) {
+      conversationHistory[conversationId] = [];
+    }
+
+    // Agregar mensaje del usuario
+    conversationHistory[conversationId].push({
+      role: 'user',
+      content: message
+    });
+
+    // Máximo 20 mensajes
+    if (conversationHistory[conversationId].length > 20) {
+      conversationHistory[conversationId] = 
+        conversationHistory[conversationId].slice(-20);
+    }
+
+    const systemPrompt = `Eres Daniela, asesora de NHC Kids. Escribes por WhatsApp como una persona real — cálida, cercana y profesional.
+
+PERFIL DEL LEAD:
+- Nombre: ${nombre}
+- Principal dificultad: ${triaje1}
+- Tiempo observando: ${triaje2}
+- Lo que han intentado: ${triaje3}
+- Área más afectada: ${triaje4}
+- Nivel de compromiso: ${triaje5}
+
+SOBRE NHC KIDS:
+Centro especializado en comprensión integral del neurodesarrollo infantil. No etiquetamos — comprendemos. Ayudamos a familias a entender qué le pasa realmente a su hijo, intervenir con precisión y acompañar el proceso con coherencia.
+
+EL NEUROMAPEO KIDS (programa diagnóstico):
+- Neuromapeo cerebral
+- Evaluación clínica
+- Sesión de devolución estratégica  
+- Plan de intervención personalizado
+Precio: $395.000 COP
+Reserva: $100.000 COP (el resto se paga al llegar)
+
+HORARIOS:
+- Lunes: 2:00pm - 3:30pm
+- Martes a Jueves: 8:30am - 4:30pm
+- Viernes: 8:30am - 4:30pm
+- Sábado: 8:30am - 10:30am
+
+MANEJO DE OBJECIONES:
+- Precio alto → "Lo que cuesta más es seguir sin claridad. La reserva son solo $100.000 y el resto al llegar."
+- Dudas si sirve → usa el triaje para personalizar la respuesta
+- Horarios → pregunta qué día le queda mejor
+
+ESCALADO — responde SOLO con la palabra [ESCALAR] cuando:
+- El lead ya está listo y quiere hablar con alguien del equipo
+- Te preguntan algo que está fuera de tu conocimiento
+- El lead lo pide explícitamente
+- Ya cerraste el proceso de venta completo
+
+REGLAS:
+- Mensajes MUY cortos — máximo 2-3 líneas
+- Tono humano y cálido, como WhatsApp real
+- Nunca digas que eres IA
+- Usa el triaje para personalizar siempre
+- Responde solo en español`;
+
+    // Llamar a Claude
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -28,28 +167,37 @@ app.post('/webhook/ghl', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        system: `Eres un asistente de NHC Kids. Tu rol es hacer el triaje inicial de familias que contactan por WhatsApp sobre dificultades de sus hijos. Debes ser empático, cálido y profesional. Responde siempre en español.`,
-        messages: [{ role: 'user', content: message }]
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: conversationHistory[conversationId]
       })
     });
 
     const claudeData = await claudeRes.json();
     const reply = claudeData.content[0].text;
 
-    await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GHL_KEY}`,
-        'Version': '2021-04-15',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        type: 'WhatsApp',
-        conversationId: conversationId,
-        message: reply
-      })
+    // Verificar si Claude quiere escalar
+    if (reply.includes('[ESCALAR]')) {
+      await addTag(contactId, 'escalado nhck');
+      
+      await humanDelay();
+      await sendMessage(conversationId, 
+        'En un momento un asesor del área de ventas te va a ayudar con esto 🙌');
+      
+      return res.json({ success: true, escalated: true });
+    }
+
+    // Agregar respuesta al historial
+    conversationHistory[conversationId].push({
+      role: 'assistant',
+      content: reply
     });
+
+    // Delay humano antes de responder
+    await humanDelay();
+
+    // Enviar respuesta
+    await sendMessage(conversationId, reply);
 
     res.json({ success: true, reply });
 
