@@ -83,7 +83,18 @@ app.post('/webhook/ghl', async (req, res) => {
   try {
     console.log('BODY RECIBIDO:', JSON.stringify(req.body));
 
-    let { contactId, conversationId, message } = req.body;
+    const contactId = req.body.contactId || 
+                  req.body.customData?.contactId || 
+                  req.body.contact_id ||
+                  req.body.contact?.id;
+
+const conversationId_raw = req.body.conversationId || 
+                           req.body.customData?.conversationId || '';
+
+let conversationId = conversationId_raw;
+
+const message = req.body.message || 
+                req.body.customData?.message || '';
 
     if (!contactId) {
       return res.status(400).json({ error: 'Faltan datos' });
