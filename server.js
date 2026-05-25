@@ -100,7 +100,7 @@ const conversationId_raw = req.body.conversationId ||
 
 let conversationId = conversationId_raw;
 
-const message = req.body.message || 
+const message = req.body.message?.body || 
                 req.body.customData?.message || '';
 
     if (!contactId) {
@@ -154,10 +154,10 @@ const message = req.body.message ||
       conversationHistory[conversationId] = [];
     }
 
-    conversationHistory[conversationId].push({
-      role: 'user',
-      content: lastMessage
-    });
+ conversationHistory[conversationId].push({
+  role: 'user',
+  content: [{ type: 'text', text: lastMessage }]
+});
 
     if (conversationHistory[conversationId].length > 20) {
       conversationHistory[conversationId] = 
