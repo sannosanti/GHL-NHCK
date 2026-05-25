@@ -9,12 +9,10 @@ const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
 
 const conversationHistory = {};
 
-// Delay humano aleatorio entre 2 y 6 segundos
 const humanDelay = () => new Promise(resolve => 
   setTimeout(resolve, Math.floor(Math.random() * 4000) + 2000)
 );
 
-// Obtener contacto desde GHL
 async function getContact(contactId) {
   const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
     headers: {
@@ -25,7 +23,20 @@ async function getContact(contactId) {
   return await res.json();
 }
 
-// Agregar etiqueta al contacto en GHL
+async function getLastMessage(conversationId) {
+  const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
+    headers: {
+      'Authorization': `Bearer ${GHL_KEY}`,
+      'Version': '2021-04-15'
+    }
+  });
+  const data = await res.json();
+  const messages = data.messages?.messages || [];
+  // Buscar el último mensaje del contacto (direction 1 = inbound)
+  const lastInbound = messages.find(m => m.direction === 'inbound');
+  return lastInbound?.body || '';
+}
+
 async function addTag(contactId, tag) {
   await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
     method: 'POST',
@@ -38,7 +49,6 @@ async function addTag(contactId, tag) {
   });
 }
 
-// Enviar mensaje por WhatsApp via GHL
 async function sendMessage(conversationId, message) {
   await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
     method: 'POST',
@@ -61,24 +71,29 @@ app.get('/', (req, res) => {
 
 app.post('/webhook/ghl', async (req, res) => {
   try {
-    const { contactId, message, conversationId } = req.body;
+    const { contactId, conversationId } = req.body;
 
-    if (!message || !contactId) {
+    if (!contactId || !conversationId) {
       return res.status(400).json({ error: 'Faltan datos' });
     }
 
-    // Obtener contacto y sus etiquetas
+    // Obtener contacto y etiquetas
     const contactData = await getContact(contactId);
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
 
-    // Verificar etiquetas
     const terminoTriaje = tags.includes('terminó triaje nhck');
     const escalado = tags.includes('escalado nhck');
 
-    // Si no terminó el triaje o ya está escalado → ignorar
     if (!terminoTriaje || escalado) {
       return res.json({ success: true, skipped: true });
+    }
+
+    // Obtener último mensaje del lead
+    const message = await getLastMessage(conversationId);
+
+    if (!message) {
+      return res.json({ success: true, skipped: true, reason: 'No message found' });
     }
 
     // Obtener campos de triaje
@@ -100,13 +115,11 @@ app.post('/webhook/ghl', async (req, res) => {
       conversationHistory[conversationId] = [];
     }
 
-    // Agregar mensaje del usuario
     conversationHistory[conversationId].push({
       role: 'user',
       content: message
     });
 
-    // Máximo 20 mensajes
     if (conversationHistory[conversationId].length > 20) {
       conversationHistory[conversationId] = 
         conversationHistory[conversationId].slice(-20);
@@ -128,7 +141,7 @@ Centro especializado en comprensión integral del neurodesarrollo infantil. No e
 EL NEUROMAPEO KIDS (programa diagnóstico):
 - Neuromapeo cerebral
 - Evaluación clínica
-- Sesión de devolución estratégica  
+- Sesión de devolución estratégica
 - Plan de intervención personalizado
 Precio: $395.000 COP
 Reserva: $100.000 COP (el resto se paga al llegar)
@@ -146,18 +159,17 @@ MANEJO DE OBJECIONES:
 
 ESCALADO — responde SOLO con la palabra [ESCALAR] cuando:
 - El lead ya está listo y quiere hablar con alguien del equipo
-- Te preguntan algo que está fuera de tu conocimiento
+- Te preguntan algo fuera de tu conocimiento
 - El lead lo pide explícitamente
 - Ya cerraste el proceso de venta completo
 
 REGLAS:
 - Mensajes MUY cortos — máximo 2-3 líneas
-- Tono humano y cálido, como WhatsApp real
+- Tono humano y cálido como WhatsApp real
 - Nunca digas que eres IA
 - Usa el triaje para personalizar siempre
-- Responde solo en español`;
+- Solo en español`;
 
-    // Llamar a Claude
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -176,27 +188,20 @@ REGLAS:
     const claudeData = await claudeRes.json();
     const reply = claudeData.content[0].text;
 
-    // Verificar si Claude quiere escalar
     if (reply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
-      
       await humanDelay();
-      await sendMessage(conversationId, 
+      await sendMessage(conversationId,
         'En un momento un asesor del área de ventas te va a ayudar con esto 🙌');
-      
       return res.json({ success: true, escalated: true });
     }
 
-    // Agregar respuesta al historial
     conversationHistory[conversationId].push({
       role: 'assistant',
       content: reply
     });
 
-    // Delay humano antes de responder
     await humanDelay();
-
-    // Enviar respuesta
     await sendMessage(conversationId, reply);
 
     res.json({ success: true, reply });
