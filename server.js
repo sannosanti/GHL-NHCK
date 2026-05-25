@@ -225,6 +225,7 @@ REGLAS:
     });
 
     const claudeData = await claudeRes.json();
+    console.log('CLAUDE RESPONSE:', JSON.stringify(claudeData));
     const reply = claudeData.content[0].text;
 
     if (reply.includes('[ESCALAR]')) {
