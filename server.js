@@ -23,6 +23,17 @@ async function getContact(contactId) {
   return await res.json();
 }
 
+async function getConversationId(contactId) {
+  const res = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${GHL_LOCATION_ID}`, {
+    headers: {
+      'Authorization': `Bearer ${GHL_KEY}`,
+      'Version': '2021-04-15'
+    }
+  });
+  const data = await res.json();
+  return data.conversations?.[0]?.id || null;
+}
+
 async function getLastMessage(conversationId) {
   const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
     headers: {
@@ -32,7 +43,6 @@ async function getLastMessage(conversationId) {
   });
   const data = await res.json();
   const messages = data.messages?.messages || [];
-  // Buscar el último mensaje del contacto (direction 1 = inbound)
   const lastInbound = messages.find(m => m.direction === 'inbound');
   return lastInbound?.body || '';
 }
@@ -72,10 +82,20 @@ app.get('/', (req, res) => {
 app.post('/webhook/ghl', async (req, res) => {
   try {
     console.log('BODY RECIBIDO:', JSON.stringify(req.body));
-    const { contactId, conversationId } = req.body;
 
-    if (!contactId || !conversationId) {
+    let { contactId, conversationId, message } = req.body;
+
+    if (!contactId) {
       return res.status(400).json({ error: 'Faltan datos' });
+    }
+
+    // Si conversationId está vacío, buscarlo
+    if (!conversationId) {
+      conversationId = await getConversationId(contactId);
+    }
+
+    if (!conversationId) {
+      return res.status(400).json({ error: 'No se encontró conversación' });
     }
 
     // Obtener contacto y etiquetas
@@ -91,9 +111,9 @@ app.post('/webhook/ghl', async (req, res) => {
     }
 
     // Obtener último mensaje del lead
-    const message = await getLastMessage(conversationId);
+    const lastMessage = message || await getLastMessage(conversationId);
 
-    if (!message) {
+    if (!lastMessage) {
       return res.json({ success: true, skipped: true, reason: 'No message found' });
     }
 
@@ -118,7 +138,7 @@ app.post('/webhook/ghl', async (req, res) => {
 
     conversationHistory[conversationId].push({
       role: 'user',
-      content: message
+      content: lastMessage
     });
 
     if (conversationHistory[conversationId].length > 20) {
