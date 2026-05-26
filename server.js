@@ -141,12 +141,13 @@ app.post('/webhook/ghl', async (req, res) => {
     };
 
     const nombre = contact.firstName || 'Hola';
-    const triaje1 = getField('triaje_nhc__principal_dificultad');
-    const triaje2 = getField('triaje_nhc__tiempo_observando');
-    const triaje3 = getField('triaje_nhc__intentos_previos');
-    const triaje4 = getField('triaje_nhc__rea_ms_afectada');
-    const triaje5 = getField('triaje_nhc__nivel_de_compromiso');
-
+const triaje1 = req.body['Triaje NHC - Principal dificultad'] || 'No respondido';
+const triaje2 = req.body['Triaje NHC - Tiempo observando'] || 'No respondido';
+const triaje3 = Array.isArray(req.body['Triaje NHC - Intentos previos']) 
+                ? req.body['Triaje NHC - Intentos previos'].join(', ') 
+                : req.body['Triaje NHC - Intentos previos'] || 'No respondido';
+const triaje4 = req.body['Triaje NHC - Área más afectada'] || 'No respondido';
+const triaje5 = req.body['Triaje NHC - Nivel de compromiso'] || 'No respondido';
     console.log('TRIAJE DATA:', { triaje1, triaje2, triaje3, triaje4, triaje5 });
 
     if (!conversationHistory[conversationId]) {
