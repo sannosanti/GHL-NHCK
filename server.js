@@ -200,7 +200,6 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const base = {
     Tipo: 'Presencial',
     Contacto: contactoID || '',
-    Movil: movilLimpio,
     Email: email || '',
     Estado: 'Programada',
     Observaciones: 'NHC Kids - Agendado por Carolina IA',
