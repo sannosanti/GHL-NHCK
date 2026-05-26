@@ -7,9 +7,101 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GHL_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
 
-const conversationHistory = {};
+// ─── ZOHO CONFIG ───────────────────────────────────────────────────────────────
+const ZOHO_CLIENT_ID = process.env.ZOHO_CLIENT_ID || '1000.YU4EF3FZ0RS8NAEMKVPVNTS7DU23WK';
+const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET || 'fc1adeeb598f9a6a7d38912922bfffcb1db6857203';
+const ZOHO_REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN || '1000.18ea8055151efce1711489d0475df2c9.6533e8fc2ee705c2af94f5a108312d26';
 
-const humanDelay = () => new Promise(resolve => 
+let zohoAccessToken = null;
+let zohoTokenExpiry = 0;
+
+async function getZohoAccessToken() {
+  if (zohoAccessToken && Date.now() < zohoTokenExpiry) {
+    return zohoAccessToken;
+  }
+  const res = await fetch('https://accounts.zoho.com/oauth/v2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: ZOHO_CLIENT_ID,
+      client_secret: ZOHO_CLIENT_SECRET,
+      refresh_token: ZOHO_REFRESH_TOKEN
+    })
+  });
+  const data = await res.json();
+  if (!data.access_token) {
+    console.error('Error renovando token Zoho:', JSON.stringify(data));
+    throw new Error('No se pudo obtener access token de Zoho');
+  }
+  zohoAccessToken = data.access_token;
+  zohoTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  console.log('Token Zoho renovado correctamente');
+  return zohoAccessToken;
+}
+
+async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, edad, sintoma, genero, ocupacion }) {
+  const token = await getZohoAccessToken();
+  const headers = {
+    'Authorization': `Zoho-oauthtoken ${token}`,
+    'Content-Type': 'application/json'
+  };
+
+  // 1. Crear Contacto
+  const bodyContacto = {
+    data: {
+      Nombre_Completo: `${nombre} ${apellido}`.trim(),
+      Email: email || '',
+      Movil: (movil || '').replace(/[\s+\(\)\-]/g, ''),
+      CRM: contactIdGHL || '',
+      Edad: edad || '',
+      Sintoma_o_necesidad: sintoma || '',
+      Genero: genero || '',
+      Ocupacion: ocupacion || ''
+    }
+  };
+
+  const resContacto = await fetch(
+    'https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Contactos',
+    { method: 'POST', headers, body: JSON.stringify(bodyContacto) }
+  );
+  const dataContacto = await resContacto.json();
+  console.log('ZOHO CONTACTO RESPONSE:', JSON.stringify(dataContacto));
+
+  const contactoID = dataContacto?.data?.ID;
+  if (!contactoID) {
+    throw new Error('No se obtuvo ID del contacto en Anamnesis: ' + JSON.stringify(dataContacto));
+  }
+
+  // 2. Crear Proceso
+  const bodyProceso = {
+    data: {
+      Nombrel_del_consultante: contactoID,
+      Edad: edad || '',
+      S_ntoma: sintoma || '',
+      Genero: genero || '',
+      Ocupaci_n: ocupacion || '',
+      Tipo_Proceso: 'Diagnóstico',
+      Estado_Paciente: 'Activo'
+    }
+  };
+
+  const resProceso = await fetch(
+    'https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Procesos',
+    { method: 'POST', headers, body: JSON.stringify(bodyProceso) }
+  );
+  const dataProceso = await resProceso.json();
+  console.log('ZOHO PROCESO RESPONSE:', JSON.stringify(dataProceso));
+
+  return { contactoID, procesoData: dataProceso };
+}
+
+// ─── MEMORIA ───────────────────────────────────────────────────────────────────
+const conversationHistory = {};
+const pendingData = {}; // Guarda edad, genero, ocupacion por conversación
+
+// ─── HELPERS GHL ──────────────────────────────────────────────────────────────
+const humanDelay = () => new Promise(resolve =>
   setTimeout(resolve, Math.floor(Math.random() * 4000) + 2000)
 );
 
@@ -84,6 +176,7 @@ async function sendMessage(conversationId, message, contactId) {
   console.log('SEND MESSAGE RESPONSE:', JSON.stringify(data));
 }
 
+// ─── WEBHOOK PRINCIPAL ────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   res.send('Servidor NHC Kids activo ✓');
 });
@@ -92,17 +185,16 @@ app.post('/webhook/ghl', async (req, res) => {
   try {
     console.log('BODY RECIBIDO:', JSON.stringify(req.body));
 
-    const contactId = req.body.contactId || 
-                      req.body.customData?.contactId || 
+    const contactId = req.body.contactId ||
+                      req.body.customData?.contactId ||
                       req.body.contact_id ||
                       req.body.contact?.id;
 
-    const conversationId_raw = req.body.conversationId || 
+    const conversationId_raw = req.body.conversationId ||
                                req.body.customData?.conversationId || '';
 
     let conversationId = conversationId_raw;
-
-    const message = req.body.message?.body || 
+    const message = req.body.message?.body ||
                     req.body.customData?.message || '';
 
     if (!contactId) {
@@ -129,29 +221,35 @@ app.post('/webhook/ghl', async (req, res) => {
     }
 
     const lastMessage = message || await getLastMessage(conversationId);
-
     if (!lastMessage) {
       return res.json({ success: true, skipped: true, reason: 'No message found' });
     }
 
-    const customFields = contact.customFields || [];
-    const getField = (key) => {
-      const field = customFields.find(f => f.fieldKey === key);
-      return field ? field.value : 'No respondido';
-    };
-
+    // Triaje desde el body
     const nombre = contact.firstName || 'Hola';
-const triaje1 = req.body['Triaje NHC - Principal dificultad'] || 'No respondido';
-const triaje2 = req.body['Triaje NHC - Tiempo observando'] || 'No respondido';
-const triaje3 = Array.isArray(req.body['Triaje NHC - Intentos previos']) 
-                ? req.body['Triaje NHC - Intentos previos'].join(', ') 
-                : req.body['Triaje NHC - Intentos previos'] || 'No respondido';
-const triaje4 = req.body['Triaje NHC - Área más afectada'] || 'No respondido';
-const triaje5 = req.body['Triaje NHC - Nivel de compromiso'] || 'No respondido';
+    const triaje1 = req.body['Triaje NHC - Principal dificultad'] || 'No respondido';
+    const triaje2 = req.body['Triaje NHC - Tiempo observando'] || 'No respondido';
+    const triaje3 = Array.isArray(req.body['Triaje NHC - Intentos previos'])
+                    ? req.body['Triaje NHC - Intentos previos'].join(', ')
+                    : req.body['Triaje NHC - Intentos previos'] || 'No respondido';
+    const triaje4 = req.body['Triaje NHC - Área más afectada'] || 'No respondido';
+    const triaje5 = req.body['Triaje NHC - Nivel de compromiso'] || 'No respondido';
+
     console.log('TRIAJE DATA:', { triaje1, triaje2, triaje3, triaje4, triaje5 });
 
+    // Inicializar historial y pendingData
     if (!conversationHistory[conversationId]) {
       conversationHistory[conversationId] = [];
+    }
+    if (!pendingData[conversationId]) {
+      pendingData[conversationId] = {
+        edad: null,
+        genero: null,
+        ocupacion: null,
+        citaConfirmada: false,
+        diaCita: null,
+        horaCita: null
+      };
     }
 
     conversationHistory[conversationId].push({
@@ -160,7 +258,7 @@ const triaje5 = req.body['Triaje NHC - Nivel de compromiso'] || 'No respondido';
     });
 
     if (conversationHistory[conversationId].length > 20) {
-      conversationHistory[conversationId] = 
+      conversationHistory[conversationId] =
         conversationHistory[conversationId].slice(-20);
     }
 
@@ -197,6 +295,24 @@ HORARIOS DISPONIBLES:
 - Viernes: 8:30am - 4:30pm
 - Sábado: 8:30am - 10:30am
 
+RECOLECCIÓN DE DATOS (OBLIGATORIO antes de confirmar cita):
+Antes de proponer día y hora, necesitas recoger estos 3 datos del niño/a si aún no los tienes:
+- Edad del niño/a
+- Género del niño/a
+- Ocupación del padre/madre (si no se mencionó)
+Recógelos de forma natural, no como formulario.
+
+CONFIRMACIÓN DE CITA:
+Cuando ya tengas edad, género y ocupación, propón un día y hora disponible.
+Cuando el padre/madre confirme con "sí", "de acuerdo", "perfecto", "listo" o similar:
+Responde EXACTAMENTE así (sin nada más):
+[CITA_CONFIRMADA]
+día: <el día que acordaron>
+hora: <la hora que acordaron>
+edad: <edad del niño>
+genero: <género del niño>
+ocupacion: <ocupación del padre/madre>
+
 CÓMO USAR EL TRIAJE EN TUS RESPUESTAS:
 - Si pregunta qué hacen → explica el Neuromapeo y conéctalo con su dificultad específica (${triaje1})
 - Si pregunta si sirve para su caso → "Sí, especialmente porque llevan ${triaje2} con esta situación y ya intentaron ${triaje3} sin los resultados esperados"
@@ -209,13 +325,12 @@ MANEJO DE OBJECIONES:
 - Horarios → "¿Qué día te vendría mejor? Tenemos disponibilidad de lunes a sábado."
 
 ESCALADO — responde SOLO con [ESCALAR] cuando:
-- El lead está listo para pagar y confirmar cita
 - Te preguntan algo fuera de tu conocimiento
 - El lead pide hablar con alguien del equipo
-- Ya completaste el proceso de venta
 
 REGLAS ESTRICTAS:
-- Mensajes MUY cortos — máximo 3 líneas
+- Mensajes MUY cortos — máximo 3 líneas continuas, SIN líneas en blanco entre ellas
+- NUNCA separes las líneas con espacios vacíos — escribe como un solo bloque de texto
 - Tono humano y cálido como WhatsApp real
 - NUNCA digas que eres IA
 - NUNCA digas que no tienes información del triaje
@@ -231,7 +346,7 @@ REGLAS ESTRICTAS:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 300,
+        max_tokens: 400,
         system: systemPrompt,
         messages: conversationHistory[conversationId]
       })
@@ -239,8 +354,61 @@ REGLAS ESTRICTAS:
 
     const claudeData = await claudeRes.json();
     console.log('CLAUDE RESPONSE:', JSON.stringify(claudeData));
-    const reply = claudeData.content[0].text;
+    const reply = claudeData.content[0].text
+      .split('\n')
+      .filter(line => line.trim() !== '')
+      .join('\n');
 
+    // ─── MANEJO [CITA_CONFIRMADA] ────────────────────────────────────────────
+    if (reply.includes('[CITA_CONFIRMADA]')) {
+      console.log('CITA CONFIRMADA DETECTADA');
+
+      // Extraer datos del reply
+      const extractField = (field) => {
+        const match = reply.match(new RegExp(`${field}:\\s*(.+)`));
+        return match ? match[1].trim() : '';
+      };
+
+      const diaCita    = extractField('día');
+      const horaCita   = extractField('hora');
+      const edad       = extractField('edad');
+      const genero     = extractField('genero');
+      const ocupacion  = extractField('ocupacion');
+
+      console.log('DATOS CITA:', { diaCita, horaCita, edad, genero, ocupacion });
+
+      // Crear en Anamnesis
+      try {
+        const resultado = await crearEnAnamnesis({
+          nombre: contact.firstName || '',
+          apellido: contact.lastName || '',
+          email: contact.email || '',
+          movil: contact.phone || '',
+          contactIdGHL: contactId,
+          edad,
+          sintoma: triaje1,
+          genero,
+          ocupacion
+        });
+        console.log('ANAMNESIS CREADO:', JSON.stringify(resultado));
+      } catch (err) {
+        console.error('Error creando en Anamnesis:', err.message);
+        // No detenemos el flujo, igual escalamos
+      }
+
+      // Etiquetar y escalar
+      await addTag(contactId, 'escalado nhck');
+      await humanDelay();
+      await sendMessage(
+        conversationId,
+        `¡Perfecto! Tu cita queda agendada para el ${diaCita} a las ${horaCita} 🎉\nEn un momento un asesor te confirmará los detalles finales 🙌`,
+        contactId
+      );
+
+      return res.json({ success: true, citaConfirmada: true, escalated: true });
+    }
+
+    // ─── MANEJO [ESCALAR] ────────────────────────────────────────────────────
     if (reply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
       await humanDelay();
@@ -249,6 +417,7 @@ REGLAS ESTRICTAS:
       return res.json({ success: true, escalated: true });
     }
 
+    // ─── RESPUESTA NORMAL ────────────────────────────────────────────────────
     conversationHistory[conversationId].push({
       role: 'assistant',
       content: [{ type: 'text', text: reply }]
