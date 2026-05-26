@@ -217,6 +217,9 @@ async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, ho
   const fin2H = ini2M + 60 >= 60 ? ini2H + 1 : ini2H;
   const fin2M = (ini2M + 60) % 60;
 
+  const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
+  const diaStr = `${dd}-${mmm}-${yyyy}`;
+
   const baseCita = {
     Tipo: 'Presencial',
     Contacto: contactoID || '',
@@ -226,10 +229,31 @@ async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, ho
     Observaciones: 'NHC Kids - Agendado por Carolina IA'
   };
 
-  const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-  const diaStr = `${dd}-${mmm}-${yyyy}`;
-
   const cita1 = {
+    data: {
+      ...baseCita,
+      Inicio: fmtFecha(hIni, mIni),
+      Fin: fmtFecha(fin1H, fin1M),
+      Duraci_n: '30 minutos',
+      Consultor: ID_CONSULTOR_NEUROTECNOLOGIAS,
+      Espacio: ID_ESPACIO_NEUROTECNOLOGIAS_1,
+      Dia: diaStr
+    }
+  };
+
+  const cita2 = {
+    data: {
+      ...baseCita,
+      Inicio: fmtFecha(ini2H, ini2M),
+      Fin: fmtFecha(fin2H, fin2M),
+      Duraci_n: '1 hora',
+      Consultor: ID_CONSULTOR_MAPEOS,
+      Espacio: ID_ESPACIO_MAPEOS,
+      Dia: diaStr
+    }
+  };
+
+  const res1 = await fetch
     data: {
       ...baseCita,
       Inicio: fmtFecha(hIni, mIni),
