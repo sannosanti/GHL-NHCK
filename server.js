@@ -253,18 +253,17 @@ async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, ho
     }
   };
 
-  const res1 = await fetch
-    data: {
-      ...baseCita,
-      Inicio: fmtFecha(hIni, mIni),
-      Fin: fmtFecha(fin1H, fin1M),
-      Duraci_n: '30 minutos',
-      Consultor: ID_CONSULTOR_NEUROTECNOLOGIAS,
-      Espacio: ID_ESPACIO_NEUROTECNOLOGIAS_1,
-      Dia: diaStr
-    }
-  };
+  const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas',
+    { method: 'POST', headers, body: JSON.stringify(cita1) });
+  const data1 = await res1.json();
+  console.log('CITA 1 ANAMNESIS:', JSON.stringify(data1));
 
+  const res2 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas',
+    { method: 'POST', headers, body: JSON.stringify(cita2) });
+  const data2 = await res2.json();
+  console.log('CITA 2 MAPEO:', JSON.stringify(data2));
+
+  return { cita1: data1, cita2: data2 };
   const cita2 = {
     data: {
       ...baseCita,
