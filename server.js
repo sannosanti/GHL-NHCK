@@ -41,6 +41,28 @@ async function getZohoAccessToken() {
   return zohoAccessToken;
 }
 
+// ─── MAPEO SÍNTOMA ───────────────────────────────────────────────────────────
+function mapearSintoma(sintomaRaw) {
+  const s = (sintomaRaw || '').toLowerCase().trim();
+  if (s.includes('ansiedad') || s.includes('miedo') || s.includes('inseguridad') || s.includes('temor')) return 'Ansiedad';
+  if (s.includes('autis')) return 'Autismo';
+  if (s.includes('autoestima') || s.includes('confianza') || s.includes('seguridad en sí')) return 'Autoestima';
+  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('concentra') || s.includes('tdah')) return 'Déficit de atención';
+  if (s.includes('depres')) return 'Depresión1';
+  if (s.includes('cognitiv') || s.includes('memoria') || s.includes('aprendizaje cogn')) return 'Desarrollo Cognitivo';
+  if (s.includes('desarrollo personal') || s.includes('crecimiento')) return 'Desarrollo personal';
+  if (s.includes('aprendizaje') || s.includes('escolar') || s.includes('leer') || s.includes('escribir') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
+  if (s.includes('pareja') || s.includes('relación')) return 'Dificultades de pareja';
+  if (s.includes('duelo') || s.includes('pérdida') || s.includes('muerte')) return 'Duelo';
+  if (s.includes('estrés') || s.includes('estres') || s.includes('tensión')) return 'Estrés';
+  if (s.includes('ruptura') || s.includes('separac')) return 'Ruptura';
+  if (s.includes('toc') || s.includes('obsesiv') || s.includes('compulsiv')) return 'TOC (Transtorno Obsesivo C...)';
+  if (s.includes('tod') || s.includes('oposicion') || s.includes('oposición') || s.includes('desafiante')) return 'TOD (Transtorno Oposicion...)';
+  if (s.includes('conducta') || s.includes('comportamiento') || s.includes('agresiv')) return 'Otros';
+  if (!s || s === 'no respondido') return 'Sin información';
+  return 'Otros';
+}
+
 // ─── MAPEO GÉNERO ─────────────────────────────────────────────────────────────
 function mapearGenero(generoRaw) {
   const g = (generoRaw || '').toLowerCase().trim();
@@ -126,7 +148,7 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
         Movil: movilLimpio,
         CRM: contactIdGHL || '',
         Edad: edad || '',
-        Sintoma_o_necesidad: sintoma || '',
+        Sintoma_o_necesidad: mapearSintoma(sintoma),
         Genero: generoMapeado,
         Ocupaci_n: ocupacionMapeada
       }
@@ -148,7 +170,7 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
     data: {
       Nombrel_del_consultante: contactoID,
       Edad: edad || '',
-      S_ntoma: sintoma || '',
+      S_ntoma: mapearSintoma(sintoma),
       Genero: generoMapeado,
       Ocupaci_n: ocupacionMapeada,
       Tipo_Proceso: 'Diagnóstico',
@@ -166,7 +188,7 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
 }
 
 // ─── CREAR CITAS EN CALENDARIO ────────────────────────────────────────────────
-async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, horaInicio }) {
+async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, horaInicio, contactoID }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
 
@@ -195,44 +217,41 @@ async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, ho
   const fin2H = ini2M + 60 >= 60 ? ini2H + 1 : ini2H;
   const fin2M = (ini2M + 60) % 60;
 
+  const baseCita = {
+    Tipo: 'Presencial',
+    Contacto: contactoID || '',
+    Movil: movilLimpio,
+    Email: email || '',
+    Estado: 'Programada',
+    Observaciones: 'NHC Kids - Agendado por Carolina IA'
+  };
+
   const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
   const diaStr = `${dd}-${mmm}-${yyyy}`;
 
   const cita1 = {
     data: {
-      Tipo: 'Presencial',
+      ...baseCita,
       Inicio: fmtFecha(hIni, mIni),
       Fin: fmtFecha(fin1H, fin1M),
       Duraci_n: '30 minutos',
       Consultor: ID_CONSULTOR_NEUROTECNOLOGIAS,
       Espacio: ID_ESPACIO_NEUROTECNOLOGIAS_1,
-      Contacto: nombreContacto,
-      Movil: movilLimpio,
-      Email: email || '',
-      Dia: diaStr,
-      Estado: 'Programada',
-      Observaciones: 'NHC Kids - Anamnesis - Agendado por Carolina IA'
+      Dia: diaStr
     }
   };
 
   const cita2 = {
     data: {
-      Tipo: 'Presencial',
+      ...baseCita,
       Inicio: fmtFecha(ini2H, ini2M),
       Fin: fmtFecha(fin2H, fin2M),
       Duraci_n: '1 hora',
       Consultor: ID_CONSULTOR_MAPEOS,
       Espacio: ID_ESPACIO_MAPEOS,
-      Contacto: nombreContacto,
-      Movil: movilLimpio,
-      Email: email || '',
-      Dia: diaStr,
-      Estado: 'Programada',
-      Observaciones: 'NHC Kids - Mapeo - Agendado por Carolina IA'
+      Dia: diaStr
     }
-  };
-
-  const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas',
+  };('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas',
     { method: 'POST', headers, body: JSON.stringify(cita1) });
   const data1 = await res1.json();
   console.log('CITA 1 ANAMNESIS:', JSON.stringify(data1));
@@ -488,8 +507,8 @@ REGLAS:
 - Máximo 3 líneas continuas SIN líneas en blanco
 - Tono humano WhatsApp
 - NUNCA digas que eres IA
-- Solo español
-- NUNCA aceptes horarios fuera de la disponibilidad real`;
+- NUNCA menciones datos bancarios, cuentas, transferencias ni números de consignación
+- NUNCA inventes información de pago — eso lo maneja el equipo humano`;
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -538,7 +557,8 @@ REGLAS:
           movil: contact.phone || '',
           email: contact.email || '',
           fechaISO: fechaCita,
-          horaInicio: horaCita
+          horaInicio: horaCita,
+          contactoID: resultado?.contactoID || null
         });
         console.log('CITAS CALENDARIO OK:', JSON.stringify(citas));
       } catch (err) {
