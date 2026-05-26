@@ -7,12 +7,10 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GHL_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
 
-// ─── ZOHO CONFIG ───────────────────────────────────────────────────────────────
 const ZOHO_CLIENT_ID = process.env.ZOHO_CLIENT_ID || '1000.YU4EF3FZ0RS8NAEMKVPVNTS7DU23WK';
 const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET || 'fc1adeeb598f9a6a7d38912922bfffcb1db6857203';
 const ZOHO_REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN || '1000.18ea8055151efce1711489d0475df2c9.6533e8fc2ee705c2af94f5a108312d26';
 
-// IDs fijos de Consultores y Espacios
 const ID_CONSULTOR_NEUROTECNOLOGIAS = '3572150000004871156';
 const ID_CONSULTOR_MAPEOS = '3572150000005140253';
 const ID_ESPACIO_NEUROTECNOLOGIAS_1 = '3572150000004826066';
@@ -41,61 +39,52 @@ async function getZohoAccessToken() {
   return zohoAccessToken;
 }
 
-// ─── MAPEO SÍNTOMA ───────────────────────────────────────────────────────────
-function mapearSintoma(sintomaRaw) {
-  const s = (sintomaRaw || '').toLowerCase().trim();
-  if (s.includes('ansiedad') || s.includes('miedo') || s.includes('inseguridad') || s.includes('temor')) return 'Ansiedad';
+function mapearSintoma(s) {
+  s = (s || '').toLowerCase().trim();
+  if (s.includes('ansiedad') || s.includes('miedo') || s.includes('inseguridad')) return 'Ansiedad';
   if (s.includes('autis')) return 'Autismo';
-  if (s.includes('autoestima') || s.includes('confianza') || s.includes('seguridad en sí')) return 'Autoestima';
-  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('concentra') || s.includes('tdah')) return 'Déficit de atención';
+  if (s.includes('autoestima') || s.includes('confianza')) return 'Autoestima';
+  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('tdah')) return 'Déficit de atención';
   if (s.includes('depres')) return 'Depresión1';
-  if (s.includes('cognitiv') || s.includes('memoria') || s.includes('aprendizaje cogn')) return 'Desarrollo Cognitivo';
-  if (s.includes('desarrollo personal') || s.includes('crecimiento')) return 'Desarrollo personal';
-  if (s.includes('aprendizaje') || s.includes('escolar') || s.includes('leer') || s.includes('escribir') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
-  if (s.includes('pareja') || s.includes('relación')) return 'Dificultades de pareja';
-  if (s.includes('duelo') || s.includes('pérdida') || s.includes('muerte')) return 'Duelo';
-  if (s.includes('estrés') || s.includes('estres') || s.includes('tensión')) return 'Estrés';
-  if (s.includes('ruptura') || s.includes('separac')) return 'Ruptura';
-  if (s.includes('toc') || s.includes('obsesiv') || s.includes('compulsiv')) return 'TOC (Transtorno Obsesivo C...)';
-  if (s.includes('tod') || s.includes('oposicion') || s.includes('oposición') || s.includes('desafiante')) return 'TOD (Transtorno Oposicion...)';
-  if (s.includes('conducta') || s.includes('comportamiento') || s.includes('agresiv')) return 'Otros';
+  if (s.includes('cognitiv') || s.includes('memoria')) return 'Desarrollo Cognitivo';
+  if (s.includes('desarrollo personal')) return 'Desarrollo personal';
+  if (s.includes('aprendizaje') || s.includes('escolar') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
+  if (s.includes('pareja')) return 'Dificultades de pareja';
+  if (s.includes('duelo') || s.includes('pérdida')) return 'Duelo';
+  if (s.includes('estrés') || s.includes('estres')) return 'Estrés';
+  if (s.includes('toc') || s.includes('obsesiv')) return 'TOC (Transtorno Obsesivo C...)';
+  if (s.includes('tod') || s.includes('oposicion') || s.includes('desafiante')) return 'TOD (Transtorno Oposicion...)';
   if (!s || s === 'no respondido') return 'Sin información';
   return 'Otros';
 }
 
-// ─── MAPEO GÉNERO ─────────────────────────────────────────────────────────────
-function mapearGenero(generoRaw) {
-  const g = (generoRaw || '').toLowerCase().trim();
-  if (g.includes('mascul') || g.includes('niño') || g.includes('hombre') || g.includes('varon') || g.includes('varón') || g === 'm') return 'Masculino';
-  if (g.includes('femen') || g.includes('niña') || g.includes('mujer') || g.includes('chica') || g === 'f') return 'Femenino';
+function mapearGenero(g) {
+  g = (g || '').toLowerCase().trim();
+  if (g.includes('mascul') || g.includes('niño') || g.includes('hombre') || g === 'm') return 'Masculino';
+  if (g.includes('femen') || g.includes('niña') || g.includes('mujer') || g === 'f') return 'Femenino';
   return 'Otro';
 }
 
-// ─── MAPEO OCUPACIÓN ──────────────────────────────────────────────────────────
-function mapearOcupacion(ocupacionRaw) {
-  const o = (ocupacionRaw || '').toLowerCase().trim();
+function mapearOcupacion(o) {
+  o = (o || '').toLowerCase().trim();
   if (o.includes('ama') || o.includes('hogar')) return 'Ama de casa';
   if (o.includes('deport') || o.includes('atleta')) return 'Deportista';
   if (o.includes('desemplead') || o.includes('sin trabajo')) return 'Desempleado';
   if (o.includes('ejecutiv') || o.includes('gerente') || o.includes('director')) return 'Ejecutivo';
   if (o.includes('empresari') || o.includes('dueño') || o.includes('negocio')) return 'Empresario';
-  if (o.includes('colegio') || o.includes('bachiller') || o.includes('secundaria')) return 'Estudiante de colegio';
+  if (o.includes('colegio') || o.includes('bachiller')) return 'Estudiante de colegio';
   if (o.includes('universidad') || o.includes('universitari')) return 'Estudiante de universidad';
   if (o.includes('pension') || o.includes('jubilad') || o.includes('retirad')) return 'Pensionado';
-  if (o.includes('terapeut') || o.includes('psicolog') || o.includes('médic') || o.includes('medic')) return 'Terapeuta';
+  if (o.includes('terapeut') || o.includes('psicolog') || o.includes('médic')) return 'Terapeuta';
   if (o.includes('emplead') || o.includes('trabajador') || o.includes('programad') ||
-      o.includes('developer') || o.includes('software') || o.includes('ingenier') ||
-      o.includes('tecnolog') || o.includes('sistem') || o.includes('operari')) return 'Empleado';
+      o.includes('developer') || o.includes('ingenier') || o.includes('tecnolog')) return 'Empleado';
   return 'N.A';
 }
 
-// ─── BUSCAR CONTACTO EXISTENTE EN ANAMNESIS ───────────────────────────────────
 async function buscarContactoAnamnesis(movil, email) {
   try {
     const token = await getZohoAccessToken();
     const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-    
-    // Buscar por móvil
     if (movilLimpio) {
       const res = await fetch(
         `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Movil%3D%22${movilLimpio}%22&max_records=1`,
@@ -103,12 +92,10 @@ async function buscarContactoAnamnesis(movil, email) {
       );
       const data = await res.json();
       if (data?.data?.length > 0) {
-        console.log('Contacto existente encontrado por móvil:', data.data[0].ID);
+        console.log('Contacto existente por móvil:', data.data[0].ID);
         return data.data[0].ID;
       }
     }
-
-    // Buscar por email
     if (email) {
       const res = await fetch(
         `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Email%3D%22${encodeURIComponent(email)}%22&max_records=1`,
@@ -116,11 +103,10 @@ async function buscarContactoAnamnesis(movil, email) {
       );
       const data = await res.json();
       if (data?.data?.length > 0) {
-        console.log('Contacto existente encontrado por email:', data.data[0].ID);
+        console.log('Contacto existente por email:', data.data[0].ID);
         return data.data[0].ID;
       }
     }
-
     return null;
   } catch (err) {
     console.error('Error buscando contacto:', err.message);
@@ -128,19 +114,17 @@ async function buscarContactoAnamnesis(movil, email) {
   }
 }
 
-// ─── CREAR EN ANAMNESIS (con verificación de duplicado) ───────────────────────
 async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, edad, sintoma, genero, ocupacion }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
   const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
   const generoMapeado = mapearGenero(genero);
   const ocupacionMapeada = mapearOcupacion(ocupacion);
+  const sintomaMapeado = mapearSintoma(sintoma);
 
-  // Verificar si ya existe
   let contactoID = await buscarContactoAnamnesis(movilLimpio, email);
 
   if (!contactoID) {
-    // Crear contacto nuevo
     const bodyContacto = {
       data: {
         Nombre_Completo: `${nombre} ${apellido}`.trim(),
@@ -148,7 +132,7 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
         Movil: movilLimpio,
         CRM: contactIdGHL || '',
         Edad: edad || '',
-        Sintoma_o_necesidad: mapearSintoma(sintoma),
+        Sintoma_o_necesidad: sintomaMapeado,
         Genero: generoMapeado,
         Ocupaci_n: ocupacionMapeada
       }
@@ -160,17 +144,14 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
     const dataContacto = await resContacto.json();
     console.log('ZOHO CONTACTO RESPONSE:', JSON.stringify(dataContacto));
     contactoID = dataContacto?.data?.ID;
-    if (!contactoID) throw new Error('No se obtuvo ID del contacto: ' + JSON.stringify(dataContacto));
-  } else {
-    console.log('Contacto ya existe, usando ID:', contactoID);
+    if (!contactoID) throw new Error('No ID contacto: ' + JSON.stringify(dataContacto));
   }
 
-  // Crear proceso
   const bodyProceso = {
     data: {
       Nombrel_del_consultante: contactoID,
       Edad: edad || '',
-      S_ntoma: mapearSintoma(sintoma),
+      S_ntoma: sintomaMapeado,
       Genero: generoMapeado,
       Ocupaci_n: ocupacionMapeada,
       Tipo_Proceso: 'Diagnóstico',
@@ -187,8 +168,7 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
   return { contactoID, dataProceso };
 }
 
-// ─── CREAR CITAS EN CALENDARIO ────────────────────────────────────────────────
-async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, horaInicio, contactoID }) {
+async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contactoID }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
 
@@ -207,49 +187,57 @@ async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, ho
   const yyyy = d.getFullYear();
   const pad = n => String(n).padStart(2, '0');
   const fmtFecha = (h, m) => `${dd}-${mmm}-${yyyy} ${pad(h)}:${pad(m)}:00`;
+  const diaStr = `${dd}-${mmm}-${yyyy}`;
+  const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
 
-  // Cita 1: Anamnesis 30min
   const fin1H = mIni + 30 >= 60 ? hIni + 1 : hIni;
   const fin1M = (mIni + 30) % 60;
-
-  // Cita 2: Mapeo 1hora (empieza donde termina la 1)
-  const ini2H = fin1H, ini2M = fin1M;
+  const ini2H = fin1H;
+  const ini2M = fin1M;
   const fin2H = ini2M + 60 >= 60 ? ini2H + 1 : ini2H;
   const fin2M = (ini2M + 60) % 60;
 
-  const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-  const diaStr = `${dd}-${mmm}-${yyyy}`;
-
-  const baseCita = {
+  const base = {
     Tipo: 'Presencial',
     Contacto: contactoID || '',
     Movil: movilLimpio,
     Email: email || '',
     Estado: 'Programada',
-    Observaciones: 'NHC Kids - Agendado por Carolina IA'
+    Observaciones: 'NHC Kids - Agendado por Carolina IA',
+    Dia: diaStr
   };
 
   const cita1 = {
     data: {
-      ...baseCita,
+      Tipo: base.Tipo,
+      Contacto: base.Contacto,
+      Movil: base.Movil,
+      Email: base.Email,
+      Estado: base.Estado,
+      Observaciones: base.Observaciones,
+      Dia: base.Dia,
       Inicio: fmtFecha(hIni, mIni),
       Fin: fmtFecha(fin1H, fin1M),
       Duraci_n: '30 minutos',
       Consultor: ID_CONSULTOR_NEUROTECNOLOGIAS,
-      Espacio: ID_ESPACIO_NEUROTECNOLOGIAS_1,
-      Dia: diaStr
+      Espacio: ID_ESPACIO_NEUROTECNOLOGIAS_1
     }
   };
 
   const cita2 = {
     data: {
-      ...baseCita,
+      Tipo: base.Tipo,
+      Contacto: base.Contacto,
+      Movil: base.Movil,
+      Email: base.Email,
+      Estado: base.Estado,
+      Observaciones: base.Observaciones,
+      Dia: base.Dia,
       Inicio: fmtFecha(ini2H, ini2M),
       Fin: fmtFecha(fin2H, fin2M),
       Duraci_n: '1 hora',
       Consultor: ID_CONSULTOR_MAPEOS,
-      Espacio: ID_ESPACIO_MAPEOS,
-      Dia: diaStr
+      Espacio: ID_ESPACIO_MAPEOS
     }
   };
 
@@ -264,30 +252,8 @@ async function crearCitasCalendario({ nombreContacto, movil, email, fechaISO, ho
   console.log('CITA 2 MAPEO:', JSON.stringify(data2));
 
   return { cita1: data1, cita2: data2 };
-  const cita2 = {
-    data: {
-      ...baseCita,
-      Inicio: fmtFecha(ini2H, ini2M),
-      Fin: fmtFecha(fin2H, fin2M),
-      Duraci_n: '1 hora',
-      Consultor: ID_CONSULTOR_MAPEOS,
-      Espacio: ID_ESPACIO_MAPEOS,
-      Dia: diaStr
-    }
-  };('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas',
-    { method: 'POST', headers, body: JSON.stringify(cita1) });
-  const data1 = await res1.json();
-  console.log('CITA 1 ANAMNESIS:', JSON.stringify(data1));
-
-  const res2 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas',
-    { method: 'POST', headers, body: JSON.stringify(cita2) });
-  const data2 = await res2.json();
-  console.log('CITA 2 MAPEO:', JSON.stringify(data2));
-
-  return { cita1: data1, cita2: data2 };
 }
 
-// ─── CONSULTAR DISPONIBILIDAD ─────────────────────────────────────────────────
 async function getDisponibilidad(fechaISO) {
   try {
     const token = await getZohoAccessToken();
@@ -297,7 +263,7 @@ async function getDisponibilidad(fechaISO) {
     const data = await res.json();
     return data.data || [];
   } catch (err) {
-    console.error('Error consultando disponibilidad:', err.message);
+    console.error('Error disponibilidad:', err.message);
     return [];
   }
 }
@@ -312,7 +278,6 @@ function calcularSlotsLibres(citas, fechaISO) {
   else if (diaSemana === 6) { inicioHora = 8.5; finHora = 10.5; }
   else { inicioHora = 8.5; finHora = 16.5; }
 
-  // Obtener horas ocupadas en Neurotecnologías 1 y Mapeos
   const ocupados = citas.map(c => {
     const consultorID = c.Consultor?.ID || '';
     const espacioID = c.Espacio?.ID || '';
@@ -321,7 +286,7 @@ function calcularSlotsLibres(citas, fechaISO) {
                         espacioID === ID_ESPACIO_NEUROTECNOLOGIAS_1 ||
                         espacioID === ID_ESPACIO_MAPEOS;
     if (!esRelevante) return null;
-    const ini = new Date(c.Inicio?.replace(/-/g, ' ') || '');
+    const ini = new Date((c.Inicio || '').replace(/-/g, ' '));
     if (isNaN(ini)) return null;
     return ini.getHours() + ini.getMinutes() / 60;
   }).filter(h => h !== null);
@@ -333,16 +298,13 @@ function calcularSlotsLibres(citas, fechaISO) {
       const hh = Math.floor(h);
       const mm = (h % 1) * 60;
       const sufijo = hh < 12 ? 'am' : 'pm';
-      const hh12 = hh > 12 ? hh - 12 : hh;
-      const label = `${hh12}:${mm === 0 ? '00' : '30'}${sufijo}`;
-      const horaISO = `${String(hh).padStart(2,'0')}:${mm === 0 ? '00' : '30'}`;
-      slots.push({ hora: h, label, horaISO });
+      const hh12 = hh > 12 ? hh - 12 : hh === 0 ? 12 : hh;
+      slots.push({ label: `${hh12}:${mm === 0 ? '00' : '30'}${sufijo}`, horaISO: `${String(hh).padStart(2,'0')}:${mm === 0 ? '00' : '30'}` });
     }
   }
   return slots;
 }
 
-// ─── HELPERS GHL ──────────────────────────────────────────────────────────────
 const conversationHistory = {};
 const disponibilidadCache = {};
 
@@ -399,7 +361,6 @@ async function sendMessage(conversationId, message, contactId) {
   console.log('SEND MESSAGE RESPONSE:', JSON.stringify(data));
 }
 
-// ─── WEBHOOK PRINCIPAL ────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
 app.post('/webhook/ghl', async (req, res) => {
@@ -414,7 +375,7 @@ app.post('/webhook/ghl', async (req, res) => {
 
     if (!contactId) return res.status(400).json({ error: 'Faltan datos' });
     if (!conversationId) conversationId = await getConversationId(contactId);
-    if (!conversationId) return res.status(400).json({ error: 'No se encontró conversación' });
+    if (!conversationId) return res.status(400).json({ error: 'No conversación' });
 
     const contactData = await getContact(contactId);
     const contact = contactData.contact || {};
@@ -425,7 +386,7 @@ app.post('/webhook/ghl', async (req, res) => {
     }
 
     const lastMessage = message || await getLastMessage(conversationId);
-    if (!lastMessage) return res.json({ success: true, skipped: true, reason: 'No message found' });
+    if (!lastMessage) return res.json({ success: true, skipped: true });
 
     const nombre = contact.firstName || 'Hola';
     const triaje1 = req.body['Triaje NHC - Principal dificultad'] || 'No respondido';
@@ -443,15 +404,12 @@ app.post('/webhook/ghl', async (req, res) => {
       conversationHistory[conversationId] = conversationHistory[conversationId].slice(-20);
     }
 
-    // Consultar disponibilidad real próximos días hábiles
     let disponibilidadTexto = '';
-    let slotsDisponibles = [];
     try {
       const hoy = new Date();
-      let diaOffset = 1;
-      let diasConSlots = 0;
       const mesesNombres = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       const diasNombres = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+      let diaOffset = 1, diasConSlots = 0;
 
       while (diasConSlots < 3 && diaOffset <= 14) {
         const fecha = new Date(hoy);
@@ -459,79 +417,73 @@ app.post('/webhook/ghl', async (req, res) => {
         const diaSemana = fecha.getDay();
         if (diaSemana !== 0) {
           const fechaISO = fecha.toISOString().split('T')[0];
-          const cacheKey = fechaISO;
-          if (!disponibilidadCache[cacheKey]) {
-            disponibilidadCache[cacheKey] = await getDisponibilidad(fechaISO);
+          if (!disponibilidadCache[fechaISO]) {
+            disponibilidadCache[fechaISO] = await getDisponibilidad(fechaISO);
           }
-          const slots = calcularSlotsLibres(disponibilidadCache[cacheKey], fechaISO);
+          const slots = calcularSlotsLibres(disponibilidadCache[fechaISO], fechaISO);
           if (slots.length > 0) {
-            const labelDia = `${diasNombres[diaSemana]} ${fecha.getDate()} de ${mesesNombres[fecha.getMonth()]}`;
-            const slotsMostrar = slots.slice(0, 3);
-            slotsDisponibles.push({ fechaISO, labelDia, slots: slotsMostrar });
-            disponibilidadTexto += `${labelDia}: ${slotsMostrar.map(s => s.label).join(', ')}\n`;
+            const labelDia = `${diasNombres[diaSemana]} ${fecha.getDate()} de ${mesesNombres[fecha.getMonth()]} (${fechaISO})`;
+            disponibilidadTexto += `${labelDia}: ${slots.slice(0,3).map(s => s.label).join(', ')}\n`;
             diasConSlots++;
           }
         }
         diaOffset++;
       }
-      if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad encontrada en los próximos días.';
+      if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos días.';
     } catch (err) {
       console.error('Error disponibilidad:', err.message);
-      disponibilidadTexto = 'Disponibilidad no consultada. Usa horarios generales: lunes 2-3:30pm, martes a viernes 8:30am-4:30pm, sábado 8:30-10:30am.';
+      disponibilidadTexto = 'Disponibilidad no consultada. Horarios generales: lunes 2-3:30pm, martes a viernes 8:30am-4:30pm, sábado 8:30-10:30am.';
     }
 
     const systemPrompt = `Eres Carolina, asesora experta de NHC Kids. Escribes por WhatsApp como una persona real — cálida, cercana y profesional.
 
 CONTEXTO CRÍTICO:
 - ${nombre} es el PADRE o MADRE, no el niño. NUNCA digas "ayudar a ${nombre}".
-- Ya completaron el triaje. TIENES toda su información. NUNCA digas que no tienes sus datos.
-- Tu primer mensaje SIEMPRE debe demostrar que leíste el triaje.
+- Ya completaron el triaje. TIENES toda su información.
+- Tu primer mensaje SIEMPRE menciona algo del triaje.
 
-TRIAJE COMPLETADO POR ${nombre}:
-- Principal dificultad del hijo/a: ${triaje1}
-- Tiempo observando: ${triaje2}
-- Lo que han intentado: ${triaje3}
-- Área más afectada: ${triaje4}
-- Nivel de compromiso: ${triaje5}
+TRIAJE DE ${nombre}:
+- Dificultad: ${triaje1}
+- Tiempo: ${triaje2}
+- Intentos: ${triaje3}
+- Área afectada: ${triaje4}
+- Compromiso: ${triaje5}
 
-SOBRE NHC KIDS:
-Centro especializado en neurodesarrollo infantil. No etiquetamos — comprendemos.
-EL NEUROMAPEO KIDS: Neuromapeo cerebral + Evaluación clínica + Devolución estratégica + Plan personalizado.
-Precio: $395.000 COP. Reserva: $100.000 COP (resto al llegar).
+NHC KIDS — NEUROMAPEO KIDS:
+Neuromapeo cerebral + Evaluación clínica + Devolución estratégica + Plan personalizado.
+Precio: $395.000 COP. Reserva: $100.000 (resto al llegar).
 
-DISPONIBILIDAD REAL DEL CALENDARIO (SOLO puedes ofrecer estos horarios exactos):
+DISPONIBILIDAD REAL (incluye la fecha YYYY-MM-DD entre paréntesis — úsala para [CITA_CONFIRMADA]):
 ${disponibilidadTexto}
-REGLA CRÍTICA: NUNCA confirmes ni aceptes un horario que el padre proponga si no está en esta lista. Si propone algo diferente, dile que ese horario no está disponible y ofrece las opciones reales.
+REGLA CRÍTICA: NUNCA confirmes horarios que el padre proponga si no están en esta lista exacta. Si propone algo diferente, muéstrale las opciones reales.
 
-RECOLECCIÓN DE DATOS (OBLIGATORIO antes de confirmar cita):
-Necesitas: edad del niño/a, género del niño/a, ocupación del padre/madre.
-Recógelos de forma natural en un solo mensaje si es posible.
+DATOS REQUERIDOS antes de confirmar (recoge de forma natural):
+1. Edad del niño/a
+2. Género del niño/a
+3. Ocupación del padre/madre
 
-GÉNEROS VÁLIDOS: Masculino (niño/hombre), Femenino (niña/mujer), Otro.
-OCUPACIONES VÁLIDAS: Ama de casa, Deportista, Desempleado, Ejecutivo, Empleado, Empresario, Estudiante de colegio, Estudiante de universidad, Pensionado, Terapeuta, N.A.
-
-CONFIRMACIÓN DE CITA:
-Cuando tengas edad, género, ocupación Y el padre confirme un horario de la lista disponible, responde EXACTAMENTE así (sin texto adicional antes):
+CUANDO TENGAS LOS 3 DATOS Y EL PADRE ELIJA UN HORARIO DE LA LISTA:
+Pide confirmación explícita ("¿Confirmamos para ese día y hora?").
+Cuando confirme con sí/listo/perfecto/de acuerdo, responde EXACTAMENTE así sin texto adicional antes:
 [CITA_CONFIRMADA]
-fecha: <YYYY-MM-DD>
+fecha: <YYYY-MM-DD de la lista>
 hora: <HH:MM en 24h>
 edad: <edad>
 genero: <Masculino/Femenino/Otro>
-ocupacion: <ocupación tal como la dijo>
+ocupacion: <como lo dijo>
 
 OBJECIONES:
 - Precio → "La reserva son solo $100.000 y el resto al llegar."
-- Dudas → "Con ${triaje2} observando ${triaje1}, esto es exactamente para lo que está diseñado."
-- Horario no disponible → "Ese horario no lo tengo libre, pero puedo ofrecerte: [lista disponible]"
+- Horario no disponible → "Ese horario no lo tengo, pero puedo ofrecerte: [lista]"
 
-ESCALAR solo con [ESCALAR] cuando pida hablar con alguien o salga de tu conocimiento.
+[ESCALAR] solo cuando pida hablar con alguien o esté fuera de tu conocimiento.
 
 REGLAS:
-- Máximo 3 líneas continuas SIN líneas en blanco
+- Máximo 3 líneas continuas SIN líneas en blanco entre ellas
 - Tono humano WhatsApp
 - NUNCA digas que eres IA
-- NUNCA menciones datos bancarios, cuentas, transferencias ni números de consignación
-- NUNCA inventes información de pago — eso lo maneja el equipo humano`;
+- NUNCA menciones datos bancarios, cuentas ni transferencias
+- Solo español`;
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -549,7 +501,6 @@ REGLAS:
     const reply = claudeData.content[0].text
       .split('\n').filter(line => line.trim() !== '').join('\n');
 
-    // ─── CITA CONFIRMADA ────────────────────────────────────────────────────
     if (reply.includes('[CITA_CONFIRMADA]')) {
       console.log('CITA CONFIRMADA DETECTADA');
       const extract = field => { const m = reply.match(new RegExp(`${field}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
@@ -577,16 +528,15 @@ REGLAS:
 
       try {
         const citas = await crearCitasCalendario({
-          nombreContacto: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           movil: contact.phone || '',
           email: contact.email || '',
           fechaISO: fechaCita,
           horaInicio: horaCita,
           contactoID: resultado?.contactoID || null
         });
-        console.log('CITAS CALENDARIO OK:', JSON.stringify(citas));
+        console.log('CITAS OK:', JSON.stringify(citas));
       } catch (err) {
-        console.error('Error Citas Calendario:', err.message);
+        console.error('Error Citas:', err.message);
       }
 
       const mesesNombres = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -594,7 +544,7 @@ REGLAS:
       const fechaLegible = fechaCita ? `${parseInt(dd)} de ${mesesNombres[parseInt(mm)-1]}` : 'la fecha acordada';
       const [hh, min] = (horaCita || '00:00').split(':');
       const hNum = parseInt(hh);
-      const horaLegible = `${hNum > 12 ? hNum - 12 : hNum}:${min}${hNum < 12 ? 'am' : 'pm'}`;
+      const horaLegible = `${hNum > 12 ? hNum - 12 : hNum === 0 ? 12 : hNum}:${min}${hNum < 12 ? 'am' : 'pm'}`;
 
       await addTag(contactId, 'escalado nhck');
       await humanDelay();
@@ -604,7 +554,6 @@ REGLAS:
       return res.json({ success: true, citaConfirmada: true });
     }
 
-    // ─── ESCALAR ─────────────────────────────────────────────────────────────
     if (reply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
       await humanDelay();
@@ -612,7 +561,6 @@ REGLAS:
       return res.json({ success: true, escalated: true });
     }
 
-    // ─── RESPUESTA NORMAL ─────────────────────────────────────────────────────
     conversationHistory[conversationId].push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
     await humanDelay();
     await sendMessage(conversationId, reply, contactId);
