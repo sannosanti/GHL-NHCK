@@ -537,8 +537,9 @@ REGLAS:
       const ocupacion = extract('ocupacion');
       console.log('DATOS CITA:', { fechaCita, horaCita, edad, genero, ocupacion });
 
+      let resultado = null;
       try {
-        const resultado = await crearEnAnamnesis({
+        resultado = await crearEnAnamnesis({
           nombre: contact.firstName || '',
           apellido: contact.lastName || '',
           email: contact.email || '',
