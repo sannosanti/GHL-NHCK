@@ -304,8 +304,37 @@ function calcularSlotsLibres(citas, fechaISO) {
   return slots;
 }
 
-const conversationHistory = {};
-const disponibilidadCache = {};
+const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7F2r1cjj4WMTXWkh3cXW';
+const WOMPI_PRIVATE_KEY = process.env.WOMPI_PRIVATE_KEY || 'prv_test_rs7u6wx1045DshLEx7tLz58YAe6XOmwn';
+const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
+const WOMPI_BASE_URL = 'https://sandbox.wompi.co/v1';
+
+// Pagos pendientes: referencia → datos de la cita
+const pendingPayments = {};
+
+async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
+  // Generar firma de integridad: SHA256(referencia + monto_en_centavos + COP + integrity_key)
+  const crypto = require('crypto');
+  const montoEnCentavos = monto * 100;
+  const cadena = `${referencia}${montoEnCentavos}COP${WOMPI_INTEGRITY_KEY}`;
+  const firma = crypto.createHash('sha256').update(cadena).digest('hex');
+
+  const params = new URLSearchParams({
+    'public-key': WOMPI_PUBLIC_KEY,
+    currency: 'COP',
+    'amount-in-cents': montoEnCentavos,
+    reference: referencia,
+    'signature:integrity': firma,
+    'customer-data:email': email || '',
+    'customer-data:full-name': nombre || '',
+    'customer-data:phone-number': (telefono || '').replace(/[\s+\(\)\-]/g, ''),
+    'redirect-url': 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso'
+  });
+
+  return `https://checkout.wompi.co/p/?${params.toString()}`;
+}
+
+
 
 const humanDelay = () => new Promise(resolve =>
   setTimeout(resolve, Math.floor(Math.random() * 4000) + 2000)
@@ -510,32 +539,36 @@ REGLAS:
       const ocupacion = extract('ocupacion');
       console.log('DATOS CITA:', { fechaCita, horaCita, edad, genero, ocupacion });
 
-      let resultado = null;
-      try {
-        resultado = await crearEnAnamnesis({
-          nombre: contact.firstName || '',
-          apellido: contact.lastName || '',
-          email: contact.email || '',
-          movil: contact.phone || '',
-          contactIdGHL: contactId,
-          edad, sintoma: triaje1, genero, ocupacion
-        });
-        console.log('ANAMNESIS OK:', JSON.stringify(resultado));
-      } catch (err) {
-        console.error('Error Anamnesis:', err.message);
-      }
+      // Generar referencia única
+      const referencia = `NHCK-${contactId}-${Date.now()}`;
 
+      // Guardar datos pendientes de pago
+      pendingPayments[referencia] = {
+        contactId,
+        conversationId,
+        contact,
+        fechaCita,
+        horaCita,
+        edad,
+        genero,
+        ocupacion,
+        sintoma: triaje1,
+        nombre
+      };
+
+      // Generar link de pago Wompi
+      let linkPago = null;
       try {
-        const citas = await crearCitasCalendario({
-          movil: contact.phone || '',
+        linkPago = await generarLinkPago({
+          referencia,
+          monto: 100000,
+          nombre: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           email: contact.email || '',
-          fechaISO: fechaCita,
-          horaInicio: horaCita,
-          contactoID: resultado?.contactoID || null
+          telefono: contact.phone || ''
         });
-        console.log('CITAS OK:', JSON.stringify(citas));
+        console.log('LINK PAGO GENERADO:', linkPago);
       } catch (err) {
-        console.error('Error Citas:', err.message);
+        console.error('Error generando link pago:', err.message);
       }
 
       const mesesNombres = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -545,12 +578,19 @@ REGLAS:
       const hNum = parseInt(hh);
       const horaLegible = `${hNum > 12 ? hNum - 12 : hNum === 0 ? 12 : hNum}:${min}${hNum < 12 ? 'am' : 'pm'}`;
 
-      await addTag(contactId, 'escalado nhck');
       await humanDelay();
-      await sendMessage(conversationId,
-        `¡Perfecto ${nombre}! Tu cita queda agendada para el ${fechaLegible} a las ${horaLegible} 🎉\nEn un momento un asesor te confirmará los detalles finales 🙌`,
-        contactId);
-      return res.json({ success: true, citaConfirmada: true });
+      if (linkPago) {
+        await sendMessage(conversationId,
+          `¡Perfecto ${nombre}! Tu cita queda para el ${fechaLegible} a las ${horaLegible} 🎉\nPara confirmar el cupo necesitas hacer la reserva de $100.000 aquí 👇\n${linkPago}`,
+          contactId);
+      } else {
+        await sendMessage(conversationId,
+          `¡Perfecto ${nombre}! Tu cita queda para el ${fechaLegible} a las ${horaLegible} 🎉\nEn un momento un asesor te envía los datos para la reserva de $100.000 🙌`,
+          contactId);
+        await addTag(contactId, 'escalado nhck');
+      }
+
+      return res.json({ success: true, citaPendientePago: true, referencia });
     }
 
     if (reply.includes('[ESCALAR]')) {
@@ -571,5 +611,107 @@ REGLAS:
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// ─── WEBHOOK WOMPI ────────────────────────────────────────────────────────────
+app.post('/webhook/wompi', async (req, res) => {
+  try {
+    console.log('WOMPI WEBHOOK:', JSON.stringify(req.body));
+    const evento = req.body?.event;
+    const transaccion = req.body?.data?.transaction;
+
+    if (!transaccion) return res.json({ received: true });
+
+    const { reference, status, amount_in_cents, customer_email } = transaccion;
+
+    console.log('WOMPI TRANSACCION:', { reference, status, amount_in_cents });
+
+    // Verificar firma del evento
+    const crypto = require('crypto');
+    const checksum = req.body?.signature?.checksum;
+    const properties = req.body?.signature?.properties || [];
+    if (checksum && properties.length > 0) {
+      const cadena = properties.map(p => {
+        const keys = p.split('.');
+        let val = req.body.data;
+        for (const k of keys) val = val?.[k];
+        return val;
+      }).join('') + req.body.timestamp + WOMPI_INTEGRITY_KEY;
+      const firmaCalculada = crypto.createHash('sha256').update(cadena).digest('hex');
+      if (firmaCalculada !== checksum) {
+        console.error('Firma Wompi inválida');
+        return res.status(401).json({ error: 'Firma inválida' });
+      }
+    }
+
+    if (status !== 'APPROVED') {
+      console.log('Pago no aprobado:', status);
+      return res.json({ received: true });
+    }
+
+    // Buscar datos pendientes
+    const datos = pendingPayments[reference];
+    if (!datos) {
+      console.log('Referencia no encontrada:', reference);
+      return res.json({ received: true });
+    }
+
+    const { contactId, conversationId, contact, fechaCita, horaCita, edad, genero, ocupacion, sintoma, nombre } = datos;
+
+    // Crear en Anamnesis
+    let resultado = null;
+    try {
+      resultado = await crearEnAnamnesis({
+        nombre: contact.firstName || '',
+        apellido: contact.lastName || '',
+        email: contact.email || '',
+        movil: contact.phone || '',
+        contactIdGHL: contactId,
+        edad, sintoma, genero, ocupacion
+      });
+      console.log('ANAMNESIS OK:', JSON.stringify(resultado));
+    } catch (err) {
+      console.error('Error Anamnesis:', err.message);
+    }
+
+    // Crear citas en Calendario
+    try {
+      const citas = await crearCitasCalendario({
+        movil: contact.phone || '',
+        email: contact.email || '',
+        fechaISO: fechaCita,
+        horaInicio: horaCita,
+        contactoID: resultado?.contactoID || null
+      });
+      console.log('CITAS OK:', JSON.stringify(citas));
+    } catch (err) {
+      console.error('Error Citas:', err.message);
+    }
+
+    // Mensaje de confirmación final
+    const mesesNombres = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const [yyyy, mm, dd] = (fechaCita || '').split('-');
+    const fechaLegible = fechaCita ? `${parseInt(dd)} de ${mesesNombres[parseInt(mm)-1]}` : 'la fecha acordada';
+    const [hh, min] = (horaCita || '00:00').split(':');
+    const hNum = parseInt(hh);
+    const horaLegible = `${hNum > 12 ? hNum - 12 : hNum === 0 ? 12 : hNum}:${min}${hNum < 12 ? 'am' : 'pm'}`;
+
+    await addTag(contactId, 'escalado nhck');
+    await sendMessage(conversationId,
+      `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaLegible} a las ${horaLegible} 🎉\nNos vemos pronto, recuerda llegar 10 minutos antes 🙌`,
+      contactId);
+
+    // Limpiar pago pendiente
+    delete pendingPayments[reference];
+
+    return res.json({ received: true });
+  } catch (error) {
+    console.error('Error webhook Wompi:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/pago-exitoso', (req, res) => {
+  res.send('<h2>¡Pago recibido! Tu cita está confirmada. Puedes cerrar esta ventana.</h2>');
+});
+
+
 app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
