@@ -154,7 +154,7 @@ async function deletePendingPayment(referencia) {
 async function getCachedDisponibilidad(fechaISO) {
   try {
     const res = await pool.query(
-      "SELECT citas FROM availability_cache WHERE fecha_iso=$1 AND cached_at > NOW() - INTERVAL '1 hour'",
+      "SELECT citas FROM availability_cache WHERE fecha_iso=$1 AND cached_at > NOW() - INTERVAL '10 minutes'",
       [fechaISO]
     );
     return res.rows[0]?.citas || null;
@@ -393,19 +393,21 @@ function calcularSlotsLibres(citas, fechaISO) {
 
   citas.forEach(c => {
     const cID = c.Consultor?.ID || '';
-    const t = new Date((c.Inicio || '').replace(/-/g,' '));
-    if (isNaN(t)) return;
-    const h = t.getHours() + t.getMinutes()/60;
-    if (cID === ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push(h);
-    if (cID === ID_CONSULTOR_MAPEOS) ocupadosMapeos.push(h);
+    const tIni = new Date((c.Inicio || '').replace(/-/g,' '));
+    const tFin = new Date((c.Fin || '').replace(/-/g,' '));
+    if (isNaN(tIni)) return;
+    const hIni = tIni.getHours() + tIni.getMinutes()/60;
+    const hFin = isNaN(tFin) ? hIni + 0.5 : tFin.getHours() + tFin.getMinutes()/60;
+    if (cID === ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push({ ini: hIni, fin: hFin });
+    if (cID === ID_CONSULTOR_MAPEOS) ocupadosMapeos.push({ ini: hIni, fin: hFin });
   });
 
   const slots = [];
   for (const { ini, fin } of horarios) {
     for (let h = ini; h + 1.5 <= fin; h += 0.5) {
-      // Juan Esteban libre en h (30min) Y Mapeos libre en h+0.5 (1hora)
-      const jeLibre = !ocupadosJE.some(o => o >= h && o < h + 0.5);
-      const mapeosLibre = !ocupadosMapeos.some(o => o >= h + 0.5 && o < h + 1.5);
+      // Juan Esteban libre en h a h+0.5 Y Mapeos libre en h+0.5 a h+1.5
+      const jeLibre = !ocupadosJE.some(o => o.ini < h + 0.5 && o.fin > h);
+      const mapeosLibre = !ocupadosMapeos.some(o => o.ini < h + 1.5 && o.fin > h + 0.5);
       if (jeLibre && mapeosLibre) {
         const hh = Math.floor(h); const mm = (h%1)*60;
         const hh12 = hh > 12 ? hh-12 : hh === 0 ? 12 : hh;
