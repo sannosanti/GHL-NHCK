@@ -336,6 +336,9 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
 
 
 
+const conversationHistory = {};
+const disponibilidadCache = {};
+
 const humanDelay = () => new Promise(resolve =>
   setTimeout(resolve, Math.floor(Math.random() * 4000) + 2000)
 );
