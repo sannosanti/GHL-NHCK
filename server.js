@@ -86,6 +86,7 @@ async function initDB() {
   // Agregar columnas que pueden faltar en tablas existentes
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre_nino TEXT`).catch(()=>{});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre TEXT`).catch(()=>{});
+  await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_link_id TEXT`).catch(()=>{});
   console.log('Base de datos inicializada ✓');
 }
 
@@ -130,18 +131,24 @@ async function setCachedContact(contactId, contactData) {
 async function savePendingPayment(referencia, datos) {
   try {
     await pool.query(`
-      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre_nino,nombre)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      ON CONFLICT (referencia) DO UPDATE SET fecha_cita=$5, hora_cita=$6
+      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre_nino,nombre,payment_link_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      ON CONFLICT (referencia) DO UPDATE SET fecha_cita=$5, hora_cita=$6, payment_link_id=$13
     `, [referencia, datos.contactId, datos.conversationId, JSON.stringify(datos.contact),
         datos.fechaCita, datos.horaCita, datos.edad, datos.genero, datos.ocupacion,
-        datos.sintoma, datos.nombreNino, datos.nombre]);
+        datos.sintoma, datos.nombreNino, datos.nombre, datos.paymentLinkId || null]);
   } catch (err) { console.error('Error guardando pago:', err.message); }
 }
 
-async function getPendingPayment(referencia) {
+async function getPendingPayment(reference) {
   try {
-    const res = await pool.query('SELECT * FROM pending_payments WHERE referencia=$1', [referencia]);
+    // Buscar por referencia exacta primero
+    let res = await pool.query('SELECT * FROM pending_payments WHERE referencia=$1', [reference]);
+    // Si no encuentra, buscar por payment_link_id (Wompi cambia la referencia en payment links)
+    if (!res.rows[0]) {
+      const linkId = reference.split('_').slice(0, 2).join('_'); // test_bFmVkE
+      res = await pool.query('SELECT * FROM pending_payments WHERE payment_link_id=$1', [linkId]);
+    }
     if (!res.rows[0]) return null;
     const r = res.rows[0];
     return { contactId: r.contact_id, conversationId: r.conversation_id, contact: r.contact_data,
@@ -464,7 +471,7 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
   console.log('WOMPI PAYMENT LINK:', JSON.stringify(data));
 
   if (data?.data?.id) {
-    return `https://checkout.wompi.co/l/${data.data.id}`;
+    return { url: `https://checkout.wompi.co/l/${data.data.id}`, linkId: data.data.id };
   }
 
   // Fallback al link largo si falla
@@ -476,7 +483,7 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
     'customer-data:phone-number': (telefono || '').replace(/[\s+\(\)\-]/g, ''),
     'redirect-url': 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso'
   });
-  return `https://checkout.wompi.co/p/?${params.toString()}`;
+  return { url: `https://checkout.wompi.co/p/?${params.toString()}`, linkId: null };
 }
 
 // ─── GHL HELPERS ──────────────────────────────────────────────────────────────
@@ -748,16 +755,23 @@ REGLAS FINALES:
       await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: triaje1 });
 
       const referencia = `NHCK-${contactId}-${Date.now()}`;
-      await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
-        edad, genero, ocupacion: mapearOcupacionNino(estudia, edad), sintoma: triaje1, nombreNino, nombre });
       await logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
 
       let linkPago = null;
       try {
-        linkPago = await generarLinkPago({ referencia, monto:100000,
+        const pagoResult = await generarLinkPago({ referencia, monto:100000,
           nombre: `${contact.firstName||''} ${contact.lastName||''}`.trim(),
           email: contact.email||'', telefono: contact.phone||'' });
-      } catch (err) { console.error('Error link pago:', err.message); }
+        linkPago = pagoResult.url;
+        await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
+          edad, genero, ocupacion: mapearOcupacionNino(estudia, edad), sintoma: triaje1,
+          nombreNino, nombre, paymentLinkId: pagoResult.linkId });
+      } catch (err) {
+        console.error('Error link pago:', err.message);
+        await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
+          edad, genero, ocupacion: mapearOcupacionNino(estudia, edad), sintoma: triaje1,
+          nombreNino, nombre, paymentLinkId: null });
+      }
 
       const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       const [,mm,dd] = (fechaCita||'').split('-');
