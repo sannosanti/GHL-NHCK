@@ -350,7 +350,8 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
     method:'POST', headers, body: JSON.stringify({ data: { ...base,
       Inicio: fmt(hIni,mIni), Fin: fmt(fin1H,fin1M), Duraci_n:'30 minutos',
-      Consultor: ID_CONSULTOR_JUAN_ESTEBAN
+      Consultor: ID_CONSULTOR_JUAN_ESTEBAN,
+      Espacio: '3572150000004826074'
     }})
   });
   const data1 = await res1.json();
