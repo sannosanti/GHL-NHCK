@@ -21,6 +21,16 @@ const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7
 const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
 const WOMPI_BASE_URL = 'https://sandbox.wompi.co/v1';
 
+// Pipeline NHC Kids
+const GHL_PIPELINE_ID = 'GFfv1dCSQAAZ70MNHsfM';
+const STAGE_INICIO = '24270da1-9917-4ba7-bf5a-35b226b2687f';
+const STAGE_INFO_COMPLETA = '2c04e0ac-0429-4300-bf18-6f75cabe8953';
+const STAGE_LINK_PAGO = '87c45501-386f-418e-95e7-6975b20559a6';
+const STAGE_PAGO_PARCIAL = '18571c0c-5c8f-40f1-9440-e865670ac108';
+
+// Timer de inactividad por conversación
+const inactivityTimers = {};
+
 // Horarios disponibles NHC Kids (aplica para Juan Esteban Y Mapeos)
 // 0=dom, 1=lun, 2=mar, 3=mie, 4=jue, 5=vie, 6=sab
 const HORARIOS_NHCK = {
@@ -497,6 +507,79 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
   return { url: `https://checkout.wompi.co/p/?${params.toString()}`, linkId: null };
 }
 
+// ─── OPORTUNIDADES GHL ────────────────────────────────────────────────────────
+async function crearOportunidad(contactId, nombre, stageId) {
+  try {
+    const res = await fetch('https://services.leadconnectorhq.com/opportunities/', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pipelineId: GHL_PIPELINE_ID,
+        locationId: GHL_LOCATION_ID,
+        name: `NHC Kids - ${nombre}`,
+        pipelineStageId: stageId,
+        status: 'open',
+        contactId
+      })
+    });
+    const data = await res.json();
+    console.log('OPORTUNIDAD CREADA:', JSON.stringify(data));
+    return data.opportunity?.id || null;
+  } catch (err) { console.error('Error creando oportunidad:', err.message); return null; }
+}
+
+async function actualizarEtapaOportunidad(contactId, stageId) {
+  try {
+    // Buscar oportunidad existente del contacto en este pipeline
+    const res = await fetch(`https://services.leadconnectorhq.com/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${GHL_PIPELINE_ID}&contact_id=${contactId}`, {
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28' }
+    });
+    const data = await res.json();
+    const opp = data.opportunities?.[0];
+    if (!opp) {
+      console.log('No se encontró oportunidad para el contacto, creando...');
+      return null;
+    }
+    const resUpdate = await fetch(`https://services.leadconnectorhq.com/opportunities/${opp.id}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pipelineStageId: stageId })
+    });
+    const dataUpdate = await resUpdate.json();
+    console.log('ETAPA ACTUALIZADA:', JSON.stringify(dataUpdate));
+    return opp.id;
+  } catch (err) { console.error('Error actualizando etapa:', err.message); return null; }
+}
+
+// ─── INACTIVIDAD ──────────────────────────────────────────────────────────────
+function limpiarTimers(conversationId) {
+  if (inactivityTimers[conversationId]) {
+    clearTimeout(inactivityTimers[conversationId].timer5);
+    clearTimeout(inactivityTimers[conversationId].timer10);
+    delete inactivityTimers[conversationId];
+  }
+}
+
+function iniciarTimersInactividad(conversationId, contactId) {
+  limpiarTimers(conversationId);
+  inactivityTimers[conversationId] = {
+    timer5: setTimeout(async () => {
+      try {
+        await sendMessage(conversationId, '¿Sigues por ahí? 😊 Quedo pendiente por si tienes alguna duda.', contactId);
+        console.log('Mensaje 5min enviado a:', conversationId);
+      } catch (err) { console.error('Error timer 5min:', err.message); }
+    }, 5 * 60 * 1000),
+    timer10: setTimeout(async () => {
+      try {
+        await sendMessage(conversationId,
+          'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso de Emilio nos escribes y con gusto te ayudamos.',
+          contactId);
+        console.log('Mensaje 10min enviado a:', conversationId);
+      } catch (err) { console.error('Error timer 10min:', err.message); }
+    }, 10 * 60 * 1000)
+  };
+}
+
 // ─── GHL HELPERS ──────────────────────────────────────────────────────────────
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random()*4000)+2000));
 
@@ -604,6 +687,9 @@ app.post('/webhook/ghl', async (req, res) => {
       return res.json({ success: true, skipped: true, reason: 'duplicate' });
     }
 
+    // Limpiar timers de inactividad al recibir mensaje
+    limpiarTimers(conversationId);
+
     const contactData = await getContact(contactId);
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
@@ -649,6 +735,11 @@ app.post('/webhook/ghl', async (req, res) => {
     console.log('TRIAJE:', triaje);
 
     const nombre = contact.firstName || 'Hola';
+
+    // Crear oportunidad si es primera interacción
+    if (!convData) {
+      crearOportunidad(contactId, `${contact.firstName || ''} ${contact.lastName || ''}`.trim(), STAGE_INICIO).catch(()=>{});
+    }
     let history = convData?.messages || [];
     history.push({ role:'user', content:[{ type:'text', text:lastMsg }] });
     if (history.length > 20) history = history.slice(-20);
@@ -765,6 +856,9 @@ REGLAS FINALES:
       // Guardar campos del niño en GHL
       await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: triaje1 });
 
+      // Actualizar etapa a Información completa
+      actualizarEtapaOportunidad(contactId, STAGE_INFO_COMPLETA).catch(()=>{});
+
       const referencia = `NHCK-${contactId}-${Date.now()}`;
       await logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
 
@@ -800,6 +894,13 @@ REGLAS FINALES:
 
       await sendMessages(conversationId, mensajes, contactId);
       if (!linkPago) await addTag(contactId, 'escalado nhck');
+
+      // Actualizar etapa a Envío de link de pago
+      actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
+
+      // Iniciar timers de inactividad
+      iniciarTimersInactividad(conversationId, contactId);
+
       return res.json({ success:true, citaPendientePago:true, referencia });
     }
 
@@ -823,6 +924,10 @@ REGLAS FINALES:
     await saveConversationData(conversationId, contactId, history, triaje, 'activo', lastMsgId);
     await humanDelay();
     await sendMessages(conversationId, partes, contactId);
+
+    // Iniciar timers de inactividad
+    iniciarTimersInactividad(conversationId, contactId);
+
     res.json({ success:true, reply });
 
   } catch (error) {
@@ -904,7 +1009,14 @@ app.post('/webhook/wompi', async (req, res) => {
     const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
 
     await addTag(contactId, 'escalado nhck');
+    await addTag(contactId, 'pagó 100K nhck');
     await deletePendingPayment(reference);
+
+    // Actualizar etapa a Pago parcial 100 mil
+    actualizarEtapaOportunidad(contactId, STAGE_PAGO_PARCIAL).catch(()=>{});
+
+    // Limpiar timers de inactividad
+    limpiarTimers(conversationId);
     await sendMessages(conversationId, [
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
       `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`
