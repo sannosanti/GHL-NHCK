@@ -694,12 +694,10 @@ REGLAS FINALES:
 
       await saveConversationData(conversationId, contactId, history, triaje, 'esperando_pago', lastMsgId);
       await humanDelay();
-
       const mensajes = linkPago
-        ? [`¡Perfecto ${nombre}! Cita agendada para el ${fechaL} a las ${horaL} 🎉`,
-           `Para confirmar el cupo haz la reserva de $100.000 aquí 👇\n${linkPago}`]
-        : [`¡Perfecto ${nombre}! Cita agendada para el ${fechaL} a las ${horaL} 🎉`,
-           `En un momento un asesor te envía los datos para la reserva de $100.000 🙌`];
+        ? [`Para confirmar tu cupo necesitas hacer la reserva de $100.000 aquí 👇\n${linkPago}`,
+           `Una vez confirmado el pago te envío los detalles de tu cita 🙌`]
+        : [`En un momento un asesor te envía los datos para la reserva de $100.000 🙌`];
 
       await sendMessages(conversationId, mensajes, contactId);
       if (!linkPago) await addTag(contactId, 'escalado nhck');
@@ -787,6 +785,8 @@ app.post('/webhook/wompi', async (req, res) => {
         fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID||null });
       console.log('CITAS OK:', JSON.stringify(citas));
       await logEvent(contactId, conversationId, 'citas_creadas', citas);
+      // Invalidar caché del día para que otros clientes vean disponibilidad actualizada
+      await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [fechaCita]).catch(()=>{});
     } catch (err) { console.error('Error Citas:', err.message); }
 
     const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
