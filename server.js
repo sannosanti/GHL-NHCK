@@ -19,6 +19,7 @@ const ID_ESPACIO_MAPEOS = '3572150000004871116';
 
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7F2r1cjj4WMTXWkh3cXW';
 const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
+const WOMPI_BASE_URL = 'https://sandbox.wompi.co/v1';
 
 // Horarios disponibles NHC Kids (aplica para Juan Esteban Y Mapeos)
 // 0=dom, 1=lun, 2=mar, 3=mie, 4=jue, 5=vie, 6=sab
@@ -430,12 +431,49 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
   const montoEnCentavos = monto * 100;
   const cadena = `${referencia}${montoEnCentavos}COP${WOMPI_INTEGRITY_KEY}`;
   const firma = crypto.createHash('sha256').update(cadena).digest('hex');
+
+  const res = await fetch(`${WOMPI_BASE_URL}/payment_links`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.WOMPI_PRIVATE_KEY || 'prv_test_rs7u6wx1045DshLEx7tLz58YAe6XOmwn'}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: 'Reserva NHC Kids - Neuromapeo',
+      description: 'Reserva para el proceso de Neuromapeo Kids ($100.000)',
+      single_use: true,
+      collect_shipping: false,
+      currency: 'COP',
+      amount_in_cents: montoEnCentavos,
+      reference: referencia,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      redirect_url: 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso',
+      signature: { integrity: firma },
+      customer_data: {
+        customer_name: nombre || '',
+        customer_last_name: '',
+        customer_legal_id: '',
+        customer_legal_id_type: 'CC',
+        customer_email: email || '',
+        customer_phone: (telefono || '').replace(/[\s+\(\)\-]/g, '')
+      }
+    })
+  });
+
+  const data = await res.json();
+  console.log('WOMPI PAYMENT LINK:', JSON.stringify(data));
+
+  if (data?.data?.id) {
+    return `https://checkout.wompi.co/l/${data.data.id}`;
+  }
+
+  // Fallback al link largo si falla
   const params = new URLSearchParams({
-    'public-key': WOMPI_PUBLIC_KEY, currency:'COP',
+    'public-key': WOMPI_PUBLIC_KEY, currency: 'COP',
     'amount-in-cents': montoEnCentavos, reference: referencia,
-    'signature:integrity': firma, 'customer-data:email': email||'',
-    'customer-data:full-name': nombre||'',
-    'customer-data:phone-number': (telefono||'').replace(/[\s+\(\)\-]/g,''),
+    'signature:integrity': firma, 'customer-data:email': email || '',
+    'customer-data:full-name': nombre || '',
+    'customer-data:phone-number': (telefono || '').replace(/[\s+\(\)\-]/g, ''),
     'redirect-url': 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso'
   });
   return `https://checkout.wompi.co/p/?${params.toString()}`;
