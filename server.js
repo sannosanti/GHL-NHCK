@@ -20,9 +20,9 @@ const ID_ESPACIO_MAPEOS = '3572150000004871116';
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7F2r1cjj4WMTXWkh3cXW';
 const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
 
-// Horarios de Juan Esteban por día de semana
+// Horarios disponibles NHC Kids (aplica para Juan Esteban Y Mapeos)
 // 0=dom, 1=lun, 2=mar, 3=mie, 4=jue, 5=vie, 6=sab
-const HORARIOS_JUAN_ESTEBAN = {
+const HORARIOS_NHCK = {
   1: [{ ini: 14, fin: 15.5 }],
   2: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],
   3: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 15.5 }],
@@ -383,7 +383,7 @@ async function getDisponibilidad(fechaISO) {
 function calcularSlotsLibres(citas, fechaISO) {
   const fecha = new Date(fechaISO + 'T00:00:00');
   const dia = fecha.getDay();
-  const horarios = HORARIOS_JUAN_ESTEBAN[dia];
+  const horarios = HORARIOS_NHCK[dia];
   if (!horarios) return [];
 
   // Horas ocupadas de Juan Esteban y Mapeos
@@ -571,7 +571,7 @@ app.post('/webhook/ghl', async (req, res) => {
       while (diasOk < 3 && offset <= 14) {
         const f = new Date(hoy); f.setDate(hoy.getDate()+offset);
         const ds = f.getDay();
-        if (HORARIOS_JUAN_ESTEBAN[ds]) {
+        if (HORARIOS_NHCK[ds]) {
           const fISO = f.toISOString().split('T')[0];
           let citas = await getCachedDisponibilidad(fISO);
           if (!citas) { citas = await getDisponibilidad(fISO); await setCachedDisponibilidad(fISO, citas); }
