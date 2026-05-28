@@ -501,6 +501,27 @@ async function sendMessages(conversationId, messages, contactId) {
 // ─── WEBHOOK GHL ──────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
+// Endpoint para reiniciar conversación desde el browser
+app.get('/reset/:conversationId', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM conversations WHERE conversation_id = $1', [req.params.conversationId]);
+    res.send(`✓ Conversación ${req.params.conversationId} reiniciada`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
+// Endpoint para reiniciar por contactId
+app.get('/reset-contact/:contactId', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM conversations WHERE contact_id = $1', [req.params.contactId]);
+    await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [req.params.contactId]);
+    res.send(`✓ Contacto ${req.params.contactId} reiniciado`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.post('/webhook/ghl', async (req, res) => {
   try {
     const contactId = req.body.contactId || req.body.customData?.contactId ||
@@ -536,6 +557,14 @@ app.post('/webhook/ghl', async (req, res) => {
       lastMsgId = fetched.id;
     }
     if (!lastMsg) return res.json({ success: true, skipped: true });
+
+    // Comando reset — reinicia la conversación
+    if (lastMsg.trim().toLowerCase() === '/reset') {
+      await pool.query('DELETE FROM conversations WHERE conversation_id = $1', [conversationId]);
+      await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [contactId]);
+      await sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
+      return res.json({ success: true, reset: true });
+    }
 
     // Triaje — leer del body o recuperar de DB
     const triajeFromBody = {
