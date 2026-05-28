@@ -13,13 +13,23 @@ const ZOHO_CLIENT_ID = process.env.ZOHO_CLIENT_ID || '1000.YU4EF3FZ0RS8NAEMKVPVN
 const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET || 'fc1adeeb598f9a6a7d38912922bfffcb1db6857203';
 const ZOHO_REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN || '1000.18ea8055151efce1711489d0475df2c9.6533e8fc2ee705c2af94f5a108312d26';
 
-const ID_CONSULTOR_NEUROTECNOLOGIAS = '3572150000004871156';
+const ID_CONSULTOR_JUAN_ESTEBAN = '3572150000004930155';
 const ID_CONSULTOR_MAPEOS = '3572150000005140253';
-const ID_ESPACIO_NEUROTECNOLOGIAS_1 = '3572150000004826066';
 const ID_ESPACIO_MAPEOS = '3572150000004871116';
 
 const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7F2r1cjj4WMTXWkh3cXW';
 const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
+
+// Horarios de Juan Esteban por día de semana
+// 0=dom, 1=lun, 2=mar, 3=mie, 4=jue, 5=vie, 6=sab
+const HORARIOS_JUAN_ESTEBAN = {
+  1: [{ ini: 14, fin: 15.5 }],
+  2: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],
+  3: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 15.5 }],
+  4: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],
+  5: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 15.5 }],
+  6: [{ ini: 8.5, fin: 10.5 }]
+};
 
 // ─── POSTGRESQL ───────────────────────────────────────────────────────────────
 const pool = new Pool({
@@ -49,6 +59,7 @@ async function initDB() {
       genero TEXT,
       ocupacion TEXT,
       sintoma TEXT,
+      nombre_nino TEXT,
       nombre TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );
@@ -74,7 +85,7 @@ async function initDB() {
   console.log('Base de datos inicializada ✓');
 }
 
-// ─── DB: CONVERSACIONES ───────────────────────────────────────────────────────
+// ─── DB HELPERS ───────────────────────────────────────────────────────────────
 async function getConversationData(conversationId) {
   try {
     const res = await pool.query('SELECT * FROM conversations WHERE conversation_id = $1', [conversationId]);
@@ -93,11 +104,10 @@ async function saveConversationData(conversationId, contactId, messages, triaje,
   } catch (err) { console.error('Error guardando conversación:', err.message); }
 }
 
-// ─── DB: CACHÉ CONTACTOS GHL ──────────────────────────────────────────────────
 async function getCachedContact(contactId) {
   try {
     const res = await pool.query(
-      "SELECT contact_data FROM contact_cache WHERE contact_id = $1 AND cached_at > NOW() - INTERVAL '5 minutes'",
+      "SELECT contact_data FROM contact_cache WHERE contact_id=$1 AND cached_at > NOW() - INTERVAL '5 minutes'",
       [contactId]
     );
     return res.rows[0]?.contact_data || null;
@@ -107,42 +117,40 @@ async function getCachedContact(contactId) {
 async function setCachedContact(contactId, contactData) {
   try {
     await pool.query(`
-      INSERT INTO contact_cache (contact_id, contact_data, cached_at)
-      VALUES ($1,$2,NOW())
+      INSERT INTO contact_cache (contact_id, contact_data, cached_at) VALUES ($1,$2,NOW())
       ON CONFLICT (contact_id) DO UPDATE SET contact_data=$2, cached_at=NOW()
     `, [contactId, JSON.stringify(contactData)]);
   } catch (err) { console.error('Error cacheando contacto:', err.message); }
 }
 
-// ─── DB: PAGOS PENDIENTES ─────────────────────────────────────────────────────
 async function savePendingPayment(referencia, datos) {
   try {
     await pool.query(`
-      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre_nino,nombre)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       ON CONFLICT (referencia) DO UPDATE SET fecha_cita=$5, hora_cita=$6
     `, [referencia, datos.contactId, datos.conversationId, JSON.stringify(datos.contact),
-        datos.fechaCita, datos.horaCita, datos.edad, datos.genero, datos.ocupacion, datos.sintoma, datos.nombre]);
+        datos.fechaCita, datos.horaCita, datos.edad, datos.genero, datos.ocupacion,
+        datos.sintoma, datos.nombreNino, datos.nombre]);
   } catch (err) { console.error('Error guardando pago:', err.message); }
 }
 
 async function getPendingPayment(referencia) {
   try {
-    const res = await pool.query('SELECT * FROM pending_payments WHERE referencia = $1', [referencia]);
+    const res = await pool.query('SELECT * FROM pending_payments WHERE referencia=$1', [referencia]);
     if (!res.rows[0]) return null;
     const r = res.rows[0];
     return { contactId: r.contact_id, conversationId: r.conversation_id, contact: r.contact_data,
              fechaCita: r.fecha_cita, horaCita: r.hora_cita, edad: r.edad, genero: r.genero,
-             ocupacion: r.ocupacion, sintoma: r.sintoma, nombre: r.nombre };
+             ocupacion: r.ocupacion, sintoma: r.sintoma, nombreNino: r.nombre_nino, nombre: r.nombre };
   } catch { return null; }
 }
 
 async function deletePendingPayment(referencia) {
-  try { await pool.query('DELETE FROM pending_payments WHERE referencia = $1', [referencia]); }
+  try { await pool.query('DELETE FROM pending_payments WHERE referencia=$1', [referencia]); }
   catch (err) { console.error('Error borrando pago:', err.message); }
 }
 
-// ─── DB: CACHÉ DISPONIBILIDAD ─────────────────────────────────────────────────
 async function getCachedDisponibilidad(fechaISO) {
   try {
     const res = await pool.query(
@@ -159,17 +167,16 @@ async function setCachedDisponibilidad(fechaISO, citas) {
       INSERT INTO availability_cache (fecha_iso, citas, cached_at) VALUES ($1,$2,NOW())
       ON CONFLICT (fecha_iso) DO UPDATE SET citas=$2, cached_at=NOW()
     `, [fechaISO, JSON.stringify(citas)]);
-  } catch (err) { console.error('Error guardando caché disponibilidad:', err.message); }
+  } catch (err) { console.error('Error guardando caché:', err.message); }
 }
 
-// ─── DB: LOGS ─────────────────────────────────────────────────────────────────
 async function logEvent(contactId, conversationId, eventType, data) {
   try {
     await pool.query(
-      'INSERT INTO transaction_logs (contact_id, conversation_id, event_type, data) VALUES ($1,$2,$3,$4)',
+      'INSERT INTO transaction_logs (contact_id,conversation_id,event_type,data) VALUES ($1,$2,$3,$4)',
       [contactId, conversationId, eventType, JSON.stringify(data)]
     );
-  } catch (err) { console.error('Error logging:', err.message); }
+  } catch (err) { console.error('Error log:', err.message); }
 }
 
 // ─── ZOHO TOKEN ───────────────────────────────────────────────────────────────
@@ -181,8 +188,8 @@ async function getZohoAccessToken() {
   const res = await fetch('https://accounts.zoho.com/oauth/v2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ZOHO_CLIENT_ID,
-      client_secret: ZOHO_CLIENT_SECRET, refresh_token: ZOHO_REFRESH_TOKEN })
+    body: new URLSearchParams({ grant_type:'refresh_token', client_id:ZOHO_CLIENT_ID,
+      client_secret:ZOHO_CLIENT_SECRET, refresh_token:ZOHO_REFRESH_TOKEN })
   });
   const data = await res.json();
   if (!data.access_token) throw new Error('No token Zoho: ' + JSON.stringify(data));
@@ -219,20 +226,33 @@ function mapearGenero(g) {
   return 'Otro';
 }
 
-function mapearOcupacion(o) {
-  o = (o || '').toLowerCase().trim();
-  if (o.includes('ama') || o.includes('hogar')) return 'Ama de casa';
-  if (o.includes('deport') || o.includes('atleta')) return 'Deportista';
-  if (o.includes('desemplead') || o.includes('sin trabajo')) return 'Desempleado';
-  if (o.includes('ejecutiv') || o.includes('gerente') || o.includes('director')) return 'Ejecutivo';
-  if (o.includes('empresari') || o.includes('dueño') || o.includes('negocio')) return 'Empresario';
-  if (o.includes('colegio') || o.includes('bachiller')) return 'Estudiante de colegio';
-  if (o.includes('universidad') || o.includes('universitari')) return 'Estudiante de universidad';
-  if (o.includes('pension') || o.includes('jubilad') || o.includes('retirad')) return 'Pensionado';
-  if (o.includes('terapeut') || o.includes('psicolog') || o.includes('médic')) return 'Terapeuta';
-  if (o.includes('emplead') || o.includes('trabajador') || o.includes('programad') ||
-      o.includes('developer') || o.includes('ingenier') || o.includes('tecnolog')) return 'Empleado';
+function mapearOcupacionNino(estudia, edad) {
+  const edadNum = parseInt(edad) || 0;
+  if (estudia === true || estudia === 'si' || estudia === 'sí' || estudia === 'yes') {
+    return 'Estudiante de colegio';
+  }
   return 'N.A';
+}
+
+// ─── GHL: GUARDAR CAMPOS DEL NIÑO ────────────────────────────────────────────
+async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNino, estudia, sintoma }) {
+  try {
+    const customFields = [
+      { id: 'nhck__nombre_del_nio', value: nombreNino || '' },
+      { id: 'nhck__edad_del_nio', value: edadNino || '' },
+      { id: 'nhck__gnero_del_nio', value: mapearGenero(generoNino) },
+      { id: 'nhck__estudia', value: estudia ? 'Sí' : 'No' },
+      { id: 'nhck__sntoma_principal', value: mapearSintoma(sintoma) }
+    ];
+    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customFields })
+    });
+    console.log('Campos niño guardados en GHL');
+    // Invalidar caché
+    await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
+  } catch (err) { console.error('Error guardando campos niño GHL:', err.message); }
 }
 
 // ─── ZOHO ANAMNESIS ───────────────────────────────────────────────────────────
@@ -260,19 +280,22 @@ async function buscarContactoAnamnesis(movil, email) {
   } catch (err) { console.error('Error buscando contacto:', err.message); return null; }
 }
 
-async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, edad, sintoma, genero, ocupacion }) {
+async function crearEnAnamnesis({ nombreNino, apellidoNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
   const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
+  const ocupacion = mapearOcupacionNino(estudia, edad);
 
   let contactoID = await buscarContactoAnamnesis(movilLimpio, email);
   if (!contactoID) {
     const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Contactos', {
       method: 'POST', headers,
       body: JSON.stringify({ data: {
-        Nombre_Completo: `${nombre} ${apellido}`.trim(), Email: email || '', Movil: movilLimpio,
-        CRM: contactIdGHL || '', Edad: edad || '', Sintoma_o_necesidad: mapearSintoma(sintoma),
-        Genero: mapearGenero(genero), Ocupaci_n: mapearOcupacion(ocupacion)
+        Nombre_Completo: `${nombreNino} ${apellidoNino || ''}`.trim(),
+        Email: email || '', Movil: movilLimpio,
+        CRM: contactIdGHL || '', Edad: edad || '',
+        Sintoma_o_necesidad: mapearSintoma(sintoma),
+        Genero: mapearGenero(genero), Ocupaci_n: ocupacion
       }})
     });
     const data = await res.json();
@@ -286,7 +309,7 @@ async function crearEnAnamnesis({ nombre, apellido, email, movil, contactIdGHL, 
     body: JSON.stringify({ data: {
       Nombrel_del_consultante: contactoID, Edad: edad || '',
       S_ntoma: mapearSintoma(sintoma), Genero: mapearGenero(genero),
-      Ocupaci_n: mapearOcupacion(ocupacion), Tipo_Proceso: 'Diagnóstico', Estado_Paciente: 'Activo'
+      Ocupaci_n: ocupacion, Tipo_Proceso: 'Diagnóstico', Estado_Paciente: 'Activo'
     }})
   });
   const dataProceso = await resProceso.json();
@@ -312,11 +335,14 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const pad = n => String(n).padStart(2,'0');
   const fmt = (h,m) => `${dd}-${mmm}-${yyyy} ${pad(h)}:${pad(m)}:00`;
   const diaStr = `${dd}-${mmm}-${yyyy}`;
-  const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
 
-  const fin1H = mIni+30>=60 ? hIni+1 : hIni; const fin1M = (mIni+30)%60;
+  // Cita 1: Pre-diagnóstico 30min con Juan Esteban
+  const fin1H = mIni+30>=60 ? hIni+1 : hIni;
+  const fin1M = (mIni+30)%60;
+  // Cita 2: Neuromapeo 1hora con Mapeos (justo después)
   const ini2H = fin1H; const ini2M = fin1M;
-  const fin2H = ini2M+60>=60 ? ini2H+1 : ini2H; const fin2M = (ini2M+60)%60;
+  const fin2H = ini2M+60>=60 ? ini2H+1 : ini2H;
+  const fin2M = (ini2M+60)%60;
 
   const base = { Tipo:'Presencial', Contacto: contactoID||'', Email: email||'',
     Estado:'Programada', Observaciones:'NHC Kids - Agendado por Carolina IA', Dia: diaStr };
@@ -324,11 +350,11 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
     method:'POST', headers, body: JSON.stringify({ data: { ...base,
       Inicio: fmt(hIni,mIni), Fin: fmt(fin1H,fin1M), Duraci_n:'30 minutos',
-      Consultor: ID_CONSULTOR_NEUROTECNOLOGIAS, Espacio: ID_ESPACIO_NEUROTECNOLOGIAS_1
+      Consultor: ID_CONSULTOR_JUAN_ESTEBAN
     }})
   });
   const data1 = await res1.json();
-  console.log('CITA 1:', JSON.stringify(data1));
+  console.log('CITA 1 PRE:', JSON.stringify(data1));
 
   const res2 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
     method:'POST', headers, body: JSON.stringify({ data: { ...base,
@@ -337,12 +363,12 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
     }})
   });
   const data2 = await res2.json();
-  console.log('CITA 2:', JSON.stringify(data2));
+  console.log('CITA 2 NEUROMAPEO:', JSON.stringify(data2));
 
   return { cita1: data1, cita2: data2 };
 }
 
-// ─── ZOHO DISPONIBILIDAD ──────────────────────────────────────────────────────
+// ─── DISPONIBILIDAD ───────────────────────────────────────────────────────────
 async function getDisponibilidad(fechaISO) {
   try {
     const token = await getZohoAccessToken();
@@ -357,27 +383,36 @@ async function getDisponibilidad(fechaISO) {
 function calcularSlotsLibres(citas, fechaISO) {
   const fecha = new Date(fechaISO + 'T00:00:00');
   const dia = fecha.getDay();
-  if (dia === 0) return [];
-  let ini, fin;
-  if (dia === 1) { ini = 14; fin = 15.5; }
-  else if (dia === 6) { ini = 8.5; fin = 10.5; }
-  else { ini = 8.5; fin = 16.5; }
+  const horarios = HORARIOS_JUAN_ESTEBAN[dia];
+  if (!horarios) return [];
 
-  const ocupados = citas.map(c => {
-    const cID = c.Consultor?.ID || ''; const eID = c.Espacio?.ID || '';
-    if (cID !== ID_CONSULTOR_NEUROTECNOLOGIAS && cID !== ID_CONSULTOR_MAPEOS &&
-        eID !== ID_ESPACIO_NEUROTECNOLOGIAS_1 && eID !== ID_ESPACIO_MAPEOS) return null;
+  // Horas ocupadas de Juan Esteban y Mapeos
+  const ocupadosJE = [];
+  const ocupadosMapeos = [];
+
+  citas.forEach(c => {
+    const cID = c.Consultor?.ID || '';
     const t = new Date((c.Inicio || '').replace(/-/g,' '));
-    return isNaN(t) ? null : t.getHours() + t.getMinutes()/60;
-  }).filter(h => h !== null);
+    if (isNaN(t)) return;
+    const h = t.getHours() + t.getMinutes()/60;
+    if (cID === ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push(h);
+    if (cID === ID_CONSULTOR_MAPEOS) ocupadosMapeos.push(h);
+  });
 
   const slots = [];
-  for (let h = ini; h + 1.5 <= fin; h += 0.5) {
-    if (!ocupados.some(o => o >= h && o < h+1.5)) {
-      const hh = Math.floor(h); const mm = (h%1)*60;
-      const hh12 = hh > 12 ? hh-12 : hh === 0 ? 12 : hh;
-      slots.push({ label:`${hh12}:${mm===0?'00':'30'}${hh<12?'am':'pm'}`,
-                   horaISO:`${String(hh).padStart(2,'0')}:${mm===0?'00':'30'}` });
+  for (const { ini, fin } of horarios) {
+    for (let h = ini; h + 1.5 <= fin; h += 0.5) {
+      // Juan Esteban libre en h (30min) Y Mapeos libre en h+0.5 (1hora)
+      const jeLibre = !ocupadosJE.some(o => o >= h && o < h + 0.5);
+      const mapeosLibre = !ocupadosMapeos.some(o => o >= h + 0.5 && o < h + 1.5);
+      if (jeLibre && mapeosLibre) {
+        const hh = Math.floor(h); const mm = (h%1)*60;
+        const hh12 = hh > 12 ? hh-12 : hh === 0 ? 12 : hh;
+        slots.push({
+          label: `${hh12}:${mm===0?'00':'30'}${hh<12?'am':'pm'}`,
+          horaISO: `${String(hh).padStart(2,'0')}:${mm===0?'00':'30'}`
+        });
+      }
     }
   }
   return slots;
@@ -389,10 +424,10 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
   const cadena = `${referencia}${montoEnCentavos}COP${WOMPI_INTEGRITY_KEY}`;
   const firma = crypto.createHash('sha256').update(cadena).digest('hex');
   const params = new URLSearchParams({
-    'public-key': WOMPI_PUBLIC_KEY, currency: 'COP',
+    'public-key': WOMPI_PUBLIC_KEY, currency:'COP',
     'amount-in-cents': montoEnCentavos, reference: referencia,
-    'signature:integrity': firma, 'customer-data:email': email || '',
-    'customer-data:full-name': nombre || '',
+    'signature:integrity': firma, 'customer-data:email': email||'',
+    'customer-data:full-name': nombre||'',
     'customer-data:phone-number': (telefono||'').replace(/[\s+\(\)\-]/g,''),
     'redirect-url': 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso'
   });
@@ -403,7 +438,6 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random()*4000)+2000));
 
 async function getContact(contactId) {
-  // Intentar caché primero
   const cached = await getCachedContact(contactId);
   if (cached) return { contact: cached };
   const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
@@ -429,10 +463,10 @@ async function getLastMessage(conversationId) {
     });
     const data = await res.json();
     const messages = data.messages?.messages || data.messages || [];
-    if (!Array.isArray(messages) || messages.length === 0) return { body: '', id: null };
+    if (!Array.isArray(messages) || messages.length === 0) return { body:'', id:null };
     const last = messages.find(m => m.direction === 'inbound') || messages[0];
-    return { body: last?.body || '', id: last?.id || null };
-  } catch (err) { console.error('Error getLastMessage:', err); return { body: '', id: null }; }
+    return { body: last?.body||'', id: last?.id||null };
+  } catch (err) { console.error('Error getLastMessage:', err); return { body:'', id:null }; }
 }
 
 async function addTag(contactId, tag) {
@@ -441,18 +475,27 @@ async function addTag(contactId, tag) {
     headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ tags: [tag] })
   });
-  // Invalidar caché del contacto
-  await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [contactId]).catch(()=>{});
+  await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
 }
 
 async function sendMessage(conversationId, message, contactId) {
   const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'WhatsApp', conversationId, contactId, message })
+    body: JSON.stringify({ type:'WhatsApp', conversationId, contactId, message })
   });
   const data = await res.json();
   console.log('SEND MSG:', JSON.stringify(data));
+}
+
+// Enviar múltiples mensajes con delay entre ellos
+async function sendMessages(conversationId, messages, contactId) {
+  for (const msg of messages) {
+    await sendMessage(conversationId, msg, contactId);
+    if (messages.indexOf(msg) < messages.length - 1) {
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
 }
 
 // ─── WEBHOOK GHL ──────────────────────────────────────────────────────────────
@@ -471,7 +514,6 @@ app.post('/webhook/ghl', async (req, res) => {
     if (!conversationId) conversationId = await getConversationId(contactId);
     if (!conversationId) return res.status(400).json({ error: 'No conversación' });
 
-    // Deduplicación — saltar si ya procesamos este mensaje
     const convData = await getConversationData(conversationId);
     if (messageId && convData?.last_message_id === messageId) {
       console.log('Mensaje duplicado, saltando:', messageId);
@@ -495,7 +537,7 @@ app.post('/webhook/ghl', async (req, res) => {
     }
     if (!lastMsg) return res.json({ success: true, skipped: true });
 
-    // Triaje — leer del body si viene, si no usar el guardado en DB
+    // Triaje — leer del body o recuperar de DB
     const triajeFromBody = {
       triaje1: req.body['Triaje NHC - Principal dificultad'],
       triaje2: req.body['Triaje NHC - Tiempo observando'],
@@ -505,7 +547,6 @@ app.post('/webhook/ghl', async (req, res) => {
       triaje4: req.body['Triaje NHC - Área más afectada'],
       triaje5: req.body['Triaje NHC - Nivel de compromiso']
     };
-
     const savedTriaje = convData?.triaje || {};
     const triaje1 = triajeFromBody.triaje1 || savedTriaje.triaje1 || 'No respondido';
     const triaje2 = triajeFromBody.triaje2 || savedTriaje.triaje2 || 'No respondido';
@@ -516,10 +557,8 @@ app.post('/webhook/ghl', async (req, res) => {
     console.log('TRIAJE:', triaje);
 
     const nombre = contact.firstName || 'Hola';
-
-    // Historial desde DB
     let history = convData?.messages || [];
-    history.push({ role: 'user', content: [{ type: 'text', text: lastMsg }] });
+    history.push({ role:'user', content:[{ type:'text', text:lastMsg }] });
     if (history.length > 20) history = history.slice(-20);
 
     // Disponibilidad real
@@ -532,13 +571,13 @@ app.post('/webhook/ghl', async (req, res) => {
       while (diasOk < 3 && offset <= 14) {
         const f = new Date(hoy); f.setDate(hoy.getDate()+offset);
         const ds = f.getDay();
-        if (ds !== 0) {
+        if (HORARIOS_JUAN_ESTEBAN[ds]) {
           const fISO = f.toISOString().split('T')[0];
           let citas = await getCachedDisponibilidad(fISO);
           if (!citas) { citas = await getDisponibilidad(fISO); await setCachedDisponibilidad(fISO, citas); }
           const slots = calcularSlotsLibres(citas, fISO);
           if (slots.length > 0) {
-            disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0,3).map(s=>s.label).join(', ')}\n`;
+            disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0,4).map(s=>s.label).join(', ')}\n`;
             diasOk++;
           }
         }
@@ -547,94 +586,103 @@ app.post('/webhook/ghl', async (req, res) => {
       if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos días.';
     } catch (err) {
       console.error('Error disponibilidad:', err.message);
-      disponibilidadTexto = 'No consultada. Horarios generales: lunes 2-3:30pm, mar-vie 8:30am-4:30pm, sáb 8:30-10:30am.';
+      disponibilidadTexto = 'No consultada. Intenta más tarde.';
     }
 
-    const systemPrompt = `Eres Carolina, asesora experta de NHC Kids. Escribes por WhatsApp como una persona real — cálida, cercana y profesional.
+    const systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp — cálida, cercana, humana.
 
-CONTEXTO CRÍTICO:
-- ${nombre} es el PADRE o MADRE, no el niño. NUNCA digas "ayudar a ${nombre}".
-- Ya completaron el triaje. TIENES toda su información.
-- Tu primer mensaje SIEMPRE menciona algo del triaje.
+REGLAS DE FORMATO (CRÍTICO):
+- Máximo 3 líneas por mensaje
+- Si necesitas decir más cosas, DIVIDE en varios mensajes separados con ---
+- Sin asteriscos, sin negritas, sin listas con viñetas
+- Tono conversacional, como si fuera tu amigo
 
-TRIAJE DE ${nombre}:
+CONTEXTO:
+- ${nombre} es el PADRE/MADRE. El paciente es su HIJO/A.
+- Ya hicieron el triaje. Tienes su info.
+- Primer mensaje: menciona algo del triaje.
+
+TRIAJE:
 - Dificultad: ${triaje1}
 - Tiempo: ${triaje2}
 - Intentos: ${triaje3}
 - Área afectada: ${triaje4}
 - Compromiso: ${triaje5}
 
-NHC KIDS — NEUROMAPEO KIDS:
-Neuromapeo cerebral + Evaluación clínica + Devolución estratégica + Plan personalizado.
-Precio: $395.000 COP. Reserva: $100.000 (resto al llegar).
+NHC KIDS — NEUROMAPEO:
+Proceso: Pre-diagnóstico (30min con Juan Esteban) + Neuromapeo cerebral (1 hora).
+Precio total: $395.000. Reserva: $100.000 (resto al llegar).
 
-DISPONIBILIDAD REAL (incluye fecha YYYY-MM-DD entre paréntesis):
+DISPONIBILIDAD REAL (usa SOLO estos horarios, incluye fecha YYYY-MM-DD):
 ${disponibilidadTexto}
-REGLA: NUNCA confirmes horarios que el padre proponga si no están en esta lista.
+REGLA: NUNCA confirmes horarios que el padre proponga si no están en la lista.
 
-DATOS REQUERIDOS antes de confirmar (recoge natural):
-1. Edad del niño/a
-2. Género del niño/a
-3. Ocupación del padre/madre
+DATOS QUE NECESITAS DEL NIÑO/A (recoge de forma natural):
+1. Nombre completo del niño/a
+2. Edad
+3. Género (niño/niña)
+4. ¿Estudia actualmente? (sí/no)
 
-CUANDO TENGAS LOS 3 DATOS Y EL PADRE ELIJA HORARIO DE LA LISTA:
-Pide confirmación ("¿Confirmamos para ese día y hora?").
-Cuando confirme con sí/listo/perfecto/de acuerdo:
+CUANDO TENGAS LOS 4 DATOS Y EL PADRE CONFIRME UN HORARIO:
+Pide confirmación final ("¿Confirmamos para ese día y hora?").
+Cuando confirme, responde EXACTAMENTE así:
 [CITA_CONFIRMADA]
 fecha: <YYYY-MM-DD>
 hora: <HH:MM en 24h>
+nombre_nino: <nombre completo del niño>
 edad: <edad>
 genero: <Masculino/Femenino/Otro>
-ocupacion: <como lo dijo>
+estudia: <si/no>
 
-OBJECIONES:
-- Precio → "La reserva son solo $100.000 y el resto al llegar."
-- Horario no disponible → "Ese horario no lo tengo, pero puedo ofrecerte: [lista]"
+PREGUNTAS TÉCNICAS/CIENTÍFICAS:
+Responde con confianza. Tenemos más de 50 años de respaldo científico del qEEG.
+Estamos habilitados y certificados. No escales por esto.
 
-ESCALADO — SOLO con [ESCALAR] cuando:
-- Pida hablar explícitamente con un humano
-- Sea una queja o situación de crisis
+ESCALADO — SOLO con [ESCALAR] si:
+- Pide hablar explícitamente con un humano
+- Es una queja grave
 
-NO ESCALAR por:
-- Preguntas sobre evidencia científica → responde con confianza
-- Preguntas sobre habilitación → "Sí, estamos habilitados y certificados"
-- Dudas sobre el proceso → explica
-- Preguntas sobre precio → maneja
-
-REGLAS:
-- Máximo 3 líneas continuas SIN líneas en blanco
-- Tono humano WhatsApp
+REGLAS FINALES:
 - NUNCA digas que eres IA
-- NUNCA menciones datos bancarios ni transferencias
+- NUNCA menciones datos bancarios
 - Solo español`;
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 400, system: systemPrompt, messages: history })
+      method:'POST',
+      headers:{ 'x-api-key':ANTHROPIC_KEY, 'anthropic-version':'2023-06-01', 'Content-Type':'application/json' },
+      body: JSON.stringify({ model:'claude-sonnet-4-5', max_tokens:500, system:systemPrompt, messages:history })
     });
 
     const claudeData = await claudeRes.json();
     console.log('CLAUDE:', JSON.stringify(claudeData));
-    const reply = claudeData.content[0].text.split('\n').filter(l => l.trim() !== '').join('\n');
+    const rawReply = claudeData.content[0].text;
 
     // ─── CITA CONFIRMADA ──────────────────────────────────────────────────────
-    if (reply.includes('[CITA_CONFIRMADA]')) {
-      const extract = f => { const m = reply.match(new RegExp(`${f}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
-      const fechaCita = extract('fecha'), horaCita = extract('hora'), edad = extract('edad');
-      const genero = extract('genero'), ocupacion = extract('ocupacion');
-      console.log('CITA CONFIRMADA:', { fechaCita, horaCita, edad, genero, ocupacion });
+    if (rawReply.includes('[CITA_CONFIRMADA]')) {
+      const extract = f => { const m = rawReply.match(new RegExp(`${f}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
+      const fechaCita  = extract('fecha');
+      const horaCita   = extract('hora');
+      const nombreNino = extract('nombre_nino');
+      const edad       = extract('edad');
+      const genero     = extract('genero');
+      const estudiaSt  = extract('estudia').toLowerCase();
+      const estudia    = estudiaSt === 'si' || estudiaSt === 'sí';
+
+      console.log('CITA CONFIRMADA:', { fechaCita, horaCita, nombreNino, edad, genero, estudia });
+
+      // Guardar campos del niño en GHL
+      await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: triaje1 });
 
       const referencia = `NHCK-${contactId}-${Date.now()}`;
-      await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita, edad, genero, ocupacion, sintoma: triaje1, nombre });
+      await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
+        edad, genero, ocupacion: mapearOcupacionNino(estudia, edad), sintoma: triaje1, nombreNino, nombre });
       await logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
 
       let linkPago = null;
       try {
-        linkPago = await generarLinkPago({ referencia, monto: 100000,
+        linkPago = await generarLinkPago({ referencia, monto:100000,
           nombre: `${contact.firstName||''} ${contact.lastName||''}`.trim(),
           email: contact.email||'', telefono: contact.phone||'' });
-        console.log('LINK PAGO:', linkPago);
       } catch (err) { console.error('Error link pago:', err.message); }
 
       const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -644,37 +692,41 @@ REGLAS:
       const hN = parseInt(hh);
       const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
 
-      // Guardar historial con triaje
       await saveConversationData(conversationId, contactId, history, triaje, 'esperando_pago', lastMsgId);
-
       await humanDelay();
-      if (linkPago) {
-        await sendMessage(conversationId,
-          `¡Perfecto ${nombre}! Tu cita queda para el ${fechaL} a las ${horaL} 🎉\nPara confirmar el cupo haz la reserva de $100.000 aquí 👇\n${linkPago}`, contactId);
-      } else {
-        await sendMessage(conversationId,
-          `¡Perfecto ${nombre}! Tu cita queda para el ${fechaL} a las ${horaL} 🎉\nEn un momento un asesor te envía los datos para la reserva 🙌`, contactId);
-        await addTag(contactId, 'escalado nhck');
-      }
-      return res.json({ success: true, citaPendientePago: true, referencia });
+
+      const mensajes = linkPago
+        ? [`¡Perfecto ${nombre}! Cita agendada para el ${fechaL} a las ${horaL} 🎉`,
+           `Para confirmar el cupo haz la reserva de $100.000 aquí 👇\n${linkPago}`]
+        : [`¡Perfecto ${nombre}! Cita agendada para el ${fechaL} a las ${horaL} 🎉`,
+           `En un momento un asesor te envía los datos para la reserva de $100.000 🙌`];
+
+      await sendMessages(conversationId, mensajes, contactId);
+      if (!linkPago) await addTag(contactId, 'escalado nhck');
+      return res.json({ success:true, citaPendientePago:true, referencia });
     }
 
     // ─── ESCALAR ──────────────────────────────────────────────────────────────
-    if (reply.includes('[ESCALAR]')) {
+    if (rawReply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
       await logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
       await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId);
       await humanDelay();
-      await sendMessage(conversationId, 'En un momento un asesor te va a ayudar con esto 🙌', contactId);
-      return res.json({ success: true, escalated: true });
+      await sendMessage(conversationId, 'En un momento un asesor te va a ayudar 🙌', contactId);
+      return res.json({ success:true, escalated:true });
     }
 
-    // ─── RESPUESTA NORMAL ──────────────────────────────────────────────────────
-    history.push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
+    // ─── RESPUESTA NORMAL (puede ser múltiples mensajes) ──────────────────────
+    const reply = rawReply.split('\n').filter(l => l.trim() !== '').join('\n');
+
+    // Dividir por --- si Carolina envió múltiples mensajes
+    const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
+
+    history.push({ role:'assistant', content:[{ type:'text', text:reply }] });
     await saveConversationData(conversationId, contactId, history, triaje, 'activo', lastMsgId);
     await humanDelay();
-    await sendMessage(conversationId, reply, contactId);
-    res.json({ success: true, reply });
+    await sendMessages(conversationId, partes, contactId);
+    res.json({ success:true, reply });
 
   } catch (error) {
     console.error('Error webhook GHL:', error);
@@ -687,12 +739,11 @@ app.post('/webhook/wompi', async (req, res) => {
   try {
     console.log('WOMPI WEBHOOK:', JSON.stringify(req.body));
     const transaccion = req.body?.data?.transaction;
-    if (!transaccion) return res.json({ received: true });
+    if (!transaccion) return res.json({ received:true });
 
     const { reference, status } = transaccion;
     console.log('WOMPI TX:', { reference, status });
 
-    // Verificar firma
     const checksum = req.body?.signature?.checksum;
     const properties = req.body?.signature?.properties || [];
     if (checksum && properties.length > 0) {
@@ -704,28 +755,30 @@ app.post('/webhook/wompi', async (req, res) => {
       const firmaCalc = crypto.createHash('sha256').update(cadena).digest('hex');
       if (firmaCalc !== checksum) {
         console.error('Firma Wompi inválida');
-        return res.status(401).json({ error: 'Firma inválida' });
+        return res.status(401).json({ error:'Firma inválida' });
       }
     }
 
     if (status !== 'APPROVED') {
-      console.log('Pago no aprobado:', status);
       await logEvent(null, null, 'pago_rechazado', { reference, status });
-      return res.json({ received: true });
+      return res.json({ received:true });
     }
 
     const datos = await getPendingPayment(reference);
-    if (!datos) { console.log('Referencia no encontrada:', reference); return res.json({ received: true }); }
+    if (!datos) { console.log('Referencia no encontrada:', reference); return res.json({ received:true }); }
 
-    const { contactId, conversationId, contact, fechaCita, horaCita, edad, genero, ocupacion, sintoma, nombre } = datos;
-
+    const { contactId, conversationId, contact, fechaCita, horaCita, edad, genero, ocupacion, sintoma, nombreNino, nombre } = datos;
     await logEvent(contactId, conversationId, 'pago_aprobado', { reference, fechaCita, horaCita });
 
     let resultado = null;
     try {
-      resultado = await crearEnAnamnesis({ nombre: contact.firstName||'', apellido: contact.lastName||'',
-        email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
-        edad, sintoma, genero, ocupacion });
+      resultado = await crearEnAnamnesis({
+        nombreNino: nombreNino || contact.firstName || '',
+        apellidoNino: '',
+        email: contact.email||'', movil: contact.phone||'',
+        contactIdGHL: contactId, edad, sintoma, genero,
+        estudia: ocupacion === 'Estudiante de colegio'
+      });
       console.log('ANAMNESIS OK:', JSON.stringify(resultado));
     } catch (err) { console.error('Error Anamnesis:', err.message); }
 
@@ -745,10 +798,12 @@ app.post('/webhook/wompi', async (req, res) => {
 
     await addTag(contactId, 'escalado nhck');
     await deletePendingPayment(reference);
-    await sendMessage(conversationId,
-      `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉\nNos vemos pronto, recuerda llegar 10 minutos antes 🙌`, contactId);
+    await sendMessages(conversationId, [
+      `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
+      `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`
+    ], contactId);
 
-    return res.json({ received: true });
+    return res.json({ received:true });
   } catch (error) {
     console.error('Error webhook Wompi:', error);
     res.status(500).json({ error: error.message });
@@ -756,7 +811,7 @@ app.post('/webhook/wompi', async (req, res) => {
 });
 
 app.get('/pago-exitoso', (req, res) => {
-  res.send('<h2>¡Pago recibido! Tu cita está confirmada. Puedes cerrar esta ventana.</h2>');
+  res.send('<h2 style="font-family:sans-serif;text-align:center;margin-top:3rem">¡Pago recibido! Tu cita está confirmada. Puedes cerrar esta ventana.</h2>');
 });
 
 const PORT = process.env.PORT || 3000;
