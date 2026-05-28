@@ -271,13 +271,21 @@ async function buscarContactoAnamnesis(movil, email) {
   try {
     const token = await getZohoAccessToken();
     const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-    if (movilLimpio) {
+    // Buscar con y sin código de país
+    const variantes = [movilLimpio];
+    if (movilLimpio.startsWith('57') && movilLimpio.length === 12) variantes.push(movilLimpio.slice(2));
+    if (!movilLimpio.startsWith('57') && movilLimpio.length === 10) variantes.push('57' + movilLimpio);
+
+    for (const tel of variantes) {
       const res = await fetch(
-        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Movil%3D%22${movilLimpio}%22&max_records=1`,
+        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Movil%3D%22${tel}%22&max_records=1`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const data = await res.json();
-      if (data?.data?.length > 0) return data.data[0].ID;
+      if (data?.data?.length > 0) {
+        console.log('Contacto existente por móvil:', data.data[0].ID);
+        return data.data[0].ID;
+      }
     }
     if (email) {
       const res = await fetch(
@@ -285,7 +293,10 @@ async function buscarContactoAnamnesis(movil, email) {
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const data = await res.json();
-      if (data?.data?.length > 0) return data.data[0].ID;
+      if (data?.data?.length > 0) {
+        console.log('Contacto existente por email:', data.data[0].ID);
+        return data.data[0].ID;
+      }
     }
     return null;
   } catch (err) { console.error('Error buscando contacto:', err.message); return null; }
