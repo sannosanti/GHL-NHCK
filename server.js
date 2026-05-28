@@ -1,11 +1,127 @@
 const express = require('express');
 const fetch = require('node-fetch');
+const { Pool } = require('pg');
 const app = express();
 app.use(express.json());
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GHL_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
+
+// ─── POSTGRESQL ───────────────────────────────────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      conversation_id TEXT PRIMARY KEY,
+      contact_id TEXT,
+      messages JSONB DEFAULT '[]',
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS pending_payments (
+      referencia TEXT PRIMARY KEY,
+      contact_id TEXT,
+      conversation_id TEXT,
+      contact_data JSONB,
+      fecha_cita TEXT,
+      hora_cita TEXT,
+      edad TEXT,
+      genero TEXT,
+      ocupacion TEXT,
+      sintoma TEXT,
+      nombre TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS availability_cache (
+      fecha_iso TEXT PRIMARY KEY,
+      citas JSONB DEFAULT '[]',
+      cached_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  console.log('Base de datos inicializada ✓');
+}
+
+// Helpers DB conversaciones
+async function getHistory(conversationId) {
+  try {
+    const res = await pool.query('SELECT messages FROM conversations WHERE conversation_id = $1', [conversationId]);
+    return res.rows[0]?.messages || [];
+  } catch { return []; }
+}
+
+async function saveHistory(conversationId, contactId, messages) {
+  try {
+    await pool.query(`
+      INSERT INTO conversations (conversation_id, contact_id, messages, updated_at)
+      VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (conversation_id) DO UPDATE SET messages = $3, updated_at = NOW()
+    `, [conversationId, contactId, JSON.stringify(messages)]);
+  } catch (err) { console.error('Error guardando historial:', err.message); }
+}
+
+// Helpers DB pagos pendientes
+async function savePendingPayment(referencia, datos) {
+  try {
+    await pool.query(`
+      INSERT INTO pending_payments (referencia, contact_id, conversation_id, contact_data, fecha_cita, hora_cita, edad, genero, ocupacion, sintoma, nombre)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT (referencia) DO UPDATE SET fecha_cita=$5, hora_cita=$6
+    `, [referencia, datos.contactId, datos.conversationId, JSON.stringify(datos.contact),
+        datos.fechaCita, datos.horaCita, datos.edad, datos.genero, datos.ocupacion, datos.sintoma, datos.nombre]);
+  } catch (err) { console.error('Error guardando pago pendiente:', err.message); }
+}
+
+async function getPendingPayment(referencia) {
+  try {
+    const res = await pool.query('SELECT * FROM pending_payments WHERE referencia = $1', [referencia]);
+    if (!res.rows[0]) return null;
+    const row = res.rows[0];
+    return {
+      contactId: row.contact_id,
+      conversationId: row.conversation_id,
+      contact: row.contact_data,
+      fechaCita: row.fecha_cita,
+      horaCita: row.hora_cita,
+      edad: row.edad,
+      genero: row.genero,
+      ocupacion: row.ocupacion,
+      sintoma: row.sintoma,
+      nombre: row.nombre
+    };
+  } catch { return null; }
+}
+
+async function deletePendingPayment(referencia) {
+  try { await pool.query('DELETE FROM pending_payments WHERE referencia = $1', [referencia]); }
+  catch (err) { console.error('Error borrando pago:', err.message); }
+}
+
+// Helpers DB caché disponibilidad
+async function getCachedDisponibilidad(fechaISO) {
+  try {
+    const res = await pool.query(
+      "SELECT citas FROM availability_cache WHERE fecha_iso = $1 AND cached_at > NOW() - INTERVAL '1 hour'",
+      [fechaISO]
+    );
+    return res.rows[0]?.citas || null;
+  } catch { return null; }
+}
+
+async function setCachedDisponibilidad(fechaISO, citas) {
+  try {
+    await pool.query(`
+      INSERT INTO availability_cache (fecha_iso, citas, cached_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (fecha_iso) DO UPDATE SET citas = $2, cached_at = NOW()
+    `, [fechaISO, JSON.stringify(citas)]);
+  } catch (err) { console.error('Error guardando caché:', err.message); }
+}
+
+
 
 const ZOHO_CLIENT_ID = process.env.ZOHO_CLIENT_ID || '1000.YU4EF3FZ0RS8NAEMKVPVNTS7DU23WK';
 const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET || 'fc1adeeb598f9a6a7d38912922bfffcb1db6857203';
@@ -336,9 +452,6 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
 
 
 
-const conversationHistory = {};
-const disponibilidadCache = {};
-
 const humanDelay = () => new Promise(resolve =>
   setTimeout(resolve, Math.floor(Math.random() * 4000) + 2000)
 );
@@ -429,11 +542,10 @@ app.post('/webhook/ghl', async (req, res) => {
     const triaje5 = req.body['Triaje NHC - Nivel de compromiso'] || 'No respondido';
     console.log('TRIAJE DATA:', { triaje1, triaje2, triaje3, triaje4, triaje5 });
 
-    if (!conversationHistory[conversationId]) conversationHistory[conversationId] = [];
-    conversationHistory[conversationId].push({ role: 'user', content: [{ type: 'text', text: lastMessage }] });
-    if (conversationHistory[conversationId].length > 20) {
-      conversationHistory[conversationId] = conversationHistory[conversationId].slice(-20);
-    }
+    // Historial desde PostgreSQL
+    let history = await getHistory(conversationId);
+    history.push({ role: 'user', content: [{ type: 'text', text: lastMessage }] });
+    if (history.length > 20) history = history.slice(-20);
 
     let disponibilidadTexto = '';
     try {
@@ -448,10 +560,12 @@ app.post('/webhook/ghl', async (req, res) => {
         const diaSemana = fecha.getDay();
         if (diaSemana !== 0) {
           const fechaISO = fecha.toISOString().split('T')[0];
-          if (!disponibilidadCache[fechaISO]) {
-            disponibilidadCache[fechaISO] = await getDisponibilidad(fechaISO);
+          let citas = await getCachedDisponibilidad(fechaISO);
+          if (!citas) {
+            citas = await getDisponibilidad(fechaISO);
+            await setCachedDisponibilidad(fechaISO, citas);
           }
-          const slots = calcularSlotsLibres(disponibilidadCache[fechaISO], fechaISO);
+          const slots = calcularSlotsLibres(citas, fechaISO);
           if (slots.length > 0) {
             const labelDia = `${diasNombres[diaSemana]} ${fecha.getDate()} de ${mesesNombres[fecha.getMonth()]} (${fechaISO})`;
             disponibilidadTexto += `${labelDia}: ${slots.slice(0,3).map(s => s.label).join(', ')}\n`;
@@ -523,7 +637,7 @@ REGLAS:
         model: 'claude-sonnet-4-5',
         max_tokens: 400,
         system: systemPrompt,
-        messages: conversationHistory[conversationId]
+        messages: history
       })
     });
 
@@ -545,8 +659,8 @@ REGLAS:
       // Generar referencia única
       const referencia = `NHCK-${contactId}-${Date.now()}`;
 
-      // Guardar datos pendientes de pago
-      pendingPayments[referencia] = {
+      // Guardar datos pendientes en PostgreSQL
+      await savePendingPayment(referencia, {
         contactId,
         conversationId,
         contact,
@@ -557,7 +671,7 @@ REGLAS:
         ocupacion,
         sintoma: triaje1,
         nombre
-      };
+      });
 
       // Generar link de pago Wompi
       let linkPago = null;
@@ -603,11 +717,11 @@ REGLAS:
       return res.json({ success: true, escalated: true });
     }
 
-    conversationHistory[conversationId].push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
+    history.push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
+    await saveHistory(conversationId, contactId, history);
     await humanDelay();
     await sendMessage(conversationId, reply, contactId);
     res.json({ success: true, reply });
-
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ error: error.message });
@@ -650,8 +764,8 @@ app.post('/webhook/wompi', async (req, res) => {
       return res.json({ received: true });
     }
 
-    // Buscar datos pendientes
-    const datos = pendingPayments[reference];
+    // Buscar datos pendientes en PostgreSQL
+    const datos = await getPendingPayment(reference);
     if (!datos) {
       console.log('Referencia no encontrada:', reference);
       return res.json({ received: true });
@@ -702,8 +816,8 @@ app.post('/webhook/wompi', async (req, res) => {
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaLegible} a las ${horaLegible} 🎉\nNos vemos pronto, recuerda llegar 10 minutos antes 🙌`,
       contactId);
 
-    // Limpiar pago pendiente
-    delete pendingPayments[reference];
+    // Limpiar pago pendiente de PostgreSQL
+    await deletePendingPayment(reference);
 
     return res.json({ received: true });
   } catch (error) {
@@ -718,4 +832,9 @@ app.get('/pago-exitoso', (req, res) => {
 
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
+initDB().then(() => {
+  app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
+}).catch(err => {
+  console.error('Error iniciando DB:', err);
+  process.exit(1);
+});
