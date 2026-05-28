@@ -321,7 +321,7 @@ async function crearEnAnamnesis({ nombreNino, apellidoNino, email, movil, contac
 }
 
 // ─── ZOHO CALENDARIO ──────────────────────────────────────────────────────────
-async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contactoID }) {
+async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contactoID, nombreNino }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
 
@@ -348,7 +348,8 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const fin2M = (ini2M+60)%60;
 
   const base = { Tipo:'Presencial', Contacto: contactoID||'', Email: email||'',
-    Estado:'Programada', Observaciones:'NHC Kids - Agendado por Carolina IA', Dia: diaStr };
+    Estado:'Programada', Observaciones:'NHC Kids - Agendado por Carolina IA',
+    Dia: diaStr, Nombre: nombreNino || '' };
 
   const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
     method:'POST', headers, body: JSON.stringify({ data: { ...base,
@@ -824,7 +825,8 @@ app.post('/webhook/wompi', async (req, res) => {
 
     try {
       const citas = await crearCitasCalendario({ movil: contact.phone||'', email: contact.email||'',
-        fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID||null });
+        fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID||null,
+        nombreNino: datos.nombreNino || '' });
       console.log('CITAS OK:', JSON.stringify(citas));
       await logEvent(contactId, conversationId, 'citas_creadas', citas);
       // Invalidar caché del día para que otros clientes vean disponibilidad actualizada
