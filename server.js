@@ -1390,7 +1390,7 @@ NIT: 901164425`,
         await humanDelay();
         await sendMessages(conversationId, [
           `Aquí está el QR para pagar $100.000 👇
-https://miraculous-solace-production-47dd.up.railway.app/public/pagosQR.jpeg`,
+https://neurohackingcenter.co/wp-content/uploads/2026/05/WhatsApp-Image-2026-05-29-at-11.00.03-AM.jpeg`,
           `Ábrelo, toma captura y escanéalo con tu app bancaria 📱
 O usa la llave Bancolombia: 0090435866`,
           `Cuando pagues envíame el comprobante aquí y confirmo tu cita 📸`
