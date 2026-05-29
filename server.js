@@ -634,13 +634,29 @@ app.post('/webhook/contact-deleted', async (req, res) => {
 // ─── WEBHOOK GHL (mensajes WhatsApp) ─────────────────────────────────────────
 app.post('/webhook/ghl', async (req, res) => {
   try {
+    // Log completo si es imagen para depuración
+    const msgType = req.body.message?.type || req.body.type || '';
+    if (msgType === 'IMAGE' || req.body.message?.attachments?.length > 0) {
+      console.log('WEBHOOK IMAGEN COMPLETO:', JSON.stringify(req.body));
+    }
+
     const contactId = req.body.contactId || req.body.customData?.contactId || req.body.contact_id || req.body.contact?.id;
     let conversationId = req.body.conversationId || req.body.customData?.conversationId || '';
     const messageBody = req.body.message?.body || req.body.customData?.message || '';
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
+    const messageType = req.body.message?.type || req.body.type || 'text';
+    const attachments = req.body.message?.attachments || req.body.attachments || [];
 
     if (!contactId) return res.status(400).json({ error: 'Faltan datos' });
-    if (!conversationId) conversationId = await getConversationId(contactId);
+    if (!conversationId) {
+      // GHL a veces tarda en crear la conversación — reintentar hasta 3 veces
+      for (let i = 0; i < 3; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        conversationId = await getConversationId(contactId);
+        if (conversationId) break;
+        console.log(`Reintento ${i+1}/3 buscando conversación para ${contactId}`);
+      }
+    }
     if (!conversationId) return res.status(400).json({ error: 'No conversación' });
 
     // Deduplicación
