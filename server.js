@@ -819,12 +819,12 @@ app.post('/webhook/ghl', async (req, res) => {
     const imageUrl = req.body.customData?.attachments || null;
     const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
 
-    // ─── DEDUPLICACIÓN POR TIEMPO ─────────────────────────────────────────────
-    // Evitar procesar el mismo mensaje dos veces (GHL dispara webhook doble)
-    // Deduplicación en memoria por conversationId — ignora segundo webhook de GHL
-    const dedupKey = `proc_${conversationId}`;
+    // ─── DEDUPLICACIÓN ────────────────────────────────────────────────────────
+    // GHL dispara 2-3 webhooks por mensaje. Bloqueamos por contactId+mensaje 6 segundos.
+    const msgSnippet = (messageBody||'').trim().substring(0,15) || 'nomsg';
+    const dedupKey = `proc_${contactId}_${msgSnippet}`;
     if (messageBuffers[dedupKey]) {
-      console.log(`DEDUP: webhook doble ignorado para ${conversationId}`);
+      console.log(`DEDUP: ignorado (${dedupKey})`);
       return;
     }
     messageBuffers[dedupKey] = true;
