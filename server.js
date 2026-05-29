@@ -616,6 +616,66 @@ app.get('/reset/:conversationId', async (req, res) => {
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
+// ─── ENDPOINT MODO TESTER ────────────────────────────────────────────────────
+// Salta el triaje completo y pone el contacto directo en esperando_pago con datos de prueba
+app.get('/test-pago/:contactId', async (req, res) => {
+  try {
+    const contactId = req.params.contactId;
+
+    // Limpiar estado anterior
+    await limpiarContactoDB(contactId);
+    try {
+      await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: ['escalado nhck'] })
+      });
+    } catch(e) {}
+
+    // Obtener conversationId
+    const convRes = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${GHL_LOCATION_ID}`, {
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
+    });
+    const convData = await convRes.json();
+    const conversationId = convData.conversations?.[0]?.id;
+    if (!conversationId) return res.status(400).send('No se encontró conversación para este contacto');
+
+    // Datos de prueba
+    const triaje = { triaje1: 'Atención/concentración', triaje2: 'Más de 1 año', triaje3: 'Nada aún' };
+    const fechaCita = '2026-06-02';
+    const horaCita = '14:00';
+    const nombreNino = 'Felipe Test';
+    const referencia = `NHCK-TEST-${contactId}-${Date.now()}`;
+
+    // Obtener datos del contacto
+    const contactRes = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
+    });
+    const contactData = await contactRes.json();
+    const contact = contactData.contact || {};
+
+    // Guardar pending payment
+    await savePendingPayment(referencia, {
+      contactId, conversationId, contact,
+      fechaCita, horaCita, edad: '10', genero: 'Masculino',
+      ocupacion: 'Estudiante de colegio', sintoma: 'Atención/concentración',
+      nombreNino, nombre: contact.firstName || 'Tester', paymentLinkId: null
+    });
+
+    // Guardar estado esperando_pago
+    await saveConversationData(conversationId, contactId, [], triaje, 'esperando_pago', null, contact.phone || '');
+
+    res.send(`✓ Modo tester activado para ${contactId}<br>
+      Estado: esperando_pago<br>
+      Niño: ${nombreNino}<br>
+      Cita: ${fechaCita} ${horaCita}<br>
+      Referencia: ${referencia}<br><br>
+      Ahora escribe en WhatsApp para probar el medio de pago.`);
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 app.get('/reset-contact/:contactId', async (req, res) => {
   try {
     await limpiarContactoDB(req.params.contactId);
