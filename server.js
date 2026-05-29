@@ -21,18 +21,14 @@ const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7
 const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
 const WOMPI_BASE_URL = 'https://sandbox.wompi.co/v1';
 
-// Pipeline NHC Kids
 const GHL_PIPELINE_ID = 'GFfv1dCSQAAZ70MNHsfM';
 const STAGE_INICIO = '24270da1-9917-4ba7-bf5a-35b226b2687f';
 const STAGE_INFO_COMPLETA = '2c04e0ac-0429-4300-bf18-6f75cabe8953';
 const STAGE_LINK_PAGO = '87c45501-386f-418e-95e7-6975b20559a6';
 const STAGE_PAGO_PARCIAL = '18571c0c-5c8f-40f1-9440-e865670ac108';
 
-// Timer de inactividad por conversación
 const inactivityTimers = {};
 
-// Horarios disponibles NHC Kids (aplica para Juan Esteban Y Mapeos)
-// 0=dom, 1=lun, 2=mar, 3=mie, 4=jue, 5=vie, 6=sab
 const HORARIOS_NHCK = {
   1: [{ ini: 14, fin: 15.5 }],
   2: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],
@@ -41,6 +37,11 @@ const HORARIOS_NHCK = {
   5: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 15.5 }],
   6: [{ ini: 8.5, fin: 10.5 }]
 };
+
+// Opciones del triaje para mapeo
+const TRIAJE_P1 = ['Atención/concentración', 'Bajo rendimiento', 'Desregulación emocional', 'Conducta impulsiva', 'Ansiedad/inseguridad', 'Otro'];
+const TRIAJE_P2 = ['Menos de 3 meses', '3 a 6 meses', '6 a 12 meses', 'Más de 1 año'];
+const TRIAJE_P3 = ['Psicología', 'Neuropsicología', 'Apoyo escolar', 'Medicación', 'Varias sin resultado', 'Nada aún', 'Otro'];
 
 // ─── POSTGRESQL ───────────────────────────────────────────────────────────────
 const pool = new Pool({
@@ -55,7 +56,7 @@ async function initDB() {
       contact_id TEXT,
       messages JSONB DEFAULT '[]',
       triaje JSONB DEFAULT '{}',
-      estado TEXT DEFAULT 'activo',
+      estado TEXT DEFAULT 'nuevo',
       last_message_id TEXT,
       updated_at TIMESTAMP DEFAULT NOW()
     );
@@ -72,6 +73,7 @@ async function initDB() {
       sintoma TEXT,
       nombre_nino TEXT,
       nombre TEXT,
+      payment_link_id TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS availability_cache (
@@ -93,7 +95,6 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
-  // Agregar columnas que pueden faltar en tablas existentes
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre_nino TEXT`).catch(()=>{});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre TEXT`).catch(()=>{});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_link_id TEXT`).catch(()=>{});
@@ -152,11 +153,9 @@ async function savePendingPayment(referencia, datos) {
 
 async function getPendingPayment(reference) {
   try {
-    // Buscar por referencia exacta primero
     let res = await pool.query('SELECT * FROM pending_payments WHERE referencia=$1', [reference]);
-    // Si no encuentra, buscar por payment_link_id (Wompi cambia la referencia en payment links)
     if (!res.rows[0]) {
-      const linkId = reference.split('_').slice(0, 2).join('_'); // test_bFmVkE
+      const linkId = reference.split('_').slice(0, 2).join('_');
       res = await pool.query('SELECT * FROM pending_payments WHERE payment_link_id=$1', [linkId]);
     }
     if (!res.rows[0]) return null;
@@ -226,17 +225,13 @@ function mapearSintoma(s) {
   if (s.includes('ansiedad') || s.includes('miedo') || s.includes('inseguridad')) return 'Ansiedad';
   if (s.includes('autis')) return 'Autismo';
   if (s.includes('autoestima') || s.includes('confianza')) return 'Autoestima';
-  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('tdah')) return 'Déficit de atención';
+  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('atencion') || s.includes('tdah') || s.includes('concentra')) return 'Déficit de atención';
   if (s.includes('depres')) return 'Depresión1';
-  if (s.includes('cognitiv') || s.includes('memoria')) return 'Desarrollo Cognitivo';
-  if (s.includes('desarrollo personal')) return 'Desarrollo personal';
-  if (s.includes('aprendizaje') || s.includes('escolar') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
-  if (s.includes('pareja')) return 'Dificultades de pareja';
-  if (s.includes('duelo') || s.includes('pérdida')) return 'Duelo';
+  if (s.includes('rendimiento') || s.includes('aprendizaje') || s.includes('escolar') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
+  if (s.includes('desregul') || s.includes('emocional')) return 'Ansiedad';
+  if (s.includes('conduct') || s.includes('impulsiv')) return 'TOD (Transtorno Oposicion...)';
   if (s.includes('estrés') || s.includes('estres')) return 'Estrés';
   if (s.includes('toc') || s.includes('obsesiv')) return 'TOC (Transtorno Obsesivo C...)';
-  if (s.includes('tod') || s.includes('oposicion') || s.includes('desafiante')) return 'TOD (Transtorno Oposicion...)';
-  if (!s || s === 'no respondido') return 'Sin información';
   return 'Otros';
 }
 
@@ -247,15 +242,11 @@ function mapearGenero(g) {
   return 'Otro';
 }
 
-function mapearOcupacionNino(estudia, edad) {
-  const edadNum = parseInt(edad) || 0;
-  if (estudia === true || estudia === 'si' || estudia === 'sí' || estudia === 'yes') {
-    return 'Estudiante de colegio';
-  }
-  return 'N.A';
+function mapearOcupacionNino(estudia) {
+  return (estudia === true || estudia === 'si' || estudia === 'sí') ? 'Estudiante de colegio' : 'N.A';
 }
 
-// ─── GHL: GUARDAR CAMPOS DEL NIÑO ────────────────────────────────────────────
+// ─── GHL: GUARDAR CAMPOS NIÑO ─────────────────────────────────────────────────
 async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNino, estudia, sintoma }) {
   try {
     const customFields = [
@@ -270,9 +261,8 @@ async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNin
       headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ customFields })
     });
-    console.log('Campos niño guardados en GHL');
-    // Invalidar caché
     await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
+    console.log('Campos niño guardados en GHL');
   } catch (err) { console.error('Error guardando campos niño GHL:', err.message); }
 }
 
@@ -281,21 +271,16 @@ async function buscarContactoAnamnesis(movil, email) {
   try {
     const token = await getZohoAccessToken();
     const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-    // Buscar con y sin código de país
     const variantes = [movilLimpio];
     if (movilLimpio.startsWith('57') && movilLimpio.length === 12) variantes.push(movilLimpio.slice(2));
     if (!movilLimpio.startsWith('57') && movilLimpio.length === 10) variantes.push('57' + movilLimpio);
-
     for (const tel of variantes) {
       const res = await fetch(
         `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Movil%3D%22${tel}%22&max_records=1`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const data = await res.json();
-      if (data?.data?.length > 0) {
-        console.log('Contacto existente por móvil:', data.data[0].ID);
-        return data.data[0].ID;
-      }
+      if (data?.data?.length > 0) { console.log('Contacto existente:', data.data[0].ID); return data.data[0].ID; }
     }
     if (email) {
       const res = await fetch(
@@ -303,30 +288,24 @@ async function buscarContactoAnamnesis(movil, email) {
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const data = await res.json();
-      if (data?.data?.length > 0) {
-        console.log('Contacto existente por email:', data.data[0].ID);
-        return data.data[0].ID;
-      }
+      if (data?.data?.length > 0) { console.log('Contacto existente por email:', data.data[0].ID); return data.data[0].ID; }
     }
     return null;
   } catch (err) { console.error('Error buscando contacto:', err.message); return null; }
 }
 
-async function crearEnAnamnesis({ nombreNino, apellidoNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
+async function crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
   const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-  const ocupacion = mapearOcupacionNino(estudia, edad);
-
+  const ocupacion = mapearOcupacionNino(estudia);
   let contactoID = await buscarContactoAnamnesis(movilLimpio, email);
   if (!contactoID) {
     const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Contactos', {
       method: 'POST', headers,
       body: JSON.stringify({ data: {
-        Nombre_Completo: `${nombreNino} ${apellidoNino || ''}`.trim(),
-        Email: email || '', Movil: movilLimpio,
-        CRM: contactIdGHL || '', Edad: edad || '',
-        Sintoma_o_necesidad: mapearSintoma(sintoma),
+        Nombre_Completo: nombreNino || '', Email: email || '', Movil: movilLimpio,
+        CRM: contactIdGHL || '', Edad: edad || '', Sintoma_o_necesidad: mapearSintoma(sintoma),
         Genero: mapearGenero(genero), Ocupaci_n: ocupacion
       }})
     });
@@ -335,7 +314,6 @@ async function crearEnAnamnesis({ nombreNino, apellidoNino, email, movil, contac
     contactoID = data?.data?.ID;
     if (!contactoID) throw new Error('No ID contacto: ' + JSON.stringify(data));
   }
-
   const resProceso = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Procesos', {
     method: 'POST', headers,
     body: JSON.stringify({ data: {
@@ -353,12 +331,10 @@ async function crearEnAnamnesis({ nombreNino, apellidoNino, email, movil, contac
 async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contactoID, nombreNino }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
-
   let hIni, mIni;
   if (typeof horaInicio === 'string' && horaInicio.includes(':')) {
     [hIni, mIni] = horaInicio.split(':').map(Number);
   } else { hIni = Math.floor(horaInicio); mIni = (horaInicio % 1) * 60; }
-
   const meses = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const d = new Date(fechaISO + 'T00:00:00');
   const dd = String(d.getDate()).padStart(2,'0');
@@ -367,38 +343,25 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const pad = n => String(n).padStart(2,'0');
   const fmt = (h,m) => `${dd}-${mmm}-${yyyy} ${pad(h)}:${pad(m)}:00`;
   const diaStr = `${dd}-${mmm}-${yyyy}`;
-
-  // Cita 1: Pre-diagnóstico 30min con Juan Esteban
-  const fin1H = mIni+30>=60 ? hIni+1 : hIni;
-  const fin1M = (mIni+30)%60;
-  // Cita 2: Neuromapeo 1hora con Mapeos (justo después)
+  const fin1H = mIni+30>=60 ? hIni+1 : hIni; const fin1M = (mIni+30)%60;
   const ini2H = fin1H; const ini2M = fin1M;
-  const fin2H = ini2M+60>=60 ? ini2H+1 : ini2H;
-  const fin2M = (ini2M+60)%60;
-
+  const fin2H = ini2M+60>=60 ? ini2H+1 : ini2H; const fin2M = (ini2M+60)%60;
   const base = { Tipo:'Presencial', Contacto: contactoID||'', Email: email||'',
-    Estado:'Programada', Observaciones:'NHC Kids - Agendado por Carolina IA',
-    Dia: diaStr, Nombre: nombreNino || '' };
-
+    Estado:'Programada', Observaciones:'NHC Kids - Agendado por Carolina IA', Dia: diaStr, Nombre: nombreNino || '' };
   const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
     method:'POST', headers, body: JSON.stringify({ data: { ...base,
       Inicio: fmt(hIni,mIni), Fin: fmt(fin1H,fin1M), Duraci_n:'30 minutos',
-      Consultor: ID_CONSULTOR_JUAN_ESTEBAN,
-      Espacio: '3572150000004826074'
+      Consultor: ID_CONSULTOR_JUAN_ESTEBAN, Espacio: '3572150000004826074'
     }})
   });
-  const data1 = await res1.json();
-  console.log('CITA 1 PRE:', JSON.stringify(data1));
-
+  const data1 = await res1.json(); console.log('CITA 1 PRE:', JSON.stringify(data1));
   const res2 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
     method:'POST', headers, body: JSON.stringify({ data: { ...base,
       Inicio: fmt(ini2H,ini2M), Fin: fmt(fin2H,fin2M), Duraci_n:'1 hora',
       Consultor: ID_CONSULTOR_MAPEOS, Espacio: ID_ESPACIO_MAPEOS
     }})
   });
-  const data2 = await res2.json();
-  console.log('CITA 2 NEUROMAPEO:', JSON.stringify(data2));
-
+  const data2 = await res2.json(); console.log('CITA 2 NEUROMAPEO:', JSON.stringify(data2));
   return { cita1: data1, cita2: data2 };
 }
 
@@ -419,11 +382,7 @@ function calcularSlotsLibres(citas, fechaISO) {
   const dia = fecha.getDay();
   const horarios = HORARIOS_NHCK[dia];
   if (!horarios) return [];
-
-  // Horas ocupadas de Juan Esteban y Mapeos
-  const ocupadosJE = [];
-  const ocupadosMapeos = [];
-
+  const ocupadosJE = [], ocupadosMapeos = [];
   citas.forEach(c => {
     const cID = c.Consultor?.ID || '';
     const tIni = new Date((c.Inicio || '').replace(/-/g,' '));
@@ -434,20 +393,15 @@ function calcularSlotsLibres(citas, fechaISO) {
     if (cID === ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push({ ini: hIni, fin: hFin });
     if (cID === ID_CONSULTOR_MAPEOS) ocupadosMapeos.push({ ini: hIni, fin: hFin });
   });
-
   const slots = [];
   for (const { ini, fin } of horarios) {
     for (let h = ini; h + 1.5 <= fin; h += 0.5) {
-      // Juan Esteban libre en h a h+0.5 Y Mapeos libre en h+0.5 a h+1.5
       const jeLibre = !ocupadosJE.some(o => o.ini < h + 0.5 && o.fin > h);
       const mapeosLibre = !ocupadosMapeos.some(o => o.ini < h + 1.5 && o.fin > h + 0.5);
       if (jeLibre && mapeosLibre) {
         const hh = Math.floor(h); const mm = (h%1)*60;
         const hh12 = hh > 12 ? hh-12 : hh === 0 ? 12 : hh;
-        slots.push({
-          label: `${hh12}:${mm===0?'00':'30'}${hh<12?'am':'pm'}`,
-          horaISO: `${String(hh).padStart(2,'0')}:${mm===0?'00':'30'}`
-        });
+        slots.push({ label:`${hh12}:${mm===0?'00':'30'}${hh<12?'am':'pm'}`, horaISO:`${String(hh).padStart(2,'0')}:${mm===0?'00':'30'}` });
       }
     }
   }
@@ -459,49 +413,27 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
   const montoEnCentavos = monto * 100;
   const cadena = `${referencia}${montoEnCentavos}COP${WOMPI_INTEGRITY_KEY}`;
   const firma = crypto.createHash('sha256').update(cadena).digest('hex');
-
   const res = await fetch(`${WOMPI_BASE_URL}/payment_links`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.WOMPI_PRIVATE_KEY || 'prv_test_rs7u6wx1045DshLEx7tLz58YAe6XOmwn'}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Authorization': `Bearer ${process.env.WOMPI_PRIVATE_KEY || 'prv_test_rs7u6wx1045DshLEx7tLz58YAe6XOmwn'}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: 'Reserva NHC Kids - Neuromapeo',
-      description: 'Reserva para el proceso de Neuromapeo Kids ($100.000)',
-      single_use: true,
-      collect_shipping: false,
-      currency: 'COP',
-      amount_in_cents: montoEnCentavos,
-      reference: referencia,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      name: 'Reserva NHC Kids - Neuromapeo', description: 'Reserva para el proceso de Neuromapeo Kids ($100.000)',
+      single_use: true, collect_shipping: false, currency: 'COP', amount_in_cents: montoEnCentavos,
+      reference: referencia, expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       redirect_url: 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso',
       signature: { integrity: firma },
-      customer_data: {
-        customer_name: nombre || '',
-        customer_last_name: '',
-        customer_legal_id: '',
-        customer_legal_id_type: 'CC',
-        customer_email: email || '',
-        customer_phone: (telefono || '').replace(/[\s+\(\)\-]/g, '')
-      }
+      customer_data: { customer_name: nombre||'', customer_last_name:'', customer_legal_id:'',
+        customer_legal_id_type:'CC', customer_email: email||'',
+        customer_phone: (telefono||'').replace(/[\s+\(\)\-]/g,'') }
     })
   });
-
   const data = await res.json();
   console.log('WOMPI PAYMENT LINK:', JSON.stringify(data));
-
-  if (data?.data?.id) {
-    return { url: `https://checkout.wompi.co/l/${data.data.id}`, linkId: data.data.id };
-  }
-
-  // Fallback al link largo si falla
+  if (data?.data?.id) return { url: `https://checkout.wompi.co/l/${data.data.id}`, linkId: data.data.id };
   const params = new URLSearchParams({
-    'public-key': WOMPI_PUBLIC_KEY, currency: 'COP',
-    'amount-in-cents': montoEnCentavos, reference: referencia,
-    'signature:integrity': firma, 'customer-data:email': email || '',
-    'customer-data:full-name': nombre || '',
-    'customer-data:phone-number': (telefono || '').replace(/[\s+\(\)\-]/g, ''),
+    'public-key': WOMPI_PUBLIC_KEY, currency:'COP', 'amount-in-cents': montoEnCentavos, reference: referencia,
+    'signature:integrity': firma, 'customer-data:email': email||'', 'customer-data:full-name': nombre||'',
+    'customer-data:phone-number': (telefono||'').replace(/[\s+\(\)\-]/g,''),
     'redirect-url': 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso'
   });
   return { url: `https://checkout.wompi.co/p/?${params.toString()}`, linkId: null };
@@ -513,14 +445,8 @@ async function crearOportunidad(contactId, nombre, stageId) {
     const res = await fetch('https://services.leadconnectorhq.com/opportunities/', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pipelineId: GHL_PIPELINE_ID,
-        locationId: GHL_LOCATION_ID,
-        name: `NHC Kids - ${nombre}`,
-        pipelineStageId: stageId,
-        status: 'open',
-        contactId
-      })
+      body: JSON.stringify({ pipelineId: GHL_PIPELINE_ID, locationId: GHL_LOCATION_ID,
+        name: `NHC Kids - ${nombre}`, pipelineStageId: stageId, status: 'open', contactId })
     });
     const data = await res.json();
     console.log('OPORTUNIDAD CREADA:', JSON.stringify(data));
@@ -530,16 +456,12 @@ async function crearOportunidad(contactId, nombre, stageId) {
 
 async function actualizarEtapaOportunidad(contactId, stageId) {
   try {
-    // Buscar oportunidad existente del contacto en este pipeline
     const res = await fetch(`https://services.leadconnectorhq.com/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${GHL_PIPELINE_ID}&contact_id=${contactId}`, {
       headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28' }
     });
     const data = await res.json();
     const opp = data.opportunities?.[0];
-    if (!opp) {
-      console.log('No se encontró oportunidad para el contacto, creando...');
-      return null;
-    }
+    if (!opp) return null;
     const resUpdate = await fetch(`https://services.leadconnectorhq.com/opportunities/${opp.id}`, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
@@ -564,18 +486,12 @@ function iniciarTimersInactividad(conversationId, contactId) {
   limpiarTimers(conversationId);
   inactivityTimers[conversationId] = {
     timer5: setTimeout(async () => {
-      try {
-        await sendMessage(conversationId, '¿Sigues por ahí? 😊 Quedo pendiente por si tienes alguna duda.', contactId);
-        console.log('Mensaje 5min enviado a:', conversationId);
-      } catch (err) { console.error('Error timer 5min:', err.message); }
+      try { await sendMessage(conversationId, '¿Sigues por ahí? 😊 Quedo pendiente por si tienes alguna duda.', contactId); }
+      catch (err) { console.error('Error timer 5min:', err.message); }
     }, 5 * 60 * 1000),
     timer10: setTimeout(async () => {
-      try {
-        await sendMessage(conversationId,
-          'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso nos escribes y con gusto te ayudamos.',
-          contactId);
-        console.log('Mensaje 10min enviado a:', conversationId);
-      } catch (err) { console.error('Error timer 10min:', err.message); }
+      try { await sendMessage(conversationId, 'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso nos escribes y con gusto te ayudamos.', contactId); }
+      catch (err) { console.error('Error timer 10min:', err.message); }
     }, 10 * 60 * 1000)
   };
 }
@@ -612,7 +528,7 @@ async function getLastMessage(conversationId) {
     if (!Array.isArray(messages) || messages.length === 0) return { body:'', id:null };
     const last = messages.find(m => m.direction === 'inbound') || messages[0];
     return { body: last?.body||'', id: last?.id||null };
-  } catch (err) { console.error('Error getLastMessage:', err); return { body:'', id:null }; }
+  } catch (err) { return { body:'', id:null }; }
 }
 
 async function addTag(contactId, tag) {
@@ -634,46 +550,35 @@ async function sendMessage(conversationId, message, contactId) {
   console.log('SEND MSG:', JSON.stringify(data));
 }
 
-// Enviar múltiples mensajes con delay entre ellos
 async function sendMessages(conversationId, messages, contactId) {
-  for (const msg of messages) {
-    await sendMessage(conversationId, msg, contactId);
-    if (messages.indexOf(msg) < messages.length - 1) {
-      await new Promise(r => setTimeout(r, 1500));
-    }
+  for (let i = 0; i < messages.length; i++) {
+    await sendMessage(conversationId, messages[i], contactId);
+    if (i < messages.length - 1) await new Promise(r => setTimeout(r, 1500));
   }
 }
 
 // ─── WEBHOOK GHL ──────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
-// Endpoint para reiniciar conversación desde el browser
 app.get('/reset/:conversationId', async (req, res) => {
   try {
-    await pool.query('DELETE FROM conversations WHERE conversation_id = $1', [req.params.conversationId]);
+    await pool.query('DELETE FROM conversations WHERE conversation_id=$1', [req.params.conversationId]);
     res.send(`✓ Conversación ${req.params.conversationId} reiniciada`);
-  } catch (err) {
-    res.status(500).send('Error: ' + err.message);
-  }
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
-// Endpoint para reiniciar por contactId
 app.get('/reset-contact/:contactId', async (req, res) => {
   try {
-    await pool.query('DELETE FROM conversations WHERE contact_id = $1', [req.params.contactId]);
-    await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [req.params.contactId]);
+    await pool.query('DELETE FROM conversations WHERE contact_id=$1', [req.params.contactId]);
+    await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [req.params.contactId]);
     res.send(`✓ Contacto ${req.params.contactId} reiniciado`);
-  } catch (err) {
-    res.status(500).send('Error: ' + err.message);
-  }
+  } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
 app.post('/webhook/ghl', async (req, res) => {
   try {
-    const contactId = req.body.contactId || req.body.customData?.contactId ||
-                      req.body.contact_id || req.body.contact?.id;
-    const conversationId_raw = req.body.conversationId || req.body.customData?.conversationId || '';
-    let conversationId = conversationId_raw;
+    const contactId = req.body.contactId || req.body.customData?.contactId || req.body.contact_id || req.body.contact?.id;
+    let conversationId = req.body.conversationId || req.body.customData?.conversationId || '';
     const messageBody = req.body.message?.body || req.body.customData?.message || '';
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
 
@@ -681,21 +586,23 @@ app.post('/webhook/ghl', async (req, res) => {
     if (!conversationId) conversationId = await getConversationId(contactId);
     if (!conversationId) return res.status(400).json({ error: 'No conversación' });
 
+    // Deduplicación
     const convData = await getConversationData(conversationId);
     if (messageId && convData?.last_message_id === messageId) {
       console.log('Mensaje duplicado, saltando:', messageId);
       return res.json({ success: true, skipped: true, reason: 'duplicate' });
     }
 
-    // Limpiar timers de inactividad al recibir mensaje
+    // Limpiar timers al recibir mensaje
     limpiarTimers(conversationId);
 
     const contactData = await getContact(contactId);
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
 
-    if (!tags.includes('terminó triaje nhck') || tags.includes('escalado nhck')) {
-      return res.json({ success: true, skipped: true });
+    // Si está escalado no responder
+    if (tags.includes('escalado nhck')) {
+      return res.json({ success: true, skipped: true, reason: 'escalado' });
     }
 
     let lastMsg = messageBody;
@@ -707,128 +614,189 @@ app.post('/webhook/ghl', async (req, res) => {
     }
     if (!lastMsg) return res.json({ success: true, skipped: true });
 
-    // Comando reset — reinicia la conversación
+    // Comando reset
     if (lastMsg.trim().toLowerCase() === '/reset') {
-      await pool.query('DELETE FROM conversations WHERE conversation_id = $1', [conversationId]);
-      await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [contactId]);
+      await pool.query('DELETE FROM conversations WHERE conversation_id=$1', [conversationId]);
+      await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]);
       await sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
       return res.json({ success: true, reset: true });
     }
 
-    // Triaje — leer del body o recuperar de DB
-    const triajeFromBody = {
-      triaje1: req.body['Triaje NHC - Principal dificultad'],
-      triaje2: req.body['Triaje NHC - Tiempo observando'],
-      triaje3: Array.isArray(req.body['Triaje NHC - Intentos previos'])
-                ? req.body['Triaje NHC - Intentos previos'].join(', ')
-                : req.body['Triaje NHC - Intentos previos'],
-      triaje4: req.body['Triaje NHC - Área más afectada'],
-      triaje5: req.body['Triaje NHC - Nivel de compromiso']
-    };
-    const savedTriaje = convData?.triaje || {};
-    const triaje1 = triajeFromBody.triaje1 || savedTriaje.triaje1 || 'No respondido';
-    const triaje2 = triajeFromBody.triaje2 || savedTriaje.triaje2 || 'No respondido';
-    const triaje3 = triajeFromBody.triaje3 || savedTriaje.triaje3 || 'No respondido';
-    const triaje4 = triajeFromBody.triaje4 || savedTriaje.triaje4 || 'No respondido';
-    const triaje5 = triajeFromBody.triaje5 || savedTriaje.triaje5 || 'No respondido';
-    const triaje = { triaje1, triaje2, triaje3, triaje4, triaje5 };
-    console.log('TRIAJE:', triaje);
-
     const nombre = contact.firstName || 'Hola';
+    const estado = convData?.estado || 'nuevo';
+    const triaje = convData?.triaje || {};
+    let history = convData?.messages || [];
+
+    console.log('ESTADO:', estado, '| CONTACTO:', nombre);
 
     // Crear oportunidad si es primera interacción
     if (!convData) {
-      crearOportunidad(contactId, `${contact.firstName || ''} ${contact.lastName || ''}`.trim(), STAGE_INICIO).catch(()=>{});
+      crearOportunidad(contactId, `${contact.firstName||''} ${contact.lastName||''}`.trim(), STAGE_INICIO).catch(()=>{});
     }
-    let history = convData?.messages || [];
+
     history.push({ role:'user', content:[{ type:'text', text:lastMsg }] });
     if (history.length > 20) history = history.slice(-20);
 
-    // Disponibilidad real
+    // ─── DISPONIBILIDAD ───────────────────────────────────────────────────────
     let disponibilidadTexto = '';
-    try {
-      const hoy = new Date();
-      const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      const diasN = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
-      let offset = 1, diasOk = 0;
-      while (diasOk < 3 && offset <= 14) {
-        const f = new Date(hoy); f.setDate(hoy.getDate()+offset);
-        const ds = f.getDay();
-        if (HORARIOS_NHCK[ds]) {
-          const fISO = f.toISOString().split('T')[0];
-          let citas = await getCachedDisponibilidad(fISO);
-          if (!citas) { citas = await getDisponibilidad(fISO); await setCachedDisponibilidad(fISO, citas); }
-          const slots = calcularSlotsLibres(citas, fISO);
-          if (slots.length > 0) {
-            disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0,4).map(s=>s.label).join(', ')}\n`;
-            diasOk++;
+    if (estado === 'agendando' || estado === 'triaje_completo') {
+      try {
+        const hoy = new Date();
+        const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+        const diasN = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+        let offset = 1, diasOk = 0;
+        while (diasOk < 3 && offset <= 14) {
+          const f = new Date(hoy); f.setDate(hoy.getDate()+offset);
+          const ds = f.getDay();
+          if (HORARIOS_NHCK[ds]) {
+            const fISO = f.toISOString().split('T')[0];
+            let citas = await getCachedDisponibilidad(fISO);
+            if (!citas) { citas = await getDisponibilidad(fISO); await setCachedDisponibilidad(fISO, citas); }
+            const slots = calcularSlotsLibres(citas, fISO);
+            if (slots.length > 0) {
+              disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0,4).map(s=>s.label).join(', ')}\n`;
+              diasOk++;
+            }
           }
+          offset++;
         }
-        offset++;
+        if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos días.';
+      } catch (err) {
+        disponibilidadTexto = 'No consultada. Intenta más tarde.';
       }
-      if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos días.';
-    } catch (err) {
-      console.error('Error disponibilidad:', err.message);
-      disponibilidadTexto = 'No consultada. Intenta más tarde.';
     }
 
-    const systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp — cálida, cercana, humana.
+    // ─── SYSTEM PROMPT SEGÚN ESTADO ───────────────────────────────────────────
+    let systemPrompt = '';
 
-REGLAS DE FORMATO (CRÍTICO):
+    if (estado === 'nuevo' || estado === 'triaje_p1') {
+      systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp — cálida, cercana, humana.
+
+REGLAS DE FORMATO:
 - Máximo 3 líneas por mensaje
-- Si necesitas decir más cosas, DIVIDE en varios mensajes separados con ---
-- Sin asteriscos, sin negritas, sin listas con viñetas
-- Tono conversacional, como si fuera tu amigo
+- Si necesitas decir más, separa con ---
+- Sin asteriscos ni negritas
+- Tono conversacional
 
 CONTEXTO:
-- ${nombre} es el PADRE/MADRE. El paciente es su HIJO/A.
-- Ya hicieron el triaje. Tienes su info.
-- Primer mensaje: menciona algo del triaje.
+- ${nombre} acaba de escribir por primera vez o está en el triaje inicial
+- Eres la primera persona que responde
+- NHC Kids aplica neurotecnologías para la salud mental de niños
 
-TRIAJE:
-- Dificultad: ${triaje1}
-- Tiempo: ${triaje2}
-- Intentos: ${triaje3}
-- Área afectada: ${triaje4}
-- Compromiso: ${triaje5}
+TU TAREA AHORA:
+${!convData ? `1. Saluda cálidamente a ${nombre}
+2. Preséntate brevemente como Carolina de NHC Kids
+3. Haz la PRIMERA PREGUNTA del triaje de forma conversacional:
+"¿Cuál es la principal dificultad que están observando en su hijo/a en este momento?"
+Menciona las opciones de forma natural en el mensaje.
+Opciones: Atención/concentración, Bajo rendimiento, Desregulación emocional, Conducta impulsiva, Ansiedad/inseguridad, Otro` :
+`El padre/madre ya respondió. Interpreta su respuesta y mapéala a una de estas opciones:
+${TRIAJE_P1.join(', ')}
+Luego haz la SEGUNDA PREGUNTA:
+"¿Hace cuánto tiempo vienen observando esta situación?"
+Opciones: Menos de 3 meses, 3 a 6 meses, 6 a 12 meses, Más de 1 año`}
 
-NHC KIDS — NEUROMAPEO:
-Proceso: Pre-diagnóstico (30min con Juan Esteban) + Neuromapeo cerebral (1 hora).
-Precio total: $395.000. Reserva: $100.000 (resto al llegar).
+CUANDO TENGAS LA RESPUESTA MAPEADA, incluye al final (invisible para el padre):
+[TRIAJE_P1: <opción exacta>]
 
-DISPONIBILIDAD REAL (usa SOLO estos horarios, incluye fecha YYYY-MM-DD):
+ESCALADO — SOLO con [ESCALAR] si pide explícitamente hablar con humano.
+NUNCA digas que eres IA. Solo español.`;
+
+    } else if (estado === 'triaje_p2') {
+      systemPrompt = `Eres Carolina, asesora de NHC Kids. WhatsApp — cálida, cercana.
+
+REGLAS: Máximo 3 líneas, separa con --- si necesitas más, sin negritas.
+
+TRIAJE EN CURSO para ${nombre}:
+- P1 (dificultad): ${triaje.triaje1 || 'pendiente'}
+
+TU TAREA:
+Interpreta la respuesta del padre sobre el tiempo y mapéala a:
+${TRIAJE_P2.join(', ')}
+Luego haz la TERCERA PREGUNTA:
+"¿Qué han intentado hasta ahora para ayudar a su hijo/a?"
+Opciones: Psicología, Neuropsicología, Apoyo escolar, Medicación, Varias sin resultado, Nada aún, Otro
+
+Al final incluye:
+[TRIAJE_P2: <opción exacta>]
+
+NUNCA digas que eres IA. Solo español.`;
+
+    } else if (estado === 'triaje_p3') {
+      systemPrompt = `Eres Carolina, asesora de NHC Kids. WhatsApp — cálida, cercana.
+
+REGLAS: Máximo 3 líneas, separa con --- si necesitas más, sin negritas.
+
+TRIAJE EN CURSO para ${nombre}:
+- P1 (dificultad): ${triaje.triaje1}
+- P2 (tiempo): ${triaje.triaje2}
+
+TU TAREA:
+Interpreta la respuesta del padre sobre lo que han intentado y mapéala a:
+${TRIAJE_P3.join(', ')}
+
+Luego muestra empatía con lo que han vivido y presenta el Neuromapeo como solución:
+"Con el Neuromapeo cerebral vamos a entender exactamente qué está pasando en el cerebro de tu hijo/a para diseñar un plan personalizado."
+Precio: $395.000. Reserva: $100.000 (resto al llegar).
+Pregunta si quiere agendar.
+
+Al final incluye:
+[TRIAJE_P3: <opción exacta>]
+[TRIAJE_COMPLETO]
+
+NUNCA digas que eres IA. Solo español.`;
+
+    } else if (estado === 'triaje_completo' || estado === 'agendando') {
+      systemPrompt = `Eres Carolina, asesora de NHC Kids. WhatsApp — cálida, cercana.
+
+REGLAS: Máximo 3 líneas, separa con --- si necesitas más, sin negritas.
+
+CONTEXTO de ${nombre}:
+- Dificultad del hijo/a: ${triaje.triaje1}
+- Tiempo observando: ${triaje.triaje2}
+- Han intentado: ${triaje.triaje3}
+
+PROCESO: Pre-diagnóstico (30min con Juan Esteban) + Neuromapeo cerebral (1 hora).
+Precio: $395.000. Reserva: $100.000 (resto al llegar).
+
+DISPONIBILIDAD REAL (usa SOLO estos horarios):
 ${disponibilidadTexto}
-REGLA: NUNCA confirmes horarios que el padre proponga si no están en la lista.
+NUNCA confirmes horarios que no estén en esta lista.
 
-DATOS QUE NECESITAS DEL NIÑO/A (recoge de forma natural):
-1. Nombre completo del niño/a
+DATOS QUE NECESITAS DEL NIÑO/A (recoge natural):
+1. Nombre completo
 2. Edad
 3. Género (niño/niña)
-4. ¿Estudia actualmente? (sí/no)
+4. ¿Estudia actualmente?
 
-CUANDO TENGAS LOS 4 DATOS Y EL PADRE CONFIRME UN HORARIO:
-Pide confirmación final ("¿Confirmamos para ese día y hora?").
-Cuando confirme, responde EXACTAMENTE así:
+CUANDO TENGAS LOS 4 DATOS Y EL PADRE CONFIRME HORARIO:
+Pide confirmación ("¿Confirmamos para ese día y hora?").
+Cuando confirme, responde EXACTAMENTE:
 [CITA_CONFIRMADA]
 fecha: <YYYY-MM-DD>
 hora: <HH:MM en 24h>
-nombre_nino: <nombre completo del niño>
+nombre_nino: <nombre completo>
 edad: <edad>
 genero: <Masculino/Femenino/Otro>
 estudia: <si/no>
 
-PREGUNTAS TÉCNICAS/CIENTÍFICAS:
-Responde con confianza. Tenemos más de 50 años de respaldo científico del qEEG.
-Estamos habilitados y certificados. No escales por esto.
+ESCALADO — SOLO con [ESCALAR] si pide hablar con humano o queja grave.
+NUNCA digas que eres IA. Solo español.`;
 
-ESCALADO — SOLO con [ESCALAR] si:
-- Pide hablar explícitamente con un humano
-- Es una queja grave
+    } else if (estado === 'esperando_pago') {
+      systemPrompt = `Eres Carolina, asesora de NHC Kids. WhatsApp — cálida, cercana.
 
-REGLAS FINALES:
-- NUNCA digas que eres IA
-- NUNCA menciones datos bancarios
-- Solo español`;
+REGLAS: Máximo 3 líneas, sin negritas.
+
+CONTEXTO: ${nombre} ya tiene el link de pago. Está esperando completar la reserva.
+
+Si pregunta sobre el pago → recuérdale que puede pagar en el link que le enviaste.
+Si tiene dudas sobre el proceso → responde con confianza.
+Si pide cambiar la cita → [ESCALAR]
+Si pide hablar con humano → [ESCALAR]
+
+NUNCA digas que eres IA. Solo español.`;
+    }
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
@@ -840,23 +808,50 @@ REGLAS FINALES:
     console.log('CLAUDE:', JSON.stringify(claudeData));
     const rawReply = claudeData.content[0].text;
 
+    // ─── PROCESAR RESPUESTA DE CLAUDE ─────────────────────────────────────────
+    let nuevoEstado = estado;
+    let nuevoTriaje = { ...triaje };
+
+    // Extraer datos del triaje
+    const matchP1 = rawReply.match(/\[TRIAJE_P1:\s*(.+?)\]/);
+    const matchP2 = rawReply.match(/\[TRIAJE_P2:\s*(.+?)\]/);
+    const matchP3 = rawReply.match(/\[TRIAJE_P3:\s*(.+?)\]/);
+    const triajeCompleto = rawReply.includes('[TRIAJE_COMPLETO]');
+
+    if (matchP1) {
+      nuevoTriaje.triaje1 = matchP1[1].trim();
+      nuevoEstado = 'triaje_p2';
+      console.log('TRIAJE P1:', nuevoTriaje.triaje1);
+    }
+    if (matchP2) {
+      nuevoTriaje.triaje2 = matchP2[1].trim();
+      nuevoEstado = 'triaje_p3';
+      console.log('TRIAJE P2:', nuevoTriaje.triaje2);
+    }
+    if (matchP3) {
+      nuevoTriaje.triaje3 = matchP3[1].trim();
+      console.log('TRIAJE P3:', nuevoTriaje.triaje3);
+    }
+    if (triajeCompleto) {
+      nuevoEstado = 'triaje_completo';
+      // Guardar triaje en GHL como etiqueta
+      addTag(contactId, `nhck-triaje-${nuevoTriaje.triaje1?.toLowerCase().replace(/[^a-z0-9]/g,'-').substring(0,20) || 'completado'}`).catch(()=>{});
+      actualizarEtapaOportunidad(contactId, STAGE_INICIO).catch(()=>{});
+      console.log('TRIAJE COMPLETO:', nuevoTriaje);
+    }
+
     // ─── CITA CONFIRMADA ──────────────────────────────────────────────────────
     if (rawReply.includes('[CITA_CONFIRMADA]')) {
       const extract = f => { const m = rawReply.match(new RegExp(`${f}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
-      const fechaCita  = extract('fecha');
-      const horaCita   = extract('hora');
-      const nombreNino = extract('nombre_nino');
-      const edad       = extract('edad');
-      const genero     = extract('genero');
-      const estudiaSt  = extract('estudia').toLowerCase();
-      const estudia    = estudiaSt === 'si' || estudiaSt === 'sí';
+      const fechaCita = extract('fecha'), horaCita = extract('hora');
+      const nombreNino = extract('nombre_nino'), edad = extract('edad');
+      const genero = extract('genero');
+      const estudiaSt = extract('estudia').toLowerCase();
+      const estudia = estudiaSt === 'si' || estudiaSt === 'sí';
 
       console.log('CITA CONFIRMADA:', { fechaCita, horaCita, nombreNino, edad, genero, estudia });
 
-      // Guardar campos del niño en GHL
-      await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: triaje1 });
-
-      // Actualizar etapa a Información completa
+      await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
       actualizarEtapaOportunidad(contactId, STAGE_INFO_COMPLETA).catch(()=>{});
 
       const referencia = `NHCK-${contactId}-${Date.now()}`;
@@ -869,24 +864,19 @@ REGLAS FINALES:
           email: contact.email||'', telefono: contact.phone||'' });
         linkPago = pagoResult.url;
         await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
-          edad, genero, ocupacion: mapearOcupacionNino(estudia, edad), sintoma: triaje1,
+          edad, genero, ocupacion: mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
           nombreNino, nombre, paymentLinkId: pagoResult.linkId });
       } catch (err) {
         console.error('Error link pago:', err.message);
         await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
-          edad, genero, ocupacion: mapearOcupacionNino(estudia, edad), sintoma: triaje1,
+          edad, genero, ocupacion: mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
           nombreNino, nombre, paymentLinkId: null });
       }
 
-      const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      const [,mm,dd] = (fechaCita||'').split('-');
-      const fechaL = fechaCita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
-      const [hh,min] = (horaCita||'00:00').split(':');
-      const hN = parseInt(hh);
-      const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
-
-      await saveConversationData(conversationId, contactId, history, triaje, 'esperando_pago', lastMsgId);
+      history.push({ role:'assistant', content:[{ type:'text', text:'Cita confirmada, enviando link de pago.' }] });
+      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId);
       await humanDelay();
+
       const mensajes = linkPago
         ? [`Para confirmar tu cupo necesitas hacer la reserva de $100.000 aquí 👇\n${linkPago}`,
            `Una vez confirmado el pago te envío los detalles de tu cita 🙌`]
@@ -894,13 +884,8 @@ REGLAS FINALES:
 
       await sendMessages(conversationId, mensajes, contactId);
       if (!linkPago) await addTag(contactId, 'escalado nhck');
-
-      // Actualizar etapa a Envío de link de pago
       actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
-
-      // Iniciar timers de inactividad
       iniciarTimersInactividad(conversationId, contactId);
-
       return res.json({ success:true, citaPendientePago:true, referencia });
     }
 
@@ -908,27 +893,27 @@ REGLAS FINALES:
     if (rawReply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
       await logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
-      await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId);
+      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId);
       await humanDelay();
       await sendMessage(conversationId, 'En un momento un asesor te va a ayudar 🙌', contactId);
       return res.json({ success:true, escalated:true });
     }
 
-    // ─── RESPUESTA NORMAL (puede ser múltiples mensajes) ──────────────────────
-    const reply = rawReply.split('\n').filter(l => l.trim() !== '').join('\n');
+    // ─── RESPUESTA NORMAL ──────────────────────────────────────────────────────
+    // Limpiar tags internos del reply
+    const reply = rawReply
+      .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
+      .replace(/\[TRIAJE_COMPLETO\]/g, '')
+      .split('\n').filter(l => l.trim() !== '').join('\n');
 
-    // Dividir por --- si Carolina envió múltiples mensajes
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
 
     history.push({ role:'assistant', content:[{ type:'text', text:reply }] });
-    await saveConversationData(conversationId, contactId, history, triaje, 'activo', lastMsgId);
+    await saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId);
     await humanDelay();
     await sendMessages(conversationId, partes, contactId);
-
-    // Iniciar timers de inactividad
     iniciarTimersInactividad(conversationId, contactId);
-
-    res.json({ success:true, reply });
+    res.json({ success:true, reply, estado: nuevoEstado });
 
   } catch (error) {
     console.error('Error webhook GHL:', error);
@@ -942,7 +927,6 @@ app.post('/webhook/wompi', async (req, res) => {
     console.log('WOMPI WEBHOOK:', JSON.stringify(req.body));
     const transaccion = req.body?.data?.transaction;
     if (!transaccion) return res.json({ received:true });
-
     const { reference, status } = transaccion;
     console.log('WOMPI TX:', { reference, status });
 
@@ -961,10 +945,7 @@ app.post('/webhook/wompi', async (req, res) => {
       console.log('Firma recibida:', checksum);
       if (firmaCalc !== checksum) {
         console.error('Firma Wompi inválida — procesando de todas formas en modo test');
-        // En modo test continuamos aunque la firma falle
-        if (req.body?.environment !== 'test') {
-          return res.status(401).json({ error:'Firma inválida' });
-        }
+        if (req.body?.environment !== 'test') return res.status(401).json({ error:'Firma inválida' });
       }
     }
 
@@ -981,23 +962,17 @@ app.post('/webhook/wompi', async (req, res) => {
 
     let resultado = null;
     try {
-      resultado = await crearEnAnamnesis({
-        nombreNino: nombreNino || contact.firstName || '',
-        apellidoNino: '',
-        email: contact.email||'', movil: contact.phone||'',
-        contactIdGHL: contactId, edad, sintoma, genero,
-        estudia: ocupacion === 'Estudiante de colegio'
-      });
+      resultado = await crearEnAnamnesis({ nombreNino: nombreNino||contact.firstName||'',
+        email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
+        edad, sintoma, genero, estudia: ocupacion === 'Estudiante de colegio' });
       console.log('ANAMNESIS OK:', JSON.stringify(resultado));
     } catch (err) { console.error('Error Anamnesis:', err.message); }
 
     try {
       const citas = await crearCitasCalendario({ movil: contact.phone||'', email: contact.email||'',
-        fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID||null,
-        nombreNino: datos.nombreNino || '' });
+        fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID||null, nombreNino: nombreNino||'' });
       console.log('CITAS OK:', JSON.stringify(citas));
       await logEvent(contactId, conversationId, 'citas_creadas', citas);
-      // Invalidar caché del día para que otros clientes vean disponibilidad actualizada
       await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [fechaCita]).catch(()=>{});
     } catch (err) { console.error('Error Citas:', err.message); }
 
@@ -1011,12 +986,9 @@ app.post('/webhook/wompi', async (req, res) => {
     await addTag(contactId, 'escalado nhck');
     await addTag(contactId, 'pagó 100K nhck');
     await deletePendingPayment(reference);
-
-    // Actualizar etapa a Pago parcial 100 mil
     actualizarEtapaOportunidad(contactId, STAGE_PAGO_PARCIAL).catch(()=>{});
-
-    // Limpiar timers de inactividad
     limpiarTimers(conversationId);
+
     await sendMessages(conversationId, [
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
       `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`
