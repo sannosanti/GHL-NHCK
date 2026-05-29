@@ -1354,9 +1354,9 @@ O usa la llave Bancolombia: 0090435866`,
 
     // ─── MANEJO DE IMAGEN / MENSAJE VACÍO EN ESPERANDO_PAGO ──────────────────────
     // GHL no envía URL de imagen en workflow — detectar por mensaje vacío
-    // isImage=true cuando messageType=19, aunque attachments venga vacío
-    if ((isImage && estado === 'esperando_pago') || (!lastMsg && estado === 'esperando_pago')) {
-      console.log('IMAGEN RECIBIDA en esperando_pago — procesando comprobante');
+    // Solo detectar imagen cuando messageType=19 explícitamente
+    if (isImage && estado === 'esperando_pago') {
+      console.log('IMAGEN RECIBIDA en esperando_pago (messageType=19) — procesando comprobante');
       await humanDelay();
 
       const pending = await pool.query(
