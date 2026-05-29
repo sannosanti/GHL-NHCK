@@ -523,6 +523,7 @@ async function getContact(contactId) {
   const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
     headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
   });
+  if (res.status === 404) return { contact: null, deleted: true };
   const data = await res.json();
   if (data.contact) await setCachedContact(contactId, data.contact);
   return data;
@@ -652,6 +653,14 @@ app.post('/webhook/ghl', async (req, res) => {
     limpiarTimers(conversationId);
 
     const contactData = await getContact(contactId);
+
+    // Contacto eliminado en GHL — limpiar DB y dejar que GHL lo recree
+    if (contactData.deleted) {
+      console.log(`Contacto ${contactId} no existe en GHL (404) — limpiando DB`);
+      await limpiarContactoDB(contactId);
+      return res.json({ success: true, skipped: true, reason: 'contact_deleted' });
+    }
+
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
 
