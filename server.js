@@ -1315,16 +1315,13 @@ NIT: 901164425`,
 
       if (rawReply.includes('[MEDIO_QR]')) {
         await humanDelay();
-        await sendMessage(conversationId, `Escanea este QR para pagar $100.000 👇`, contactId);
-        await new Promise(r => setTimeout(r, 1000));
         await sendImage(conversationId, contactId,
-          'https://miraculous-solace-production-47dd.up.railway.app/public/pagosQR.jpeg',
-          'QR de pago NHC Kids');
+          'https://assets.cdn.filesafe.space/gUal0ijNeXoT4bY97mBB/media/6a19f08dd53fc25488b79d6a.jpeg',
+          'QR de pago NHC Kids - $100.000');
         await new Promise(r => setTimeout(r, 1000));
         await sendMessage(conversationId, `También puedes usar la llave Bancolombia: 0090435866
-Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
-        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
-        // ya respondido: return res.json({ success: true, medio: 'qr' }); return;
+Cuando pagues envíame el comprobante aquí y confirmo tu cita 📸`, contactId);
+        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone); return;
       }
     }
 
