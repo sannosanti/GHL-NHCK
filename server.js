@@ -572,7 +572,7 @@ function iniciarTimersInactividad(conversationId, contactId) {
     timer10: setTimeout(async () => {
       try {
         await sendMessage(conversationId,
-          'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso de Emilio nos escribes y con gusto te ayudamos.',
+          'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso nos escribes y con gusto te ayudamos.',
           contactId);
         console.log('Mensaje 10min enviado a:', conversationId);
       } catch (err) { console.error('Error timer 10min:', err.message); }
