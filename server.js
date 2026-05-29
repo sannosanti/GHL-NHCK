@@ -819,9 +819,15 @@ app.post('/webhook/ghl', async (req, res) => {
     const imageUrl = req.body.customData?.attachments || null;
     const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
 
+    // Si es imagen y no hay conversationId, buscarlo
+    if (isImage && !conversationId) {
+      conversationId = await getConversationId(contactId);
+      console.log('IMAGEN: conversationId recuperado:', conversationId);
+    }
+
     // ─── DEDUPLICACIÓN ────────────────────────────────────────────────────────
     // GHL dispara 2-3 webhooks por mensaje. Bloqueamos por contactId+mensaje 6 segundos.
-    const msgSnippet = (messageBody||'').trim().substring(0,15) || 'nomsg';
+    const msgSnippet = isImage ? 'img' : (messageBody||'').trim().substring(0,15) || 'nomsg';
     const dedupKey = `proc_${contactId}_${msgSnippet}`;
     if (messageBuffers[dedupKey]) {
       console.log(`DEDUP: ignorado (${dedupKey})`);
@@ -1348,8 +1354,9 @@ O usa la llave Bancolombia: 0090435866`,
 
     // ─── MANEJO DE IMAGEN / MENSAJE VACÍO EN ESPERANDO_PAGO ──────────────────────
     // GHL no envía URL de imagen en workflow — detectar por mensaje vacío
-    if ((!lastMsg && estado === 'esperando_pago') || (isImage && imageUrl && estado === 'esperando_pago')) {
-      console.log('IMAGEN/ARCHIVO RECIBIDO en esperando_pago:', imageUrl || 'sin URL');
+    // isImage=true cuando messageType=19, aunque attachments venga vacío
+    if ((isImage && estado === 'esperando_pago') || (!lastMsg && estado === 'esperando_pago')) {
+      console.log('IMAGEN RECIBIDA en esperando_pago — procesando comprobante');
       await humanDelay();
 
       const pending = await pool.query(
