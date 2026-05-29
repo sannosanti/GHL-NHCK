@@ -581,15 +581,48 @@ async function sendMessage(conversationId, message, contactId) {
 
 async function sendImage(conversationId, contactId, imageUrl, caption) {
   try {
-    const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+    // Descargar imagen y convertir a base64
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error('No se pudo descargar imagen: ' + imgRes.status);
+    const buffer = await imgRes.buffer();
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+    const ext = contentType.includes('png') ? 'png' : 'jpeg';
+    const filename = `qr-nhckids.${ext}`;
+
+    // Construir multipart manualmente
+    const boundary = '----FormBoundary' + Date.now();
+    const CRLF = '\r\n';
+    const header = Buffer.from(
+      `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="fileAttachment"; filename="${filename}"${CRLF}` +
+      `Content-Type: ${contentType}${CRLF}${CRLF}`
+    );
+    const footer = Buffer.from(`${CRLF}--${boundary}--${CRLF}`);
+    const body = Buffer.concat([header, buffer, footer]);
+
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages/upload`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type:'WhatsApp', conversationId, contactId,
-        attachments: [{ type: 'image/jpeg', url: imageUrl }],
-        message: caption || '' })
+      headers: {
+        'Authorization': `Bearer ${GHL_KEY}`,
+        'Version': '2021-04-15',
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length
+      },
+      body
     });
     const data = await res.json();
     console.log('SEND IMG:', JSON.stringify(data));
+
+    // Si el upload devuelve una URL, enviarla como mensaje
+    if (data?.url || data?.mediaUrl) {
+      const mediaUrl = data.url || data.mediaUrl;
+      await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'WhatsApp', conversationId, contactId,
+          attachments: [mediaUrl], message: caption || '' })
+      });
+    }
   } catch(err) { console.error('Error enviando imagen:', err.message); }
 }
 
