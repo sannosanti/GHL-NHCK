@@ -687,6 +687,28 @@ app.post('/webhook/ghl', async (req, res) => {
 
     const nombre = contact.firstName || 'Hola';
     const phone = contact.phone || '';
+
+    // Si es contacto nuevo (sin historial en esta conversación), limpiar registros
+    // viejos que puedan existir con el mismo número de teléfono (contacto recreado en GHL)
+    if (!convData && phone) {
+      try {
+        const resViejos = await pool.query(
+          'SELECT conversation_id, contact_id FROM conversations WHERE phone = $1 AND contact_id != $2',
+          [phone, contactId]
+        );
+        if (resViejos.rows.length > 0) {
+          console.log(`Limpiando ${resViejos.rows.length} registro(s) viejos para teléfono ${phone}`);
+          for (const row of resViejos.rows) {
+            await pool.query('DELETE FROM conversations WHERE conversation_id = $1', [row.conversation_id]);
+            await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [row.contact_id]);
+            await pool.query('DELETE FROM pending_payments WHERE contact_id = $1', [row.contact_id]);
+          }
+        }
+      } catch (err) {
+        console.error('Error limpiando registros viejos por teléfono:', err.message);
+      }
+    }
+
     const estado = convData?.estado || 'nuevo';
     const triaje = convData?.triaje || {};
     let history = convData?.messages || [];
