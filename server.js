@@ -879,80 +879,68 @@ app.post('/webhook/ghl', async (req, res) => {
       console.log('IMAGEN RECIBIDA en esperando_pago:', imageUrl);
       await humanDelay();
 
-      const analisis = await analizarComprobante(imageUrl);
+      // Obtener datos del pago pendiente
+      const pending = await pool.query(
+        'SELECT * FROM pending_payments WHERE contact_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [contactId]
+      );
+      const pago = pending.rows[0];
 
-      if (analisis.aprobado) {
-        // Comprobante válido — confirmar igual que Wompi
-        const pending = await pool.query(
-          'SELECT * FROM pending_payments WHERE contact_id = $1 ORDER BY created_at DESC LIMIT 1',
-          [contactId]
-        );
-        const pago = pending.rows[0];
+      if (pago) {
+        const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+        const [,mm,dd] = (pago.fecha_cita||'').split('-');
+        const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
+        const [hh,min] = (pago.hora_cita||'00:00').split(':');
+        const hN = parseInt(hh);
+        const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
+        const nombrePago = pago.nombre || nombre;
 
-        if (pago) {
-          const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-          const [,mm,dd] = (pago.fecha_cita||'').split('-');
-          const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
-          const [hh,min] = (pago.hora_cita||'00:00').split(':');
-          const hN = parseInt(hh);
-          const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
-          const nombrePago = pago.nombre || nombre;
+        // Crear cita en Zoho automáticamente
+        let resultado = null;
+        try {
+          resultado = await crearEnAnamnesis({
+            nombreNino: pago.nombre_nino||contact.firstName||'',
+            email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
+            edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
+            estudia: pago.ocupacion === 'Estudiante de colegio'
+          });
+        } catch(err) { console.error('Error Anamnesis:', err.message); }
 
-          // Crear en Anamnesis y Zoho Calendario
-          let resultado = null;
-          try {
-            resultado = await crearEnAnamnesis({
-              nombreNino: pago.nombre_nino||contact.firstName||'',
-              email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
-              edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
-              estudia: pago.ocupacion === 'Estudiante de colegio'
-            });
-          } catch(err) { console.error('Error Anamnesis comprobante:', err.message); }
+        try {
+          await crearCitasCalendario({
+            movil: contact.phone||'', email: contact.email||'',
+            fechaISO: pago.fecha_cita, horaInicio: pago.hora_cita,
+            contactoID: resultado?.contactoID||null, nombreNino: pago.nombre_nino||''
+          });
+          await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [pago.fecha_cita]).catch(()=>{});
+        } catch(err) { console.error('Error Citas:', err.message); }
 
-          try {
-            await crearCitasCalendario({
-              movil: contact.phone||'', email: contact.email||'',
-              fechaISO: pago.fecha_cita, horaInicio: pago.hora_cita,
-              contactoID: resultado?.contactoID||null, nombreNino: pago.nombre_nino||''
-            });
-            await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [pago.fecha_cita]).catch(()=>{});
-          } catch(err) { console.error('Error Citas comprobante:', err.message); }
+        await addTag(contactId, 'escalado nhck');
+        await addTag(contactId, 'validar pago nhck');
+        actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
+        limpiarTimers(conversationId);
+        await logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
+        await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
 
-          await addTag(contactId, 'escalado nhck');
-          await addTag(contactId, 'pagó 100K nhck');
-          await deletePendingPayment(pago.referencia);
-          actualizarEtapaOportunidad(contactId, STAGE_PAGO_PARCIAL).catch(()=>{});
-          limpiarTimers(conversationId);
-          await logEvent(contactId, conversationId, 'pago_comprobante_aprobado', { imageUrl, analisis });
-
-          await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
-          await sendMessages(conversationId, [
-            `✅ ¡Comprobante recibido ${nombrePago}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
-            `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`,
-            `En breve uno de nuestros asesores te escribirá para coordinar los últimos detalles: ubicación del centro, test previo y recomendaciones para el proceso. 🙏`
-          ], contactId);
-        } else {
-          await sendMessage(conversationId, '✅ ¡Comprobante recibido! Un asesor confirmará tu cita en breve. 🙌', contactId);
-        }
-      } else {
-        // Comprobante inválido o no es comprobante
-        const motivo = analisis.es_comprobante
-          ? `El monto o destinatario no corresponde (${analisis.motivo})`
-          : 'La imagen no parece ser un comprobante de pago';
         await sendMessages(conversationId, [
-          `Hmm, no pude verificar el pago con esa imagen 🤔`,
-          `${motivo}. ¿Puedes enviar el comprobante de la transferencia de $100.000 a NHC Kids? También puedes pagar directamente en el link que te envié 👇`
+          `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
+          `Tu cita para el ${fechaL} a las ${horaL} está reservada. Una asesora validará el pago y te confirmará en breve 🙌`,
+          `¡Que tengas un excelente día! 😊`
         ], contactId);
-        await logEvent(contactId, conversationId, 'comprobante_rechazado', { imageUrl, analisis });
+      } else {
+        await sendMessages(conversationId, [
+          `¡Gracias! Recibimos tu comprobante 📋`,
+          `Una asesora lo revisará y te confirmará tu cita en breve 🙌`
+        ], contactId);
+        await addTag(contactId, 'escalado nhck');
+        await addTag(contactId, 'validar pago nhck');
+        await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
       }
-
-      // ya respondido: return res.json({ success: true, imagen: true, aprobado: analisis.aprobado }); return;
+      return;
     }
 
     // Si llega imagen en otro estado, ignorar silenciosamente
-    if (isImage && imageUrl) {
-      // ya respondido: return res.json({ success: true, skipped: true, reason: 'imagen_en_estado_no_aplica' }); return;
-    }
+    if (isImage && imageUrl) { return; }
 
     // Comando reset
     if (lastMsg.trim().toLowerCase() === '/reset') {
