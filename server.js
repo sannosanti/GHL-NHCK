@@ -631,18 +631,75 @@ app.post('/webhook/contact-deleted', async (req, res) => {
   }
 });
 
+// ─── ANÁLISIS DE COMPROBANTE CON CLAUDE VISION ───────────────────────────────
+async function analizarComprobante(imageUrl) {
+  try {
+    // Descargar imagen y convertir a base64
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) throw new Error('No se pudo descargar imagen: ' + imgRes.status);
+    const buffer = await imgRes.buffer();
+    const base64 = buffer.toString('base64');
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 300,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: contentType, data: base64 }
+            },
+            {
+              type: 'text',
+              text: `Analiza este comprobante de pago. Responde SOLO en JSON con este formato exacto:
+{
+  "es_comprobante": true/false,
+  "monto": <número o null>,
+  "destinatario": "<texto o null>",
+  "aprobado": true/false,
+  "motivo": "<razón breve>"
+}
+
+Criterios para aprobado=true:
+- Es un comprobante/recibo de transferencia o pago
+- El monto es entre 80000 y 120000 (pesos colombianos, acepta variaciones)
+- El destinatario menciona: Visión Integral, NHC, Neurohacking, Wompi, o similar
+
+Si no cumple algún criterio, aprobado=false y explica en motivo.`
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '{}';
+    const clean = text.replace(/```json|```/g, '').trim();
+    const result = JSON.parse(clean);
+    console.log('ANÁLISIS COMPROBANTE:', JSON.stringify(result));
+    return result;
+  } catch (err) {
+    console.error('Error analizando comprobante:', err.message);
+    return { es_comprobante: false, aprobado: false, motivo: 'Error al analizar imagen' };
+  }
+}
+
 // ─── WEBHOOK GHL (mensajes WhatsApp) ─────────────────────────────────────────
 app.post('/webhook/ghl', async (req, res) => {
   try {
-    // Log completo de TODOS los mensajes para depuración
-    console.log('WEBHOOK BODY COMPLETO:', JSON.stringify(req.body));
 
     const contactId = req.body.contactId || req.body.customData?.contactId || req.body.contact_id || req.body.contact?.id;
     let conversationId = req.body.conversationId || req.body.customData?.conversationId || '';
     const messageBody = req.body.message?.body || req.body.customData?.message || '';
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
-    const messageType = req.body.message?.type || req.body.type || 'text';
-    const attachments = req.body.message?.attachments || req.body.attachments || [];
+    const messageType = String(req.body.customData?.messageType || req.body.message?.type || req.body.type || '');
+    const imageUrl = req.body.customData?.attachments || null;
+    const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
 
     if (!contactId) return res.status(400).json({ error: 'Faltan datos' });
     if (!conversationId) {
@@ -689,6 +746,86 @@ app.post('/webhook/ghl', async (req, res) => {
       lastMsgId = fetched.id;
     }
     if (!lastMsg) return res.json({ success: true, skipped: true });
+
+    // ─── MANEJO DE IMAGEN ────────────────────────────────────────────────────────
+    if (isImage && imageUrl && estado === 'esperando_pago') {
+      console.log('IMAGEN RECIBIDA en esperando_pago:', imageUrl);
+      await humanDelay();
+
+      const analisis = await analizarComprobante(imageUrl);
+
+      if (analisis.aprobado) {
+        // Comprobante válido — confirmar igual que Wompi
+        const pending = await pool.query(
+          'SELECT * FROM pending_payments WHERE contact_id = $1 ORDER BY created_at DESC LIMIT 1',
+          [contactId]
+        );
+        const pago = pending.rows[0];
+
+        if (pago) {
+          const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+          const [,mm,dd] = (pago.fecha_cita||'').split('-');
+          const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
+          const [hh,min] = (pago.hora_cita||'00:00').split(':');
+          const hN = parseInt(hh);
+          const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
+          const nombrePago = pago.nombre || nombre;
+
+          // Crear en Anamnesis y Zoho Calendario
+          let resultado = null;
+          try {
+            resultado = await crearEnAnamnesis({
+              nombreNino: pago.nombre_nino||contact.firstName||'',
+              email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
+              edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
+              estudia: pago.ocupacion === 'Estudiante de colegio'
+            });
+          } catch(err) { console.error('Error Anamnesis comprobante:', err.message); }
+
+          try {
+            await crearCitasCalendario({
+              movil: contact.phone||'', email: contact.email||'',
+              fechaISO: pago.fecha_cita, horaInicio: pago.hora_cita,
+              contactoID: resultado?.contactoID||null, nombreNino: pago.nombre_nino||''
+            });
+            await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [pago.fecha_cita]).catch(()=>{});
+          } catch(err) { console.error('Error Citas comprobante:', err.message); }
+
+          await addTag(contactId, 'escalado nhck');
+          await addTag(contactId, 'pagó 100K nhck');
+          await deletePendingPayment(pago.referencia);
+          actualizarEtapaOportunidad(contactId, STAGE_PAGO_PARCIAL).catch(()=>{});
+          limpiarTimers(conversationId);
+          await logEvent(contactId, conversationId, 'pago_comprobante_aprobado', { imageUrl, analisis });
+
+          await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
+          await sendMessages(conversationId, [
+            `✅ ¡Comprobante recibido ${nombrePago}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
+            `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`,
+            `En breve uno de nuestros asesores te escribirá para coordinar los últimos detalles: ubicación del centro, test previo y recomendaciones para el proceso. 🙏`
+          ], contactId);
+        } else {
+          await sendMessage(conversationId, '✅ ¡Comprobante recibido! Un asesor confirmará tu cita en breve. 🙌', contactId);
+        }
+      } else {
+        // Comprobante inválido o no es comprobante
+        const motivo = analisis.es_comprobante
+          ? `El monto o destinatario no corresponde (${analisis.motivo})`
+          : 'La imagen no parece ser un comprobante de pago';
+        await sendMessages(conversationId, [
+          `Hmm, no pude verificar el pago con esa imagen 🤔`,
+          `${motivo}. ¿Puedes enviar el comprobante de la transferencia de $100.000 a NHC Kids? También puedes pagar directamente en el link que te envié 👇`
+        ], contactId);
+        await logEvent(contactId, conversationId, 'comprobante_rechazado', { imageUrl, analisis });
+      }
+
+      return res.json({ success: true, imagen: true, aprobado: analisis.aprobado });
+    }
+
+    // Si llega imagen en otro estado, ignorar silenciosamente
+    if (isImage && imageUrl) {
+      return res.json({ success: true, skipped: true, reason: 'imagen_en_estado_no_aplica' });
+    }
 
     // Comando reset
     if (lastMsg.trim().toLowerCase() === '/reset') {
