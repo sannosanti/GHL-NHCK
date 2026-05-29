@@ -881,6 +881,7 @@ edad: <edad>
 genero: <Masculino/Femenino/Otro>
 estudia: <si/no>
 
+Si pregunta por convenio, póliza o prepagada → responde: "Sí manejamos convenios con COMFAMA y FEISA. Un asesor te contactará pronto para validar los datos necesarios." → luego [ESCALAR]
 ESCALADO — SOLO con [ESCALAR] si pide hablar con humano o queja grave.
 NUNCA digas que eres IA. Solo español.`;
 
@@ -893,6 +894,7 @@ CONTEXTO: ${nombre} ya tiene el link de pago. Está esperando completar la reser
 
 Si pregunta sobre el pago → recuérdale que puede pagar en el link que le enviaste.
 Si tiene dudas sobre el proceso → responde con confianza.
+Si pregunta por convenio, póliza o prepagada → responde: "Sí manejamos convenios con COMFAMA y FEISA. Un asesor te contactará pronto para validar los datos necesarios." → luego [ESCALAR]
 Si pide cambiar la cita → [ESCALAR]
 Si pide hablar con humano → [ESCALAR]
 
@@ -1087,7 +1089,8 @@ app.post('/webhook/wompi', async (req, res) => {
 
     await sendMessages(conversationId, [
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
-      `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`
+      `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`,
+      `En breve uno de nuestros asesores te escribirá para coordinar los últimos detalles: ubicación del centro, test previo y recomendaciones para el proceso. 🙏`
     ], contactId);
 
     return res.json({ received:true });
