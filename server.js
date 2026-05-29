@@ -904,7 +904,7 @@ app.post('/webhook/ghl', async (req, res) => {
     // ─── SYSTEM PROMPT SEGÚN ESTADO ───────────────────────────────────────────
     let systemPrompt = '';
 
-    if (estado === 'nuevo' || estado === 'triaje_p1') {
+    if (estado === 'nuevo') {
       systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp — cálida, cercana, humana.
 
 REGLAS DE FORMATO:
@@ -914,24 +914,45 @@ REGLAS DE FORMATO:
 - Tono conversacional
 
 CONTEXTO:
-- ${nombre} acaba de escribir por primera vez o está en el triaje inicial
+- Alguien acaba de escribir por primera vez
 - Eres la primera persona que responde
 - NHC Kids aplica neurotecnologías para la salud mental de niños
 
-TU TAREA AHORA:
-${!convData ? `1. Saluda cálidamente a ${nombre}
-2. Preséntate brevemente como Carolina de NHC Kids
-3. Haz la PRIMERA PREGUNTA del triaje de forma conversacional:
-"¿Cuál es la principal dificultad que están observando en su hijo/a en este momento?"
-Menciona las opciones de forma natural en el mensaje.
-Opciones: Atención/concentración, Bajo rendimiento, Desregulación emocional, Conducta impulsiva, Ansiedad/inseguridad, Otro` :
-`El padre/madre ya respondió. Interpreta su respuesta y mapéala a una de estas opciones:
-${TRIAJE_P1.join(', ')}
-Luego haz la SEGUNDA PREGUNTA:
-"¿Hace cuánto tiempo vienen observando esta situación?"
-Opciones: Menos de 3 meses, 3 a 6 meses, 6 a 12 meses, Más de 1 año`}
+TU TAREA:
+1. Saluda cálidamente
+2. Preséntate como Carolina de NHC Kids
+3. Pregunta: "¿Con quién tengo el gusto de hablar?"
 
-CUANDO TENGAS LA RESPUESTA MAPEADA, incluye al final (invisible para el padre):
+Cuando responda con su nombre, incluye al final:
+[NOMBRE_PADRE: <nombre que dijo>]
+
+ESCALADO — SOLO con [ESCALAR] si pide explícitamente hablar con humano.
+NUNCA digas que eres IA. Solo español.`;
+
+    } else if (estado === 'triaje_p1') {
+      systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp — cálida, cercana, humana.
+
+REGLAS DE FORMATO:
+- Máximo 3 líneas por mensaje
+- Si necesitas decir más, separa con ---
+- Sin asteriscos ni negritas
+- Tono conversacional
+
+CONTEXTO:
+- Hablas con ${nombre}
+- NHC Kids aplica neurotecnologías para la salud mental de niños
+
+TU TAREA:
+Haz la PRIMERA PREGUNTA del triaje de forma conversacional:
+"¿Cuál es la principal dificultad que están observando en su hijo/a en este momento?"
+Menciona las opciones de forma natural.
+Opciones: Atención/concentración, Bajo rendimiento, Desregulación emocional, Conducta impulsiva, Ansiedad/inseguridad, Otro
+
+Cuando el padre responda, interpreta y mapea a una de esas opciones, luego haz la SEGUNDA PREGUNTA:
+"¿Hace cuánto tiempo vienen observando esta situación?"
+Opciones: Menos de 3 meses, 3 a 6 meses, 6 a 12 meses, Más de 1 año
+
+CUANDO TENGAS LA RESPUESTA MAPEADA, incluye al final:
 [TRIAJE_P1: <opción exacta>]
 
 ESCALADO — SOLO con [ESCALAR] si pide explícitamente hablar con humano.
@@ -998,24 +1019,34 @@ DISPONIBILIDAD REAL (usa SOLO estos horarios):
 ${disponibilidadTexto}
 NUNCA confirmes horarios que no estén en esta lista.
 
-DATOS QUE NECESITAS DEL NIÑO/A (recoge natural):
-1. Nombre completo
+DATOS QUE NECESITAS (recoge natural, uno a uno):
+1. Nombre completo del niño/a
 2. Edad
 3. Género (niño/niña)
 4. ¿Estudia actualmente?
+5. Nombre completo del papá/mamá
+6. Correo electrónico del papá/mamá
+7. Ciudad de residencia
 
-CUANDO TENGAS LOS 4 DATOS Y EL PADRE CONFIRME HORARIO:
+CUANDO TENGAS LOS 7 DATOS Y EL PADRE CONFIRME HORARIO:
 Pide confirmación ("¿Confirmamos para ese día y hora?").
 Cuando confirme, responde EXACTAMENTE:
 [CITA_CONFIRMADA]
 fecha: <YYYY-MM-DD>
 hora: <HH:MM en 24h>
-nombre_nino: <nombre completo>
+nombre_nino: <nombre completo del niño/a>
 edad: <edad>
 genero: <Masculino/Femenino/Otro>
 estudia: <si/no>
+nombre_padre: <nombre completo del papá/mamá>
+email: <correo electrónico>
+ciudad: <ciudad>
 
 Si pregunta por convenio, póliza o prepagada → responde: "Sí manejamos convenios con COMFAMA y FEISA. Un asesor te contactará pronto para validar los datos necesarios." → luego [ESCALAR]
+VALIDACIÓN DE CIUDAD — cuando el padre diga su ciudad:
+Ciudades ACEPTADAS: Medellín, Bello, La Estrella, Copacabana, Envigado, Itagüí, Sabaneta, Barbosa, Caldas, Rionegro, La Ceja, Guarne, El Retiro, Marinilla, El Carmen de Viboral, San Vicente, Santuario, y municipios cercanos de Antioquia.
+Si la ciudad NO está en esa lista → incluye [CIUDAD_NO_DISPONIBLE] en tu respuesta y no continúes con la cita.
+
 ESCALADO — SOLO con [ESCALAR] si pide hablar con humano o queja grave.
 NUNCA digas que eres IA. Solo español.`;
 
@@ -1048,6 +1079,24 @@ NUNCA digas que eres IA. Solo español.`;
     // ─── PROCESAR RESPUESTA DE CLAUDE ─────────────────────────────────────────
     let nuevoEstado = estado;
     let nuevoTriaje = { ...triaje };
+
+    // Captura nombre del padre en estado nuevo
+    const matchNombrePadre = rawReply.match(/\[NOMBRE_PADRE:\s*(.+?)\]/);
+    if (matchNombrePadre && estado === 'nuevo') {
+      const nombreCapturado = matchNombrePadre[1].trim();
+      nuevoEstado = 'triaje_p1';
+      // Actualizar nombre en GHL
+      try {
+        const partes = nombreCapturado.split(' ');
+        await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ firstName: partes[0], lastName: partes.slice(1).join(' ') || '' })
+        });
+        await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
+        console.log('NOMBRE PADRE capturado:', nombreCapturado);
+      } catch(e) { console.error('Error actualizando nombre:', e.message); }
+    }
 
     const matchP1 = rawReply.match(/\[TRIAJE_P1:\s*(.+?)\]/);
     const matchP2 = rawReply.match(/\[TRIAJE_P2:\s*(.+?)\]/);
@@ -1083,8 +1132,30 @@ NUNCA digas que eres IA. Solo español.`;
       const genero = extract('genero');
       const estudiaSt = extract('estudia').toLowerCase();
       const estudia = estudiaSt === 'si' || estudiaSt === 'sí';
+      const emailCita = extract('email') || contact.email || '';
+      const nombrePadreCita = extract('nombre_padre') || `${contact.firstName||''} ${contact.lastName||''}`.trim();
+      const ciudadCita = extract('ciudad') || contact.city || '';
 
       console.log('CITA CONFIRMADA:', { fechaCita, horaCita, nombreNino, edad, genero, estudia });
+
+      // Actualizar datos del padre en GHL
+      const ghlUpdate = {};
+      if (emailCita && emailCita !== contact.email) ghlUpdate.email = emailCita;
+      if (ciudadCita && ciudadCita !== contact.city) ghlUpdate.city = ciudadCita;
+      if (nombrePadreCita) {
+        const partes = nombrePadreCita.trim().split(' ');
+        ghlUpdate.firstName = partes[0] || contact.firstName || '';
+        ghlUpdate.lastName = partes.slice(1).join(' ') || contact.lastName || '';
+      }
+      if (Object.keys(ghlUpdate).length > 0) {
+        fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+          body: JSON.stringify(ghlUpdate)
+        }).catch(()=>{});
+        await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
+        console.log('Datos padre actualizados en GHL:', ghlUpdate);
+      }
 
       await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
       actualizarEtapaOportunidad(contactId, STAGE_INFO_COMPLETA).catch(()=>{});
@@ -1096,16 +1167,18 @@ NUNCA digas que eres IA. Solo español.`;
       try {
         const pagoResult = await generarLinkPago({ referencia, monto:100000,
           nombre: `${contact.firstName||''} ${contact.lastName||''}`.trim(),
-          email: contact.email||'', telefono: contact.phone||'' });
+          email: emailCita || contact.email||'', telefono: contact.phone||'' });
         linkPago = pagoResult.url;
-        await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
+        const contactConDatos = { ...contact, email: emailCita || contact.email || '', city: ciudadCita || contact.city || '', firstName: nombrePadreCita.split(' ')[0] || contact.firstName || '', lastName: nombrePadreCita.split(' ').slice(1).join(' ') || contact.lastName || '' };
+        await savePendingPayment(referencia, { contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
           edad, genero, ocupacion: mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
-          nombreNino, nombre, paymentLinkId: pagoResult.linkId });
+          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: pagoResult.linkId });
       } catch (err) {
         console.error('Error link pago:', err.message);
-        await savePendingPayment(referencia, { contactId, conversationId, contact, fechaCita, horaCita,
+        const contactConDatos = { ...contact, email: emailCita || contact.email || '', city: ciudadCita || contact.city || '' };
+        await savePendingPayment(referencia, { contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
           edad, genero, ocupacion: mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
-          nombreNino, nombre, paymentLinkId: null });
+          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: null });
       }
 
       history.push({ role:'assistant', content:[{ type:'text', text:'Cita confirmada, enviando link de pago.' }] });
@@ -1125,6 +1198,19 @@ NUNCA digas que eres IA. Solo español.`;
     }
 
     // ─── ESCALAR ──────────────────────────────────────────────────────────────
+    // ─── CIUDAD NO DISPONIBLE ─────────────────────────────────────────────────
+    if (rawReply.includes('[CIUDAD_NO_DISPONIBLE]')) {
+      const replyLimpio = rawReply.replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '').trim();
+      const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
+      history.push({ role:'assistant', content:[{ type:'text', text: replyLimpio }] });
+      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
+      await addTag(contactId, 'escalado nhck');
+      await logEvent(contactId, conversationId, 'ciudad_no_disponible', { ciudad: lastMsg });
+      await humanDelay();
+      await sendMessages(conversationId, partes, contactId);
+      return res.json({ success:true, ciudad_no_disponible:true });
+    }
+
     if (rawReply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
       await logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
@@ -1138,6 +1224,7 @@ NUNCA digas que eres IA. Solo español.`;
     const reply = rawReply
       .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
       .replace(/\[TRIAJE_COMPLETO\]/g, '')
+      .replace(/\[NOMBRE_PADRE:[^\]]+\]/g, '')
       .split('\n').filter(l => l.trim() !== '').join('\n');
 
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
