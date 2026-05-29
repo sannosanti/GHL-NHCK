@@ -38,7 +38,6 @@ const HORARIOS_NHCK = {
   6: [{ ini: 8.5, fin: 10.5 }]
 };
 
-// Opciones del triaje para mapeo
 const TRIAJE_P1 = ['Atención/concentración', 'Bajo rendimiento', 'Desregulación emocional', 'Conducta impulsiva', 'Ansiedad/inseguridad', 'Otro'];
 const TRIAJE_P2 = ['Menos de 3 meses', '3 a 6 meses', '6 a 12 meses', 'Más de 1 año'];
 const TRIAJE_P3 = ['Psicología', 'Neuropsicología', 'Apoyo escolar', 'Medicación', 'Varias sin resultado', 'Nada aún', 'Otro'];
@@ -54,6 +53,7 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS conversations (
       conversation_id TEXT PRIMARY KEY,
       contact_id TEXT,
+      phone TEXT,
       messages JSONB DEFAULT '[]',
       triaje JSONB DEFAULT '{}',
       estado TEXT DEFAULT 'nuevo',
@@ -95,9 +95,11 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
+  // Migraciones seguras
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre_nino TEXT`).catch(()=>{});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre TEXT`).catch(()=>{});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_link_id TEXT`).catch(()=>{});
+  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phone TEXT`).catch(()=>{});
   console.log('Base de datos inicializada ✓');
 }
 
@@ -109,15 +111,31 @@ async function getConversationData(conversationId) {
   } catch { return null; }
 }
 
-async function saveConversationData(conversationId, contactId, messages, triaje, estado, lastMessageId) {
+async function saveConversationData(conversationId, contactId, messages, triaje, estado, lastMessageId, phone) {
   try {
     await pool.query(`
-      INSERT INTO conversations (conversation_id, contact_id, messages, triaje, estado, last_message_id, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,NOW())
+      INSERT INTO conversations (conversation_id, contact_id, phone, messages, triaje, estado, last_message_id, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
       ON CONFLICT (conversation_id) DO UPDATE
-      SET messages=$3, triaje=$4, estado=$5, last_message_id=$6, updated_at=NOW()
-    `, [conversationId, contactId, JSON.stringify(messages), JSON.stringify(triaje), estado, lastMessageId]);
+      SET messages=$4, triaje=$5, estado=$6, last_message_id=$7, phone=COALESCE($3, conversations.phone), updated_at=NOW()
+    `, [conversationId, contactId, phone||null, JSON.stringify(messages), JSON.stringify(triaje), estado, lastMessageId]);
   } catch (err) { console.error('Error guardando conversación:', err.message); }
+}
+
+async function limpiarContactoDB(contactId) {
+  try {
+    await pool.query('DELETE FROM conversations WHERE contact_id = $1', [contactId]);
+    await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [contactId]);
+    await pool.query('DELETE FROM pending_payments WHERE contact_id = $1', [contactId]);
+    console.log(`DB limpiada para contacto: ${contactId}`);
+  } catch (err) { console.error('Error limpiando contacto DB:', err.message); }
+}
+
+async function limpiarConversacionDB(conversationId) {
+  try {
+    await pool.query('DELETE FROM conversations WHERE conversation_id = $1', [conversationId]);
+    console.log(`DB limpiada para conversación: ${conversationId}`);
+  } catch (err) { console.error('Error limpiando conversación DB:', err.message); }
 }
 
 async function getCachedContact(contactId) {
@@ -540,6 +558,15 @@ async function addTag(contactId, tag) {
   await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
 }
 
+async function removeTag(contactId, tag) {
+  await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags: [tag] })
+  });
+  await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
+}
+
 async function sendMessage(conversationId, message, contactId) {
   const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
     method: 'POST',
@@ -557,7 +584,7 @@ async function sendMessages(conversationId, messages, contactId) {
   }
 }
 
-// ─── WEBHOOK GHL ──────────────────────────────────────────────────────────────
+// ─── ENDPOINTS ────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
 app.get('/reset/:conversationId', async (req, res) => {
@@ -569,12 +596,41 @@ app.get('/reset/:conversationId', async (req, res) => {
 
 app.get('/reset-contact/:contactId', async (req, res) => {
   try {
-    await pool.query('DELETE FROM conversations WHERE contact_id=$1', [req.params.contactId]);
-    await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [req.params.contactId]);
+    await limpiarContactoDB(req.params.contactId);
     res.send(`✓ Contacto ${req.params.contactId} reiniciado`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
+// ─── WEBHOOK: CONTACTO ELIMINADO EN GHL ──────────────────────────────────────
+// Configurar en GHL → Configuración → Webhooks → Evento: ContactDeleted
+// URL: https://miraculous-solace-production-47dd.up.railway.app/webhook/contact-deleted
+app.post('/webhook/contact-deleted', async (req, res) => {
+  try {
+    console.log('CONTACT DELETED WEBHOOK:', JSON.stringify(req.body));
+
+    // GHL puede enviar el ID en distintos campos según la versión del webhook
+    const contactId =
+      req.body.id ||
+      req.body.contactId ||
+      req.body.contact?.id ||
+      req.body.customData?.contactId ||
+      req.body.contact_id;
+
+    if (!contactId) {
+      console.log('Contact-deleted sin contactId:', JSON.stringify(req.body));
+      return res.json({ ok: false, reason: 'no contactId' });
+    }
+
+    await limpiarContactoDB(contactId);
+    console.log(`Contacto ${contactId} eliminado de GHL → DB limpiada`);
+    res.json({ ok: true, contactId });
+  } catch (err) {
+    console.error('Error webhook contact-deleted:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── WEBHOOK GHL (mensajes WhatsApp) ─────────────────────────────────────────
 app.post('/webhook/ghl', async (req, res) => {
   try {
     const contactId = req.body.contactId || req.body.customData?.contactId || req.body.contact_id || req.body.contact?.id;
@@ -593,14 +649,12 @@ app.post('/webhook/ghl', async (req, res) => {
       return res.json({ success: true, skipped: true, reason: 'duplicate' });
     }
 
-    // Limpiar timers al recibir mensaje
     limpiarTimers(conversationId);
 
     const contactData = await getContact(contactId);
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
 
-    // Si está escalado no responder
     if (tags.includes('escalado nhck')) {
       return res.json({ success: true, skipped: true, reason: 'escalado' });
     }
@@ -616,28 +670,20 @@ app.post('/webhook/ghl', async (req, res) => {
 
     // Comando reset
     if (lastMsg.trim().toLowerCase() === '/reset') {
-      await pool.query('DELETE FROM conversations WHERE conversation_id=$1', [conversationId]);
-      await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]);
-      // Quitar etiqueta escalado para que Carolina pueda responder de nuevo
-      try {
-        await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tags: ['escalado nhck'] })
-        });
-      } catch(e) { console.error('Error quitando tag:', e.message); }
+      await limpiarContactoDB(contactId);
+      await removeTag(contactId, 'escalado nhck');
       await sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
       return res.json({ success: true, reset: true });
     }
 
     const nombre = contact.firstName || 'Hola';
+    const phone = contact.phone || '';
     const estado = convData?.estado || 'nuevo';
     const triaje = convData?.triaje || {};
     let history = convData?.messages || [];
 
     console.log('ESTADO:', estado, '| CONTACTO:', nombre);
 
-    // Crear oportunidad si es primera interacción
     if (!convData) {
       crearOportunidad(contactId, `${contact.firstName||''} ${contact.lastName||''}`.trim(), STAGE_INICIO).catch(()=>{});
     }
@@ -820,7 +866,6 @@ NUNCA digas que eres IA. Solo español.`;
     let nuevoEstado = estado;
     let nuevoTriaje = { ...triaje };
 
-    // Extraer datos del triaje
     const matchP1 = rawReply.match(/\[TRIAJE_P1:\s*(.+?)\]/);
     const matchP2 = rawReply.match(/\[TRIAJE_P2:\s*(.+?)\]/);
     const matchP3 = rawReply.match(/\[TRIAJE_P3:\s*(.+?)\]/);
@@ -842,7 +887,6 @@ NUNCA digas que eres IA. Solo español.`;
     }
     if (triajeCompleto) {
       nuevoEstado = 'triaje_completo';
-      // Guardar triaje en GHL como etiqueta
       addTag(contactId, `nhck-triaje-${nuevoTriaje.triaje1?.toLowerCase().replace(/[^a-z0-9]/g,'-').substring(0,20) || 'completado'}`).catch(()=>{});
       actualizarEtapaOportunidad(contactId, STAGE_INICIO).catch(()=>{});
       console.log('TRIAJE COMPLETO:', nuevoTriaje);
@@ -882,7 +926,7 @@ NUNCA digas que eres IA. Solo español.`;
       }
 
       history.push({ role:'assistant', content:[{ type:'text', text:'Cita confirmada, enviando link de pago.' }] });
-      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId);
+      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
       await humanDelay();
 
       const mensajes = linkPago
@@ -901,14 +945,13 @@ NUNCA digas que eres IA. Solo español.`;
     if (rawReply.includes('[ESCALAR]')) {
       await addTag(contactId, 'escalado nhck');
       await logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
-      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId);
+      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
       await humanDelay();
       await sendMessage(conversationId, 'En un momento un asesor te va a ayudar 🙌', contactId);
       return res.json({ success:true, escalated:true });
     }
 
     // ─── RESPUESTA NORMAL ──────────────────────────────────────────────────────
-    // Limpiar tags internos del reply
     const reply = rawReply
       .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
       .replace(/\[TRIAJE_COMPLETO\]/g, '')
@@ -917,7 +960,7 @@ NUNCA digas que eres IA. Solo español.`;
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
 
     history.push({ role:'assistant', content:[{ type:'text', text:reply }] });
-    await saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId);
+    await saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
     await humanDelay();
     await sendMessages(conversationId, partes, contactId);
     iniciarTimersInactividad(conversationId, contactId);
@@ -949,8 +992,6 @@ app.post('/webhook/wompi', async (req, res) => {
         return val !== undefined && val !== null ? String(val) : '';
       }).join('') + String(timestamp) + WOMPI_INTEGRITY_KEY;
       const firmaCalc = crypto.createHash('sha256').update(cadena).digest('hex');
-      console.log('Firma calculada:', firmaCalc);
-      console.log('Firma recibida:', checksum);
       if (firmaCalc !== checksum) {
         console.error('Firma Wompi inválida — procesando de todas formas en modo test');
         if (req.body?.environment !== 'test') return res.status(401).json({ error:'Firma inválida' });
