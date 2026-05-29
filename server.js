@@ -819,24 +819,6 @@ app.post('/webhook/ghl', async (req, res) => {
     const imageUrl = req.body.customData?.attachments || null;
     const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
 
-    // ─── BUFFER ANTI-MULTI-MENSAJE ────────────────────────────────────────────
-    if (!isImage && messageBody && messageBody.trim()) {
-      if (messageBuffers[contactId]) {
-        // Ya hay buffer — acumular y salir (el primero procesará todo)
-        messageBuffers[contactId].push(messageBody.trim());
-        console.log(`BUFFER: acumulado "${messageBody.trim()}" para ${contactId}`);
-        return;
-      } else {
-        // Primer mensaje — crear buffer y esperar 3s
-        messageBuffers[contactId] = [messageBody.trim()];
-        await new Promise(r => setTimeout(r, 3000));
-        const buffered = messageBuffers[contactId] || [messageBody.trim()];
-        delete messageBuffers[contactId];
-        messageBody = buffered.join(' ');
-        if (buffered.length > 1) console.log(`BUFFER: combinado "${messageBody}"`);
-      }
-    }
-
     if (!conversationId) {
       // GHL a veces tarda en crear la conversación — reintentar hasta 3 veces
       for (let i = 0; i < 3; i++) {
