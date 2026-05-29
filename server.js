@@ -821,13 +821,13 @@ app.post('/webhook/ghl', async (req, res) => {
 
     // ─── DEDUPLICACIÓN POR TIEMPO ─────────────────────────────────────────────
     // Evitar procesar el mismo mensaje dos veces (GHL dispara webhook doble)
-    const dedupKey = `dedup_${contactId}`;
+    const dedupKey = `dedup_${contactId}_${messageBody?.trim()?.substring(0,20)||'img'}`;
     if (messageBuffers[dedupKey]) {
-      console.log(`DEDUP: mensaje duplicado para ${contactId}, ignorando`);
+      console.log(`DEDUP: mensaje duplicado ignorado para ${contactId}`);
       return;
     }
     messageBuffers[dedupKey] = true;
-    setTimeout(() => { delete messageBuffers[dedupKey]; }, 5000);
+    setTimeout(() => { delete messageBuffers[dedupKey]; }, 8000);
 
     if (!conversationId) {
       // GHL a veces tarda en crear la conversación — reintentar hasta 3 veces
@@ -872,11 +872,10 @@ app.post('/webhook/ghl', async (req, res) => {
       lastMsg = fetched.body;
       lastMsgId = fetched.id;
     }
-    if (!lastMsg) // ya respondido: return res.json({ success: true, skipped: true }); return;
-
     // ─── MANEJO DE IMAGEN ────────────────────────────────────────────────────────
-    if (isImage && imageUrl && estado === 'esperando_pago') {
-      console.log('IMAGEN RECIBIDA en esperando_pago:', imageUrl);
+    // GHL no envía imageUrl en workflow — detectar por mensaje vacío en estado esperando_pago
+    if ((!lastMsg && estado === 'esperando_pago') || (isImage && imageUrl && estado === 'esperando_pago')) {
+      console.log('IMAGEN/ARCHIVO RECIBIDO en esperando_pago:', imageUrl || 'sin URL');
       await humanDelay();
 
       // Obtener datos del pago pendiente
