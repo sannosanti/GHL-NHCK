@@ -619,7 +619,15 @@ app.get('/reset/:conversationId', async (req, res) => {
 app.get('/reset-contact/:contactId', async (req, res) => {
   try {
     await limpiarContactoDB(req.params.contactId);
-    res.send(`✓ Contacto ${req.params.contactId} reiniciado`);
+    // Quitar etiqueta escalado nhck en GHL
+    try {
+      await fetch(`https://services.leadconnectorhq.com/contacts/${req.params.contactId}/tags`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: ['escalado nhck'] })
+      });
+    } catch(e) { console.error('Error quitando tag:', e.message); }
+    res.send(`✓ Contacto ${req.params.contactId} reiniciado y etiqueta escalado removida`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
