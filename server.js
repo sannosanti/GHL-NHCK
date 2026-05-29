@@ -872,72 +872,6 @@ app.post('/webhook/ghl', async (req, res) => {
       lastMsg = fetched.body;
       lastMsgId = fetched.id;
     }
-    // ─── MANEJO DE IMAGEN ────────────────────────────────────────────────────────
-    // GHL no envía imageUrl en workflow — detectar por mensaje vacío en estado esperando_pago
-    if ((!lastMsg && estado === 'esperando_pago') || (isImage && imageUrl && estado === 'esperando_pago')) {
-      console.log('IMAGEN/ARCHIVO RECIBIDO en esperando_pago:', imageUrl || 'sin URL');
-      await humanDelay();
-
-      // Obtener datos del pago pendiente
-      const pending = await pool.query(
-        'SELECT * FROM pending_payments WHERE contact_id = $1 ORDER BY created_at DESC LIMIT 1',
-        [contactId]
-      );
-      const pago = pending.rows[0];
-
-      if (pago) {
-        const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-        const [,mm,dd] = (pago.fecha_cita||'').split('-');
-        const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
-        const [hh,min] = (pago.hora_cita||'00:00').split(':');
-        const hN = parseInt(hh);
-        const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
-        const nombrePago = pago.nombre || nombre;
-
-        // Crear cita en Zoho automáticamente
-        let resultado = null;
-        try {
-          resultado = await crearEnAnamnesis({
-            nombreNino: pago.nombre_nino||contact.firstName||'',
-            email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
-            edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
-            estudia: pago.ocupacion === 'Estudiante de colegio'
-          });
-        } catch(err) { console.error('Error Anamnesis:', err.message); }
-
-        try {
-          await crearCitasCalendario({
-            movil: contact.phone||'', email: contact.email||'',
-            fechaISO: pago.fecha_cita, horaInicio: pago.hora_cita,
-            contactoID: resultado?.contactoID||null, nombreNino: pago.nombre_nino||''
-          });
-          await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [pago.fecha_cita]).catch(()=>{});
-        } catch(err) { console.error('Error Citas:', err.message); }
-
-        await addTag(contactId, 'escalado nhck');
-        await addTag(contactId, 'validar pago nhck');
-        actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
-        limpiarTimers(conversationId);
-        await logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
-        await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
-
-        await sendMessages(conversationId, [
-          `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
-          `Tu cita para el ${fechaL} a las ${horaL} está reservada. Una asesora validará el pago y te confirmará en breve 🙌`,
-          `¡Que tengas un excelente día! 😊`
-        ], contactId);
-      } else {
-        await sendMessages(conversationId, [
-          `¡Gracias! Recibimos tu comprobante 📋`,
-          `Una asesora lo revisará y te confirmará tu cita en breve 🙌`
-        ], contactId);
-        await addTag(contactId, 'escalado nhck');
-        await addTag(contactId, 'validar pago nhck');
-        await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
-      }
-      return;
-    }
-
     // Si llega imagen en otro estado, ignorar silenciosamente
     if (isImage && imageUrl) { return; }
 
@@ -1398,6 +1332,71 @@ O usa la llave Bancolombia: 0090435866`,
       await humanDelay();
       await sendMessage(conversationId, 'En un momento un asesor te va a ayudar 🙌', contactId);
       // ya respondido: return res.json({ success:true, escalated:true }); return;
+    }
+
+
+    // ─── MANEJO DE IMAGEN / MENSAJE VACÍO EN ESPERANDO_PAGO ──────────────────────
+    // GHL no envía URL de imagen en workflow — detectar por mensaje vacío
+    if ((!lastMsg && estado === 'esperando_pago') || (isImage && imageUrl && estado === 'esperando_pago')) {
+      console.log('IMAGEN/ARCHIVO RECIBIDO en esperando_pago:', imageUrl || 'sin URL');
+      await humanDelay();
+
+      const pending = await pool.query(
+        'SELECT * FROM pending_payments WHERE contact_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [contactId]
+      );
+      const pago = pending.rows[0];
+
+      if (pago) {
+        const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+        const [,mm,dd] = (pago.fecha_cita||'').split('-');
+        const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
+        const [hh,min] = (pago.hora_cita||'00:00').split(':');
+        const hN = parseInt(hh);
+        const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
+        const nombrePago = pago.nombre || nombre;
+
+        let resultado = null;
+        try {
+          resultado = await crearEnAnamnesis({
+            nombreNino: pago.nombre_nino||contact.firstName||'',
+            email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
+            edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
+            estudia: pago.ocupacion === 'Estudiante de colegio'
+          });
+        } catch(err) { console.error('Error Anamnesis:', err.message); }
+
+        try {
+          await crearCitasCalendario({
+            movil: contact.phone||'', email: contact.email||'',
+            fechaISO: pago.fecha_cita, horaInicio: pago.hora_cita,
+            contactoID: resultado?.contactoID||null, nombreNino: pago.nombre_nino||''
+          });
+          await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [pago.fecha_cita]).catch(()=>{});
+        } catch(err) { console.error('Error Citas:', err.message); }
+
+        await addTag(contactId, 'escalado nhck');
+        await addTag(contactId, 'validar pago nhck');
+        actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
+        limpiarTimers(conversationId);
+        await logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
+        await saveConversationData(conversationId, contactId, history, nuevoTriaje || triaje, 'escalado', lastMsgId, phone);
+
+        await sendMessages(conversationId, [
+          `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
+          `Tu cita para el ${fechaL} a las ${horaL} está reservada. Una asesora validará el pago y te confirmará en breve 🙌`,
+          `¡Que tengas un excelente día! 😊`
+        ], contactId);
+      } else {
+        await sendMessages(conversationId, [
+          `¡Gracias! Recibimos tu comprobante 📋`,
+          `Una asesora lo revisará y te confirmará tu cita en breve 🙌`
+        ], contactId);
+        await addTag(contactId, 'escalado nhck');
+        await addTag(contactId, 'validar pago nhck');
+        await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
+      }
+      return;
     }
 
     // ─── RESPUESTA NORMAL ──────────────────────────────────────────────────────
