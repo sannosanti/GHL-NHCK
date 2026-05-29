@@ -582,48 +582,20 @@ async function sendMessage(conversationId, message, contactId) {
 
 async function sendImage(conversationId, contactId, imageUrl, caption) {
   try {
-    // Descargar imagen y convertir a base64
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error('No se pudo descargar imagen: ' + imgRes.status);
-    const buffer = await imgRes.buffer();
-    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
-    const ext = contentType.includes('png') ? 'png' : 'jpeg';
-    const filename = `qr-nhckids.${ext}`;
-
-    // Construir multipart manualmente
-    const boundary = '----FormBoundary' + Date.now();
-    const CRLF = '\r\n';
-    const header = Buffer.from(
-      `--${boundary}${CRLF}` +
-      `Content-Disposition: form-data; name="fileAttachment"; filename="${filename}"${CRLF}` +
-      `Content-Type: ${contentType}${CRLF}${CRLF}`
-    );
-    const footer = Buffer.from(`${CRLF}--${boundary}--${CRLF}`);
-    const body = Buffer.concat([header, buffer, footer]);
-
-    const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages/upload`, {
+    // Enviar imagen como URL pública directa
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GHL_KEY}`,
-        'Version': '2021-04-15',
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': body.length
-      },
-      body
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'WhatsApp',
+        conversationId,
+        contactId,
+        attachments: [imageUrl],
+        message: caption || ''
+      })
     });
     const data = await res.json();
     console.log('SEND IMG:', JSON.stringify(data));
-
-    // Si el upload devuelve una URL, enviarla como mensaje
-    if (data?.url || data?.mediaUrl) {
-      const mediaUrl = data.url || data.mediaUrl;
-      await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'WhatsApp', conversationId, contactId,
-          attachments: [mediaUrl], message: caption || '' })
-      });
-    }
   } catch(err) { console.error('Error enviando imagen:', err.message); }
 }
 
@@ -812,7 +784,7 @@ app.post('/webhook/ghl', async (req, res) => {
     const convData = await getConversationData(conversationId);
     if (messageId && convData?.last_message_id === messageId) {
       console.log('Mensaje duplicado, saltando:', messageId);
-      return res.json({ success: true, skipped: true, reason: 'duplicate' });
+      // ya respondido: return res.json({ success: true, skipped: true, reason: 'duplicate' }); return;
     }
 
     limpiarTimers(conversationId);
@@ -823,14 +795,14 @@ app.post('/webhook/ghl', async (req, res) => {
     if (contactData.deleted) {
       console.log(`Contacto ${contactId} no existe en GHL (404) — limpiando DB`);
       await limpiarContactoDB(contactId);
-      return res.json({ success: true, skipped: true, reason: 'contact_deleted' });
+      // ya respondido: return res.json({ success: true, skipped: true, reason: 'contact_deleted' }); return;
     }
 
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
 
     if (tags.includes('escalado nhck')) {
-      return res.json({ success: true, skipped: true, reason: 'escalado' });
+      // ya respondido: return res.json({ success: true, skipped: true, reason: 'escalado' }); return;
     }
 
     let lastMsg = messageBody;
@@ -840,7 +812,7 @@ app.post('/webhook/ghl', async (req, res) => {
       lastMsg = fetched.body;
       lastMsgId = fetched.id;
     }
-    if (!lastMsg) return res.json({ success: true, skipped: true });
+    if (!lastMsg) // ya respondido: return res.json({ success: true, skipped: true }); return;
 
     // ─── MANEJO DE IMAGEN ────────────────────────────────────────────────────────
     if (isImage && imageUrl && estado === 'esperando_pago') {
@@ -914,12 +886,12 @@ app.post('/webhook/ghl', async (req, res) => {
         await logEvent(contactId, conversationId, 'comprobante_rechazado', { imageUrl, analisis });
       }
 
-      return res.json({ success: true, imagen: true, aprobado: analisis.aprobado });
+      // ya respondido: return res.json({ success: true, imagen: true, aprobado: analisis.aprobado }); return;
     }
 
     // Si llega imagen en otro estado, ignorar silenciosamente
     if (isImage && imageUrl) {
-      return res.json({ success: true, skipped: true, reason: 'imagen_en_estado_no_aplica' });
+      // ya respondido: return res.json({ success: true, skipped: true, reason: 'imagen_en_estado_no_aplica' }); return;
     }
 
     // Comando reset
@@ -927,7 +899,7 @@ app.post('/webhook/ghl', async (req, res) => {
       await limpiarContactoDB(contactId);
       await removeTag(contactId, 'escalado nhck');
       await sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
-      return res.json({ success: true, reset: true });
+      // ya respondido: return res.json({ success: true, reset: true }); return;
     }
 
     const nombre = contact.firstName || 'Hola';
@@ -1295,7 +1267,7 @@ NUNCA digas que eres IA. Solo español.`;
 
       actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
       iniciarTimersInactividad(conversationId, contactId);
-      return res.json({ success:true, citaPendientePago:true, referencia });
+      // ya respondido: return res.json({ success:true, citaPendientePago:true, referencia }); return;
     }
 
     // ─── ESCALAR ──────────────────────────────────────────────────────────────
@@ -1323,7 +1295,7 @@ ${linkPago}`,
           ], contactId);
         }
         await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
-        return res.json({ success: true, medio: 'wompi' });
+        // ya respondido: return res.json({ success: true, medio: 'wompi' }); return;
       }
 
       if (rawReply.includes('[MEDIO_TRANSFERENCIA]')) {
@@ -1338,7 +1310,7 @@ NIT: 901164425`,
           `Una vez realizado el pago envíame aquí la foto o captura del comprobante y confirmo tu cita 📸`
         ], contactId);
         await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
-        return res.json({ success: true, medio: 'transferencia' });
+        // ya respondido: return res.json({ success: true, medio: 'transferencia' }); return;
       }
 
       if (rawReply.includes('[MEDIO_QR]')) {
@@ -1352,7 +1324,7 @@ NIT: 901164425`,
         await sendMessage(conversationId, `También puedes usar la llave Bancolombia: 0090435866
 Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
         await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
-        return res.json({ success: true, medio: 'qr' });
+        // ya respondido: return res.json({ success: true, medio: 'qr' }); return;
       }
     }
 
@@ -1366,7 +1338,7 @@ Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
       await logEvent(contactId, conversationId, 'ciudad_no_disponible', { ciudad: lastMsg });
       await humanDelay();
       await sendMessages(conversationId, partes, contactId);
-      return res.json({ success:true, ciudad_no_disponible:true });
+      // ya respondido: return res.json({ success:true, ciudad_no_disponible:true }); return;
     }
 
     if (rawReply.includes('[ESCALAR]')) {
@@ -1375,7 +1347,7 @@ Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
       await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
       await humanDelay();
       await sendMessage(conversationId, 'En un momento un asesor te va a ayudar 🙌', contactId);
-      return res.json({ success:true, escalated:true });
+      // ya respondido: return res.json({ success:true, escalated:true }); return;
     }
 
     // ─── RESPUESTA NORMAL ──────────────────────────────────────────────────────
@@ -1396,7 +1368,7 @@ Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
 
   } catch (error) {
     console.error('Error webhook GHL:', error);
-    res.status(500).json({ error: error.message });
+    console.error("Error interno:", error.message);
   }
 });
 
