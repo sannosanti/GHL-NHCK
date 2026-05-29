@@ -1254,7 +1254,7 @@ Número: 90790901451
 Llave: 0090435866
 A nombre de: Visión Integral Transformación Personal y Organizacional SAS
 NIT: 901164425`,
-          `Cuando hagas el pago envíame el comprobante aquí y confirmo tu cita 🙌`
+          `Una vez realizado el pago envíame aquí la foto o captura del comprobante y confirmo tu cita 📸`
         ], contactId);
         await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
         return res.json({ success: true, medio: 'transferencia' });
