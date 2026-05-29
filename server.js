@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const crypto = require('crypto');
 const app = express();
 app.use(express.json());
+app.use('/public', require('express').static('public')); // Archivos estáticos (QR, etc)
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GHL_KEY = process.env.GHL_API_KEY;
@@ -1345,7 +1346,7 @@ NIT: 901164425`,
         await sendMessage(conversationId, `Escanea este QR para pagar $100.000 👇`, contactId);
         await new Promise(r => setTimeout(r, 1000));
         await sendImage(conversationId, contactId,
-          'https://neurohackingcenter.co/wp-content/uploads/2026/05/WhatsApp-Image-2026-05-29-at-11.00.03-AM.jpeg',
+          'https://miraculous-solace-production-47dd.up.railway.app/public/QR%20PAGO.jpeg',
           'QR de pago NHC Kids');
         await new Promise(r => setTimeout(r, 1000));
         await sendMessage(conversationId, `También puedes usar la llave Bancolombia: 0090435866
