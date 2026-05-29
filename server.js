@@ -873,6 +873,16 @@ app.post('/webhook/ghl', async (req, res) => {
       lastMsg = fetched.body;
       lastMsgId = fetched.id;
     }
+    // Log cuando llega mensaje vacío para debug
+    if (!lastMsg && !messageBody) {
+      console.log('WEBHOOK SIN TEXTO - body completo:', JSON.stringify({
+        messageType, imageUrl, isImage,
+        customData: req.body.customData,
+        message: req.body.message,
+        type: req.body.type
+      }));
+    }
+
     // Si llega imagen en otro estado, ignorar silenciosamente
     if (isImage && imageUrl) { return; }
 
