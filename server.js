@@ -28,6 +28,7 @@ const STAGE_LINK_PAGO = '87c45501-386f-418e-95e7-6975b20559a6';
 const STAGE_PAGO_PARCIAL = '18571c0c-5c8f-40f1-9440-e865670ac108';
 
 const inactivityTimers = {};
+const messageBuffers = {}; // Buffer para agrupar mensajes rápidos del mismo usuario
 
 const HORARIOS_NHCK = {
   1: [{ ini: 14, fin: 15.5 }],
@@ -645,6 +646,32 @@ app.post('/webhook/contact-deleted', async (req, res) => {
   }
 });
 
+// ─── BUFFER DE MENSAJES ──────────────────────────────────────────────────────
+// Acumula mensajes del mismo contacto en una ventana de 3 segundos
+function bufferMessage(contactId, message, callback) {
+  if (messageBuffers[contactId]) {
+    // Ya hay un buffer activo — acumular mensaje y reiniciar timer
+    if (message && message.trim()) {
+      messageBuffers[contactId].messages.push(message.trim());
+    }
+    clearTimeout(messageBuffers[contactId].timer);
+  } else {
+    // Nuevo buffer
+    messageBuffers[contactId] = {
+      messages: message && message.trim() ? [message.trim()] : [],
+      callback: callback
+    };
+  }
+
+  // Timer: procesar después de 3 segundos sin nuevos mensajes
+  messageBuffers[contactId].timer = setTimeout(() => {
+    const buffered = messageBuffers[contactId];
+    delete messageBuffers[contactId];
+    const combinedMessage = buffered.messages.join(' ');
+    buffered.callback(combinedMessage);
+  }, 3000);
+}
+
 // ─── ANÁLISIS DE COMPROBANTE CON CLAUDE VISION ───────────────────────────────
 async function analizarComprobante(imageUrl) {
   try {
@@ -705,17 +732,37 @@ Si no cumple algún criterio, aprobado=false y explica en motivo.`
 
 // ─── WEBHOOK GHL (mensajes WhatsApp) ─────────────────────────────────────────
 app.post('/webhook/ghl', async (req, res) => {
-  try {
+  res.json({ success: true, received: true }); // Responder inmediatamente a GHL
 
+  try {
     const contactId = req.body.contactId || req.body.customData?.contactId || req.body.contact_id || req.body.contact?.id;
+    if (!contactId) return;
+
     let conversationId = req.body.conversationId || req.body.customData?.conversationId || '';
-    const messageBody = req.body.message?.body || req.body.customData?.message || '';
+    let messageBody = req.body.message?.body || req.body.customData?.message || '';
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
     const messageType = String(req.body.customData?.messageType || req.body.message?.type || req.body.type || '');
     const imageUrl = req.body.customData?.attachments || null;
     const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
 
-    if (!contactId) return res.status(400).json({ error: 'Faltan datos' });
+    // ─── BUFFER ANTI-MULTI-MENSAJE ────────────────────────────────────────────
+    if (!isImage && messageBody && messageBody.trim()) {
+      if (messageBuffers[contactId]) {
+        // Ya hay buffer — acumular y salir (el primero procesará todo)
+        messageBuffers[contactId].push(messageBody.trim());
+        console.log(`BUFFER: acumulado "${messageBody.trim()}" para ${contactId}`);
+        return;
+      } else {
+        // Primer mensaje — crear buffer y esperar 3s
+        messageBuffers[contactId] = [messageBody.trim()];
+        await new Promise(r => setTimeout(r, 3000));
+        const buffered = messageBuffers[contactId] || [messageBody.trim()];
+        delete messageBuffers[contactId];
+        messageBody = buffered.join(' ');
+        if (buffered.length > 1) console.log(`BUFFER: combinado "${messageBody}"`);
+      }
+    }
+
     if (!conversationId) {
       // GHL a veces tarda en crear la conversación — reintentar hasta 3 veces
       for (let i = 0; i < 3; i++) {
@@ -1311,7 +1358,7 @@ Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
     await humanDelay();
     await sendMessages(conversationId, partes, contactId);
     iniciarTimersInactividad(conversationId, contactId);
-    res.json({ success:true, reply, estado: nuevoEstado });
+    console.log('RESPUESTA OK:', { reply: reply?.substring(0,50), estado: nuevoEstado });
 
   } catch (error) {
     console.error('Error webhook GHL:', error);
