@@ -582,7 +582,7 @@ async function sendMessage(conversationId, message, contactId) {
 
 async function sendImage(conversationId, contactId, imageUrl, caption) {
   try {
-    // Enviar imagen como URL pública directa
+    // Intentar con attachments como array de objetos
     const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
@@ -590,7 +590,7 @@ async function sendImage(conversationId, contactId, imageUrl, caption) {
         type: 'WhatsApp',
         conversationId,
         contactId,
-        attachments: [imageUrl],
+        attachments: [{ url: imageUrl, type: 'image/jpeg' }],
         message: caption || ''
       })
     });
@@ -1355,6 +1355,10 @@ Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
       .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
       .replace(/\[TRIAJE_COMPLETO\]/g, '')
       .replace(/\[NOMBRE_PADRE:[^\]]+\]/g, '')
+      .replace(/\[MEDIO_WOMPI\]/g, '')
+      .replace(/\[MEDIO_TRANSFERENCIA\]/g, '')
+      .replace(/\[MEDIO_QR\]/g, '')
+      .replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '')
       .split('\n').filter(l => l.trim() !== '').join('\n');
 
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
