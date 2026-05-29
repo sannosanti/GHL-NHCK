@@ -821,17 +821,14 @@ app.post('/webhook/ghl', async (req, res) => {
 
     // ─── DEDUPLICACIÓN POR TIEMPO ─────────────────────────────────────────────
     // Evitar procesar el mismo mensaje dos veces (GHL dispara webhook doble)
-    // Deduplicación en DB — ignorar si ya procesamos este contacto en los últimos 4 segundos
-    try {
-      const dedupRes = await pool.query(
-        "SELECT updated_at FROM conversations WHERE conversation_id=$1 AND updated_at > NOW() - INTERVAL '4 seconds'",
-        [conversationId]
-      );
-      if (dedupRes.rows.length > 0 && messageBody) {
-        console.log(`DEDUP DB: webhook duplicado ignorado para ${contactId}`);
-        return;
-      }
-    } catch(e) {}
+    // Deduplicación en memoria por conversationId — ignora segundo webhook de GHL
+    const dedupKey = `proc_${conversationId}`;
+    if (messageBuffers[dedupKey]) {
+      console.log(`DEDUP: webhook doble ignorado para ${conversationId}`);
+      return;
+    }
+    messageBuffers[dedupKey] = true;
+    setTimeout(() => { delete messageBuffers[dedupKey]; }, 6000);
 
     if (!conversationId) {
       // GHL a veces tarda en crear la conversación — reintentar hasta 3 veces
