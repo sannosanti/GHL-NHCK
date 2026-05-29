@@ -819,6 +819,16 @@ app.post('/webhook/ghl', async (req, res) => {
     const imageUrl = req.body.customData?.attachments || null;
     const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
 
+    // ─── DEDUPLICACIÓN POR TIEMPO ─────────────────────────────────────────────
+    // Evitar procesar el mismo mensaje dos veces (GHL dispara webhook doble)
+    const dedupKey = `dedup_${contactId}`;
+    if (messageBuffers[dedupKey]) {
+      console.log(`DEDUP: mensaje duplicado para ${contactId}, ignorando`);
+      return;
+    }
+    messageBuffers[dedupKey] = true;
+    setTimeout(() => { delete messageBuffers[dedupKey]; }, 5000);
+
     if (!conversationId) {
       // GHL a veces tarda en crear la conversación — reintentar hasta 3 veces
       for (let i = 0; i < 3; i++) {
