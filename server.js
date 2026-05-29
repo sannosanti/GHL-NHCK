@@ -578,6 +578,20 @@ async function sendMessage(conversationId, message, contactId) {
   console.log('SEND MSG:', JSON.stringify(data));
 }
 
+async function sendImage(conversationId, contactId, imageUrl, caption) {
+  try {
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type:'WhatsApp', conversationId, contactId,
+        attachments: [{ type: 'image/jpeg', url: imageUrl }],
+        message: caption || '' })
+    });
+    const data = await res.json();
+    console.log('SEND IMG:', JSON.stringify(data));
+  } catch(err) { console.error('Error enviando imagen:', err.message); }
+}
+
 async function sendMessages(conversationId, messages, contactId) {
   for (let i = 0; i < messages.length; i++) {
     await sendMessage(conversationId, messages[i], contactId);
@@ -921,7 +935,8 @@ CONTEXTO:
 TU TAREA:
 1. Saluda cálidamente
 2. Preséntate como Carolina de NHC Kids
-3. Pregunta: "¿Con quién tengo el gusto de hablar?"
+3. Menciona en un mensaje breve que al continuar la conversación la persona acepta nuestras políticas de privacidad disponibles en https://neurohackingcenter.co/politicas-de-privacidad/
+4. Pregunta: "¿Con quién tengo el gusto de hablar?"
 
 Cuando responda con su nombre, incluye al final:
 [NOMBRE_PADRE: <nombre que dijo>]
@@ -943,14 +958,17 @@ CONTEXTO:
 - NHC Kids aplica neurotecnologías para la salud mental de niños
 
 TU TAREA:
+IMPORTANTE: Lee TODO el historial de la conversación. Si el padre YA mencionó la dificultad o el tiempo en mensajes anteriores, NO vuelvas a preguntarlo — extrae la respuesta directamente de lo que ya dijo.
+
 Haz la PRIMERA PREGUNTA del triaje de forma conversacional:
 "¿Cuál es la principal dificultad que están observando en su hijo/a en este momento?"
-Menciona las opciones de forma natural.
 Opciones: Atención/concentración, Bajo rendimiento, Desregulación emocional, Conducta impulsiva, Ansiedad/inseguridad, Otro
 
-Cuando el padre responda, interpreta y mapea a una de esas opciones, luego haz la SEGUNDA PREGUNTA:
+Si el padre ya respondió P1, interpreta y mapea, luego haz la SEGUNDA PREGUNTA:
 "¿Hace cuánto tiempo vienen observando esta situación?"
 Opciones: Menos de 3 meses, 3 a 6 meses, 6 a 12 meses, Más de 1 año
+
+Si el padre ya respondió P2 también (por ejemplo dijo "hace 3 meses"), mapea ambas y pasa directo a [TRIAJE_P1] y [TRIAJE_P2] juntos.
 
 CUANDO TENGAS LA RESPUESTA MAPEADA, incluye al final:
 [TRIAJE_P1: <opción exacta>]
@@ -1055,10 +1073,14 @@ NUNCA digas que eres IA. Solo español.`;
 
 REGLAS: Máximo 3 líneas, sin negritas.
 
-CONTEXTO: ${nombre} ya tiene el link de pago. Está esperando completar la reserva.
+CONTEXTO: ${nombre} acaba de confirmar su cita y debe hacer la reserva de $100.000.
+Se le preguntó qué medio de pago prefiere. Según su respuesta:
 
-Si pregunta sobre el pago → recuérdale que puede pagar en el link que le enviaste.
-Si tiene dudas sobre el proceso → responde con confianza.
+Si elige opción 1 (Link / Wompi / virtual / online) → responde EXACTAMENTE: [MEDIO_WOMPI]
+Si elige opción 2 (Transferencia / consignación / Bancolombia) → responde EXACTAMENTE: [MEDIO_TRANSFERENCIA]
+Si elige opción 3 (QR) → responde EXACTAMENTE: [MEDIO_QR]
+
+Si ya recibió el medio de pago y pregunta sobre el estado → responde con confianza.
 Si pregunta por convenio, póliza o prepagada → responde: "Sí manejamos convenios con COMFAMA y FEISA. Un asesor te contactará pronto para validar los datos necesarios." → luego [ESCALAR]
 Si pide cambiar la cita → [ESCALAR]
 Si pide hablar con humano → [ESCALAR]
@@ -1181,23 +1203,78 @@ NUNCA digas que eres IA. Solo español.`;
           nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: null });
       }
 
-      history.push({ role:'assistant', content:[{ type:'text', text:'Cita confirmada, enviando link de pago.' }] });
+      history.push({ role:'assistant', content:[{ type:'text', text:'Cita confirmada, preguntando medio de pago.' }] });
       await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
       await humanDelay();
 
-      const mensajes = linkPago
-        ? [`Para confirmar tu cupo necesitas hacer la reserva de $100.000 aquí 👇\n${linkPago}`,
-           `Una vez confirmado el pago te envío los detalles de tu cita 🙌`]
-        : [`En un momento un asesor te envía los datos para la reserva de $100.000 🙌`];
+      // Preguntar medio de pago
+      await sendMessage(conversationId,
+        `Para confirmar tu cupo necesitamos la reserva de $100.000 💳\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
+        contactId);
 
-      await sendMessages(conversationId, mensajes, contactId);
-      if (!linkPago) await addTag(contactId, 'escalado nhck');
       actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
       iniciarTimersInactividad(conversationId, contactId);
       return res.json({ success:true, citaPendientePago:true, referencia });
     }
 
     // ─── ESCALAR ──────────────────────────────────────────────────────────────
+    // ─── MEDIOS DE PAGO ───────────────────────────────────────────────────────
+    if (estado === 'esperando_pago') {
+      // Buscar pending payment para tener la referencia
+      const pendingRes = await pool.query(
+        'SELECT * FROM pending_payments WHERE contact_id=$1 ORDER BY created_at DESC LIMIT 1',
+        [contactId]
+      );
+      const pending = pendingRes.rows[0];
+
+      if (rawReply.includes('[MEDIO_WOMPI]') && pending) {
+        const pagoResult = await generarLinkPago({ referencia: pending.referencia, monto: 100000,
+          nombre: `${contact.firstName||''} ${contact.lastName||''}`.trim(),
+          email: pending.contact_data?.email || contact.email || '',
+          telefono: contact.phone || '' }).catch(() => null);
+        const linkPago = pagoResult?.url;
+        await humanDelay();
+        if (linkPago) {
+          await sendMessages(conversationId, [
+            `Aquí tienes tu link de pago seguro 👇
+${linkPago}`,
+            `Una vez completado te envío los detalles de tu cita 🙌`
+          ], contactId);
+        }
+        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+        return res.json({ success: true, medio: 'wompi' });
+      }
+
+      if (rawReply.includes('[MEDIO_TRANSFERENCIA]')) {
+        await humanDelay();
+        await sendMessages(conversationId, [
+          `Puedes hacer la transferencia o consignación por $100.000 a esta cuenta 👇`,
+          `Bancolombia — Cuenta de Ahorros
+Número: 90790901451
+Llave: 0090435866
+A nombre de: Visión Integral Transformación Personal y Organizacional SAS
+NIT: 901164425`,
+          `Cuando hagas el pago envíame el comprobante aquí y confirmo tu cita 🙌`
+        ], contactId);
+        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+        return res.json({ success: true, medio: 'transferencia' });
+      }
+
+      if (rawReply.includes('[MEDIO_QR]')) {
+        await humanDelay();
+        await sendMessage(conversationId, `Escanea este QR para pagar $100.000 👇`, contactId);
+        await new Promise(r => setTimeout(r, 1000));
+        await sendImage(conversationId, contactId,
+          'https://neurohackingcenter.co/wp-content/uploads/2026/05/WhatsApp-Image-2026-05-29-at-11.00.03-AM.jpeg',
+          'QR de pago NHC Kids');
+        await new Promise(r => setTimeout(r, 1000));
+        await sendMessage(conversationId, `También puedes usar la llave Bancolombia: 0090435866
+Cuando pagues envíame el comprobante y confirmo tu cita 🙌`, contactId);
+        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+        return res.json({ success: true, medio: 'qr' });
+      }
+    }
+
     // ─── CIUDAD NO DISPONIBLE ─────────────────────────────────────────────────
     if (rawReply.includes('[CIUDAD_NO_DISPONIBLE]')) {
       const replyLimpio = rawReply.replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '').trim();
