@@ -634,11 +634,8 @@ app.post('/webhook/contact-deleted', async (req, res) => {
 // ─── WEBHOOK GHL (mensajes WhatsApp) ─────────────────────────────────────────
 app.post('/webhook/ghl', async (req, res) => {
   try {
-    // Log completo si es imagen para depuración
-    const msgType = req.body.message?.type || req.body.type || '';
-    if (msgType === 'IMAGE' || req.body.message?.attachments?.length > 0) {
-      console.log('WEBHOOK IMAGEN COMPLETO:', JSON.stringify(req.body));
-    }
+    // Log completo de TODOS los mensajes para depuración
+    console.log('WEBHOOK BODY COMPLETO:', JSON.stringify(req.body));
 
     const contactId = req.body.contactId || req.body.customData?.contactId || req.body.contact_id || req.body.contact?.id;
     let conversationId = req.body.conversationId || req.body.customData?.conversationId || '';
