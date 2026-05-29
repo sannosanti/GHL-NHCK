@@ -1346,7 +1346,7 @@ NIT: 901164425`,
         await sendMessage(conversationId, `Escanea este QR para pagar $100.000 👇`, contactId);
         await new Promise(r => setTimeout(r, 1000));
         await sendImage(conversationId, contactId,
-          'https://miraculous-solace-production-47dd.up.railway.app/public/QR%20PAGO.jpeg',
+          'https://miraculous-solace-production-47dd.up.railway.app/public/pagosQR.jpeg',
           'QR de pago NHC Kids');
         await new Promise(r => setTimeout(r, 1000));
         await sendMessage(conversationId, `También puedes usar la llave Bancolombia: 0090435866
