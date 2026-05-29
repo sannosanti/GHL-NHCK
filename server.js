@@ -618,6 +618,14 @@ app.post('/webhook/ghl', async (req, res) => {
     if (lastMsg.trim().toLowerCase() === '/reset') {
       await pool.query('DELETE FROM conversations WHERE conversation_id=$1', [conversationId]);
       await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]);
+      // Quitar etiqueta escalado para que Carolina pueda responder de nuevo
+      try {
+        await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tags: ['escalado nhck'] })
+        });
+      } catch(e) { console.error('Error quitando tag:', e.message); }
       await sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
       return res.json({ success: true, reset: true });
     }
