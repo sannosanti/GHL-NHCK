@@ -640,7 +640,7 @@ function iniciarTimersInactividad(conversationId, contactId) {
 
 // ─── GHL HELPERS ──────────────────────────────────────────────────────────────
 // CAMBIO #20: 30 segundos entre respuestas
-const humanDelay = () => new Promise(r => setTimeout(r, 30000));
+const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random()*3000)+3000)); // 3-6 segundos
 
 async function getContact(contactId) {
   const cached = await getCachedContact(contactId);
