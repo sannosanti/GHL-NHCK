@@ -796,6 +796,9 @@ app.post('/webhook/ghl', async (req, res) => {
     const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
     // Audio: messageType 2
     const isAudio = messageType === '2' || messageType === 'AUDIO';
+    
+    // DEBUG: log completo de cada webhook
+    console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, messageBody: (messageBody||'').substring(0,30), imageUrl }));
 
     if (isImage && !conversationId) {
       conversationId = await getConversationId(contactId);
