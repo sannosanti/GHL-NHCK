@@ -793,8 +793,9 @@ app.post('/webhook/ghl', async (req, res) => {
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
     const messageType = String(req.body.customData?.messageType || req.body.message?.type || req.body.type || '');
     const imageUrl = req.body.customData?.attachments || null;
-    const isImage = messageType === '19' || messageType === 'IMAGE' || !!imageUrl;
-    // Audio: messageType 2
+    // messageType=19 viene en TODOS los mensajes de GHL — no es confiable
+    // Solo detectar imagen cuando hay URL de adjunto real
+    const isImage = !!imageUrl;
     const isAudio = messageType === '2' || messageType === 'AUDIO';
     
     // DEBUG: log completo de cada webhook
