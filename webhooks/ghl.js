@@ -332,7 +332,7 @@ async function ghlWebhookHandler(req, res) {
         `Para confirmar tu cupo necesitamos la reserva de $100.000 💳\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
         contactId);
       ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
-      timers.iniciarTimersInactividad(conversationId, contactId);
+      timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage);
       return;
     }
 
@@ -426,7 +426,7 @@ async function ghlWebhookHandler(req, res) {
     await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
     await humanDelay();
     await ghl.sendMessages(conversationId, partes, contactId);
-    timers.iniciarTimersInactividad(conversationId, contactId);
+    timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage);
     console.log('RESPUESTA OK:', { reply: reply?.substring(0, 60), estado: nuevoEstado });
 
   } catch (error) {

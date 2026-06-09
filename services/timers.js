@@ -1,7 +1,5 @@
 'use strict';
 
-const { sendMessage } = require('./ghl');
-
 // Module-scoped state — owned exclusively by this module
 const inactivityTimers = {};
 
@@ -13,7 +11,7 @@ function limpiarTimers(conversationId) {
   }
 }
 
-function iniciarTimersInactividad(conversationId, contactId) {
+function iniciarTimersInactividad(conversationId, contactId, sendMessage) {
   limpiarTimers(conversationId);
   inactivityTimers[conversationId] = {
     timer5: setTimeout(async () => {
