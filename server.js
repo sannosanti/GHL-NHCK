@@ -18,9 +18,9 @@ const ID_CONSULTOR_JUAN_ESTEBAN = '3572150000004930155';
 const ID_CONSULTOR_MAPEOS = '3572150000005140253';
 const ID_ESPACIO_MAPEOS = '3572150000004871116';
 
-const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY || 'pub_test_KXCXFRLYICPi7F2r1cjj4WMTXWkh3cXW';
-const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY || 'test_integrity_g9UQoEukIzFDreRn5yOX9mSZkE5jeauz';
-const WOMPI_BASE_URL = 'https://sandbox.wompi.co/v1';
+const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY;
+const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY;
+const WOMPI_BASE_URL = 'https://production.wompi.co/v1';
 
 const GHL_PIPELINE_ID = 'GFfv1dCSQAAZ70MNHsfM';
 const STAGE_INICIO = '24270da1-9917-4ba7-bf5a-35b226b2687f';
@@ -557,7 +557,7 @@ async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
   const firma = crypto.createHash('sha256').update(cadena).digest('hex');
   const res = await fetch(`${WOMPI_BASE_URL}/payment_links`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${process.env.WOMPI_PRIVATE_KEY || 'prv_test_rs7u6wx1045DshLEx7tLz58YAe6XOmwn'}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${process.env.WOMPI_PRIVATE_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: 'Reserva NHC Kids - Neuromapeo', description: 'Reserva para el proceso de Neuromapeo Kids ($100.000)',
       single_use: true, collect_shipping: false, currency: 'COP', amount_in_cents: montoEnCentavos,
