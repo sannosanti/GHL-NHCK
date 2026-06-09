@@ -1331,6 +1331,7 @@ Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
 
 // ─── WEBHOOK WOMPI ────────────────────────────────────────────────────────────
 app.post('/webhook/wompi', async (req, res) => {
+  console.log('WOMPI WEBHOOK RECIBIDO:', JSON.stringify(req.body));
   try {
     const transaccion = req.body?.data?.transaction;
     if (!transaccion) return res.json({ received:true });
