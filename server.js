@@ -1,9 +1,9 @@
 'use strict';
 
 const express = require('express');
-const fetch = require('node-fetch');
 const { env } = require('./config');
 const db = require('./db');
+const { removeTag, getContact, getConversationId } = require('./services/ghl');
 const { ghlWebhookHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
 
@@ -26,28 +26,15 @@ app.get('/test-pago/:contactId', async (req, res) => {
   try {
     const contactId = req.params.contactId;
     await db.limpiarContactoDB(contactId);
-    try {
-      await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: ['escalado nhck'] }),
-      });
-    } catch (e) {}
-    const convRes = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
-      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
-    });
-    const convData = await convRes.json();
-    const conversationId = convData.conversations?.[0]?.id;
+    try { await removeTag(contactId, 'escalado nhck'); } catch (e) {}
+    const conversationId = await getConversationId(contactId);
     if (!conversationId) return res.status(400).send('No se encontró conversación para este contacto');
     const triaje = { triaje1: 'Atención/concentración', triaje2: 'Más de 1 año', triaje3: 'Nada aún' };
     const fechaCita = '2026-06-10';
     const horaCita = '14:00';
     const nombreNino = 'Felipe Test';
     const referencia = `NHCK-TEST-${contactId}-${Date.now()}`;
-    const contactRes = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
-      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
-    });
-    const contactData = await contactRes.json();
+    const contactData = await getContact(contactId);
     const contact = contactData.contact || {};
     await db.savePendingPayment(referencia, {
       contactId, conversationId, contact, fechaCita, horaCita, edad: '10', genero: 'Masculino',
@@ -62,13 +49,7 @@ app.get('/test-pago/:contactId', async (req, res) => {
 app.get('/reset-contact/:contactId', async (req, res) => {
   try {
     await db.limpiarContactoDB(req.params.contactId);
-    try {
-      await fetch(`https://services.leadconnectorhq.com/contacts/${req.params.contactId}/tags`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: ['escalado nhck'] }),
-      });
-    } catch (e) {}
+    try { await removeTag(req.params.contactId, 'escalado nhck'); } catch (e) {}
     res.send(`✓ Contacto ${req.params.contactId} reiniciado`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
