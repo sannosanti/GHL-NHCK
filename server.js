@@ -1,721 +1,37 @@
+'use strict';
+
 const express = require('express');
 const fetch = require('node-fetch');
-const { Pool } = require('pg');
 const crypto = require('crypto');
+
+// ─── CONFIG & DB ─────────────────────────────────────────────────────────────
+const { env, constants } = require('./config');
+const db = require('./db');
+
+// ─── SERVICES ────────────────────────────────────────────────────────────────
+const ghl = require('./services/ghl');
+const zoho = require('./services/zoho');
+const pagos = require('./services/pagos');
+const timers = require('./services/timers');
+
+// ─── AI ──────────────────────────────────────────────────────────────────────
+const { buildSystemPrompt } = require('./ai/prompt');
+const { callClaude } = require('./ai/claude');
+
+// ─── EXPRESS ─────────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
-app.use('/public', require('express').static('public'));
+app.use('/public', express.static('public'));
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const GHL_KEY = process.env.GHL_API_KEY;
-const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
-
-const ZOHO_CLIENT_ID = process.env.ZOHO_CLIENT_ID || '1000.YU4EF3FZ0RS8NAEMKVPVNTS7DU23WK';
-const ZOHO_CLIENT_SECRET = process.env.ZOHO_CLIENT_SECRET || 'fc1adeeb598f9a6a7d38912922bfffcb1db6857203';
-const ZOHO_REFRESH_TOKEN = process.env.ZOHO_REFRESH_TOKEN || '1000.18ea8055151efce1711489d0475df2c9.6533e8fc2ee705c2af94f5a108312d26';
-
-const ID_CONSULTOR_JUAN_ESTEBAN = '3572150000004930155';
-const ID_CONSULTOR_MAPEOS = '3572150000005140253';
-const ID_ESPACIO_MAPEOS = '3572150000004871116';
-
-const WOMPI_PUBLIC_KEY = process.env.WOMPI_PUBLIC_KEY;
-const WOMPI_INTEGRITY_KEY = process.env.WOMPI_INTEGRITY_KEY;
-const WOMPI_BASE_URL = 'https://production.wompi.co/v1';
-
-const GHL_PIPELINE_ID = 'GFfv1dCSQAAZ70MNHsfM';
-const STAGE_INICIO = '24270da1-9917-4ba7-bf5a-35b226b2687f';
-const STAGE_INFO_COMPLETA = '2c04e0ac-0429-4300-bf18-6f75cabe8953';
-const STAGE_LINK_PAGO = '87c45501-386f-418e-95e7-6975b20559a6';
-const STAGE_PAGO_PARCIAL = '18571c0c-5c8f-40f1-9440-e865670ac108';
-
-const inactivityTimers = {};
-const messageBuffers = {};
-
-const HORARIOS_NHCK = {
-  1: [{ ini: 14, fin: 15.5 }],
-  2: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],
-  3: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 15.5 }],
-  4: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],
-  5: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 15.5 }],
-  6: [{ ini: 8.5, fin: 10.5 }]
-};
-
-const TRIAJE_P1 = ['Atención/concentración', 'Bajo rendimiento', 'Desregulación emocional', 'Conducta impulsiva', 'Ansiedad/inseguridad', 'Otro'];
-const TRIAJE_P2 = ['Menos de 3 meses', '3 a 6 meses', '6 a 12 meses', 'Más de 1 año'];
-const TRIAJE_P3 = ['Psicología', 'Neuropsicología', 'Apoyo escolar', 'Medicación', 'Varias sin resultado', 'Nada aún', 'Otro'];
-
-// ─── BASE DE CONOCIMIENTO NHC KIDS ───────────────────────────────────────────
-const CONOCIMIENTO_NHC = `
-CONOCIMIENTO BASE — Carolina debe usar esto para responder con precisión:
-
-## PROCESO DE EVALUACIÓN ($395.000 — TODO INCLUIDO)
-Incluye:
-- Neuromapeo Cerebral (QEEG): mide la actividad eléctrica del cerebro con sensores
-- Entrevista clínica con psicólogo (NO es neuropsicólogo — NUNCA mencionar nombre del profesional)
-- Pruebas psicológicas (Test BASC): evalúa emociones y conducta
-- Cita de entrega de resultados con plan personalizado
-
-Duración:
-- Antes de la cita: test en casa que se envían por anticipado (45 min)
-- Cita 1: entrevista + neuromapeo = aproximadamente 1 hora y media
-- Cita 2: devolución de resultados = aproximadamente 1 hora
-El orden de la entrevista y el mapeo depende de la disponibilidad de agenda.
-
-IMPORTANTE:
-- Nosotros NO diagnosticamos — emitimos una impresión diagnóstica
-- El profesional de la entrevista NO es neuropsicólogo
-- NUNCA mencionar el nombre del profesional
-- NO usar el término "gorrita" — usar "sensores" o "dispositivo de medición"
-- No incluye cita con neuropsicólogo
-
-## EDAD MÍNIMA
-- Desde 7 años, siempre que el niño sepa leer
-- Entre 6 y 8 años: preguntar si lee de manera fluida antes de continuar
-- Si no lee: explicar que la evaluación requiere seguir instrucciones escritas
-
-## REQUISITOS PARA EL NEUROMAPEO
-El procedimiento puede no realizarse si el niño presenta:
-1. Dificultad severa para seguir instrucciones básicas (no puede permanecer sentado, abrir/cerrar ojos cuando se le pide)
-2. Movimiento excesivo e incontrolable durante la toma
-3. Ausencia de control inhibitorio (no puede mantener estados específicos por algunos minutos)
-4. Hipersensibilidad sensorial importante (rechazo al contacto en cabeza/cuello/hombros o intolerancia al gel)
-5. Ansiedad o rechazo severo al procedimiento
-6. En casos de autismo nivel 2-3: evaluar individualmente
-El criterio principal es si el niño puede tolerar el procedimiento y generar un registro de calidad clínica.
-
-## AUTISMO (TEA)
-- El diagnóstico de autismo por sí solo NO contraindica el neuromapeo
-- TEA Nivel 1 o menores necesidades de apoyo: generalmente bien
-- TEA Nivel 2 y 3: la viabilidad debe evaluarse individualmente por movimientos o alta sensibilidad sensorial
-- También evaluar si el niño sabe leer
-- Para autismo: escalar al asesor para evaluación individual
-
-## PÓLIZA / EPS / SEGUROS DE SALUD
-- NO tenemos convenio directo
-- Sí proveemos documentación para reembolso bajo: Medicina funcional, Neuropsicología o Servicios psicológicos
-- La documentación y soportes son SOLO para pólizas de salud o prepagadas (NO para cajas de compensación)
-- COMFAMA y FEISA: SÍ tenemos convenio — 10% de descuento en el valor restante el día de la cita — escalar al asesor para validar
-- Las cajas de compensación como COMFAMA/COMFENALCO NO tienen subsidios para este tipo de servicios
-
-## PRECIO
-Proceso de evaluación completo: $395.000 (todo incluido)
-Reserva para agendar: $100.000 (no reembolsable en caso de cancelación)
-Afiliados COMFAMA o FEISA: 10% de descuento en el valor restante el día de la cita
-
-## POLÍTICAS DE AGENDAMIENTO
-- Abono $100.000 para reservar — no reembolsable
-- El valor restante se cancela el día de la cita
-- Reprogramación: mínimo 24 horas de anticipación
-- Cita de devolución de resultados: agendar dentro de los 3 días hábiles posteriores al proceso
-
-## CUANDO EL COLEGIO O EPS PIDE DIAGNÓSTICO FORMAL
-Si el padre menciona que el colegio o EPS pide un diagnóstico formal → contemplar Evaluación Neuropsicológica → escalar al asesor
-
-## EVALUACIÓN NEUROPSICOLÓGICA (diferente al neuromapeo)
-- Evalúa perfil cognitivo: memoria, conducta, aprendizaje, emociones
-- Genera diagnóstico formal reconocido por instituciones y colegios
-- Carolina NO puede agendar esto — debe escalar al asesor
-
-## TRATAMIENTO POSTERIOR (qué sigue después del diagnóstico)
-Con base en los resultados, se diseña un plan de entrenamiento cerebral 100% personalizado.
-Incluye: Terapia psicológica + Medicina Funcional + Brain Gym (neurotecnologías).
-El precio, detalle y duración dependen del diagnóstico — se informa en la cita de devolución de resultados.
-Rango del tratamiento: $1.901.800 a $4.821.300 según el acompañamiento requerido.
-Hay opciones más accesibles que se informan en la devolución de resultados.
-El tratamiento NO incluye solo neurotecnologías — también terapia psicológica y medicina funcional.
-
-Medios de pago para la terapia:
-- Contado: 10% de descuento (pronto pago)
-- Tarjeta de crédito: el cliente decide el número de cuotas
-- Financiación directa: diferido a 3 meses en cuotas iguales (NO hay planes personalizados)
-- Crédito Addi
-
-## QUÉ TRATAMOS
-Ansiedad, estrés, TDAH/déficit de atención, memoria y concentración, depresión, insomnio, desregulación emocional, conducta impulsiva, bajo rendimiento escolar — con neurotecnologías, sin medicamentos ni efectos secundarios.
-
-## DATOS BANCARIOS (transferencia)
-Bancolombia — Cuenta de Ahorros
-Número: 90790901451
-Llave: 0090435866
-A nombre de: Visión Integral Transformación Personal y Organizacional SAS
-NIT: 901164425
-
-## CIUDAD Y SEDE
-Sede ÚNICA y presencial en Medellín (El Poblado).
-Ciudades ACEPTADAS: Medellín, Bello, La Estrella, Copacabana, Envigado, Itagüí, Sabaneta, Barbosa, Caldas, Rionegro, La Ceja, Guarne, El Retiro, Marinilla, El Carmen de Viboral, San Vicente, Santuario, y municipios cercanos de Antioquia.
-Si no es de esas ciudades → explicar amablemente que el servicio es presencial en Medellín, invitar a contactar cuando visiten la ciudad.
-
-## SOLICITUDES DE LLAMADA
-Si el cliente pide una llamada o hablar por teléfono → escalar INMEDIATAMENTE con [ESCALAR], NO cerrar la conversación
-
-## AUDIOS
-Si el cliente envía un audio → escalar INMEDIATAMENTE con [ESCALAR], NO cerrar la conversación
-
-## DATOS DEL PACIENTE — pedir en bloque, NUNCA uno por uno
-Cuando llegue el momento de recoger datos, enviar TODO en un solo mensaje:
-"Agradecemos tu colaboración con el envío de la siguiente información 🤗
-Paciente:
-- Nombre completo:
-- Documento de identidad:
-- Fecha de nacimiento:
-- Edad:
-- Celular:
-- Correo electrónico:
-- Ocupación:"
-
-## REGLAS GENERALES DE CONVERSACIÓN
-- NUNCA repetir información que ya se dio en el mensaje anterior o en la misma respuesta
-- Respuestas cortas y concretas — máximo 3 líneas por mensaje, separar con --- si necesitas más
-- NUNCA inventar precios, datos o información — usar SOLO lo que está aquí
-- NUNCA mencionar "asesores humanos" — solo "un asesor" o "nuestro equipo"
-- NUNCA mostrar tags internos como [ESCALAR] al usuario
-- Usar el nombre del NIÑO correctamente — no confundir con el adulto
-- Si no tiene respuesta clara → escalar al asesor en lugar de inventar
-- Cuando se escala: NO cerrar la conversación por inactividad
-`;
-
-// ─── POSTGRESQL ───────────────────────────────────────────────────────────────
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS conversations (
-      conversation_id TEXT PRIMARY KEY,
-      contact_id TEXT,
-      phone TEXT,
-      messages JSONB DEFAULT '[]',
-      triaje JSONB DEFAULT '{}',
-      estado TEXT DEFAULT 'nuevo',
-      last_message_id TEXT,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS pending_payments (
-      referencia TEXT PRIMARY KEY,
-      contact_id TEXT,
-      conversation_id TEXT,
-      contact_data JSONB,
-      fecha_cita TEXT,
-      hora_cita TEXT,
-      edad TEXT,
-      genero TEXT,
-      ocupacion TEXT,
-      sintoma TEXT,
-      nombre_nino TEXT,
-      nombre TEXT,
-      payment_link_id TEXT,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS availability_cache (
-      fecha_iso TEXT PRIMARY KEY,
-      citas JSONB DEFAULT '[]',
-      cached_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS contact_cache (
-      contact_id TEXT PRIMARY KEY,
-      contact_data JSONB,
-      cached_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS transaction_logs (
-      id SERIAL PRIMARY KEY,
-      contact_id TEXT,
-      conversation_id TEXT,
-      event_type TEXT,
-      data JSONB,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-  await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre_nino TEXT`).catch(()=>{});
-  await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS nombre TEXT`).catch(()=>{});
-  await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_link_id TEXT`).catch(()=>{});
-  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phone TEXT`).catch(()=>{});
-  console.log('Base de datos inicializada ✓');
-}
-
-// ─── DB HELPERS ───────────────────────────────────────────────────────────────
-async function getConversationData(conversationId) {
-  try {
-    const res = await pool.query('SELECT * FROM conversations WHERE conversation_id = $1', [conversationId]);
-    return res.rows[0] || null;
-  } catch { return null; }
-}
-
-async function saveConversationData(conversationId, contactId, messages, triaje, estado, lastMessageId, phone) {
-  try {
-    await pool.query(`
-      INSERT INTO conversations (conversation_id, contact_id, phone, messages, triaje, estado, last_message_id, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-      ON CONFLICT (conversation_id) DO UPDATE
-      SET messages=$4, triaje=$5, estado=$6, last_message_id=$7, phone=COALESCE($3, conversations.phone), updated_at=NOW()
-    `, [conversationId, contactId, phone||null, JSON.stringify(messages), JSON.stringify(triaje), estado, lastMessageId]);
-  } catch (err) { console.error('Error guardando conversación:', err.message); }
-}
-
-async function limpiarContactoDB(contactId) {
-  try {
-    await pool.query('DELETE FROM conversations WHERE contact_id = $1', [contactId]);
-    await pool.query('DELETE FROM contact_cache WHERE contact_id = $1', [contactId]);
-    await pool.query('DELETE FROM pending_payments WHERE contact_id = $1', [contactId]);
-    console.log(`DB limpiada para contacto: ${contactId}`);
-  } catch (err) { console.error('Error limpiando contacto DB:', err.message); }
-}
-
-async function getCachedContact(contactId) {
-  try {
-    const res = await pool.query(
-      "SELECT contact_data FROM contact_cache WHERE contact_id=$1 AND cached_at > NOW() - INTERVAL '5 minutes'",
-      [contactId]
-    );
-    return res.rows[0]?.contact_data || null;
-  } catch { return null; }
-}
-
-async function setCachedContact(contactId, contactData) {
-  try {
-    await pool.query(`
-      INSERT INTO contact_cache (contact_id, contact_data, cached_at) VALUES ($1,$2,NOW())
-      ON CONFLICT (contact_id) DO UPDATE SET contact_data=$2, cached_at=NOW()
-    `, [contactId, JSON.stringify(contactData)]);
-  } catch (err) { console.error('Error cacheando contacto:', err.message); }
-}
-
-async function savePendingPayment(referencia, datos) {
-  try {
-    await pool.query(`
-      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre_nino,nombre,payment_link_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-      ON CONFLICT (referencia) DO UPDATE SET fecha_cita=$5, hora_cita=$6, payment_link_id=$13
-    `, [referencia, datos.contactId, datos.conversationId, JSON.stringify(datos.contact),
-        datos.fechaCita, datos.horaCita, datos.edad, datos.genero, datos.ocupacion,
-        datos.sintoma, datos.nombreNino, datos.nombre, datos.paymentLinkId || null]);
-  } catch (err) { console.error('Error guardando pago:', err.message); }
-}
-
-async function getPendingPayment(reference) {
-  try {
-    let res = await pool.query('SELECT * FROM pending_payments WHERE referencia=$1', [reference]);
-    if (!res.rows[0]) {
-      const linkId = reference.split('_').slice(0, 2).join('_');
-      res = await pool.query('SELECT * FROM pending_payments WHERE payment_link_id=$1', [linkId]);
-    }
-    if (!res.rows[0]) return null;
-    const r = res.rows[0];
-    return { contactId: r.contact_id, conversationId: r.conversation_id, contact: r.contact_data,
-             fechaCita: r.fecha_cita, horaCita: r.hora_cita, edad: r.edad, genero: r.genero,
-             ocupacion: r.ocupacion, sintoma: r.sintoma, nombreNino: r.nombre_nino, nombre: r.nombre };
-  } catch { return null; }
-}
-
-async function deletePendingPayment(referencia) {
-  try { await pool.query('DELETE FROM pending_payments WHERE referencia=$1', [referencia]); }
-  catch (err) { console.error('Error borrando pago:', err.message); }
-}
-
-async function getCachedDisponibilidad(fechaISO) {
-  try {
-    const res = await pool.query(
-      "SELECT citas FROM availability_cache WHERE fecha_iso=$1 AND cached_at > NOW() - INTERVAL '10 minutes'",
-      [fechaISO]
-    );
-    return res.rows[0]?.citas || null;
-  } catch { return null; }
-}
-
-async function setCachedDisponibilidad(fechaISO, citas) {
-  try {
-    await pool.query(`
-      INSERT INTO availability_cache (fecha_iso, citas, cached_at) VALUES ($1,$2,NOW())
-      ON CONFLICT (fecha_iso) DO UPDATE SET citas=$2, cached_at=NOW()
-    `, [fechaISO, JSON.stringify(citas)]);
-  } catch (err) { console.error('Error guardando caché:', err.message); }
-}
-
-async function logEvent(contactId, conversationId, eventType, data) {
-  try {
-    await pool.query(
-      'INSERT INTO transaction_logs (contact_id,conversation_id,event_type,data) VALUES ($1,$2,$3,$4)',
-      [contactId, conversationId, eventType, JSON.stringify(data)]
-    );
-  } catch (err) { console.error('Error log:', err.message); }
-}
-
-// ─── ZOHO TOKEN ───────────────────────────────────────────────────────────────
-let zohoAccessToken = null;
-let zohoTokenExpiry = 0;
-
-async function getZohoAccessToken() {
-  if (zohoAccessToken && Date.now() < zohoTokenExpiry) return zohoAccessToken;
-  const res = await fetch('https://accounts.zoho.com/oauth/v2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type:'refresh_token', client_id:ZOHO_CLIENT_ID,
-      client_secret:ZOHO_CLIENT_SECRET, refresh_token:ZOHO_REFRESH_TOKEN })
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error('No token Zoho: ' + JSON.stringify(data));
-  zohoAccessToken = data.access_token;
-  zohoTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  console.log('Token Zoho renovado');
-  return zohoAccessToken;
-}
-
-// ─── MAPEOS ───────────────────────────────────────────────────────────────────
-function mapearSintoma(s) {
-  s = (s || '').toLowerCase().trim();
-  if (s.includes('ansiedad') || s.includes('miedo') || s.includes('inseguridad')) return 'Ansiedad';
-  if (s.includes('autis')) return 'Autismo';
-  if (s.includes('autoestima') || s.includes('confianza')) return 'Autoestima';
-  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('atencion') || s.includes('tdah') || s.includes('concentra')) return 'Déficit de atención';
-  if (s.includes('depres')) return 'Depresión1';
-  if (s.includes('rendimiento') || s.includes('aprendizaje') || s.includes('escolar') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
-  if (s.includes('desregul') || s.includes('emocional')) return 'Ansiedad';
-  if (s.includes('conduct') || s.includes('impulsiv')) return 'TOD (Transtorno Oposicion...)';
-  if (s.includes('estrés') || s.includes('estres')) return 'Estrés';
-  if (s.includes('toc') || s.includes('obsesiv')) return 'TOC (Transtorno Obsesivo C...)';
-  return 'Otros';
-}
-
-function mapearGenero(g) {
-  g = (g || '').toLowerCase().trim();
-  if (g.includes('mascul') || g.includes('niño') || g.includes('hombre') || g === 'm') return 'Masculino';
-  if (g.includes('femen') || g.includes('niña') || g.includes('mujer') || g === 'f') return 'Femenino';
-  return 'Otro';
-}
-
-function mapearOcupacionNino(estudia) {
-  return (estudia === true || estudia === 'si' || estudia === 'sí') ? 'Estudiante de colegio' : 'N.A';
-}
-
-// ─── GHL: GUARDAR CAMPOS NIÑO ─────────────────────────────────────────────────
-async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNino, estudia, sintoma }) {
-  try {
-    const customFields = [
-      { id: 'nhck__nombre_del_nio', value: nombreNino || '' },
-      { id: 'nhck__edad_del_nio', value: edadNino || '' },
-      { id: 'nhck__gnero_del_nio', value: mapearGenero(generoNino) },
-      { id: 'nhck__estudia', value: estudia ? 'Sí' : 'No' },
-      { id: 'nhck__sntoma_principal', value: mapearSintoma(sintoma) }
-    ];
-    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customFields })
-    });
-    await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
-    console.log('Campos niño guardados en GHL');
-  } catch (err) { console.error('Error guardando campos niño GHL:', err.message); }
-}
-
-// ─── ZOHO ANAMNESIS ───────────────────────────────────────────────────────────
-async function buscarContactoAnamnesis(movil, email) {
-  try {
-    const token = await getZohoAccessToken();
-    const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-    const variantes = [movilLimpio];
-    if (movilLimpio.startsWith('57') && movilLimpio.length === 12) variantes.push(movilLimpio.slice(2));
-    if (!movilLimpio.startsWith('57') && movilLimpio.length === 10) variantes.push('57' + movilLimpio);
-    for (const tel of variantes) {
-      const res = await fetch(
-        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Movil%3D%22${tel}%22&max_records=1`,
-        { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
-      );
-      const data = await res.json();
-      if (data?.data?.length > 0) { console.log('Contacto existente:', data.data[0].ID); return data.data[0].ID; }
-    }
-    if (email) {
-      const res = await fetch(
-        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Email%3D%22${encodeURIComponent(email)}%22&max_records=1`,
-        { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
-      );
-      const data = await res.json();
-      if (data?.data?.length > 0) { console.log('Contacto existente por email:', data.data[0].ID); return data.data[0].ID; }
-    }
-    return null;
-  } catch (err) { console.error('Error buscando contacto:', err.message); return null; }
-}
-
-async function crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
-  const token = await getZohoAccessToken();
-  const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
-  const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
-  const ocupacion = mapearOcupacionNino(estudia);
-  let contactoID = await buscarContactoAnamnesis(movilLimpio, email);
-  if (!contactoID) {
-    const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Contactos', {
-      method: 'POST', headers,
-      body: JSON.stringify({ data: {
-        Nombre_Completo: nombreNino || '', Email: email || '', Movil: movilLimpio,
-        CRM: contactIdGHL || '', Edad: edad || '', Sintoma_o_necesidad: mapearSintoma(sintoma),
-        Genero: mapearGenero(genero), Ocupaci_n: ocupacion
-      }})
-    });
-    const data = await res.json();
-    console.log('ZOHO CONTACTO:', JSON.stringify(data));
-    contactoID = data?.data?.ID;
-    if (!contactoID) throw new Error('No ID contacto: ' + JSON.stringify(data));
-  }
-  const resProceso = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Procesos', {
-    method: 'POST', headers,
-    body: JSON.stringify({ data: {
-      Nombrel_del_consultante: contactoID, Edad: edad || '',
-      S_ntoma: mapearSintoma(sintoma), Genero: mapearGenero(genero),
-      Ocupaci_n: ocupacion, Tipo_Proceso: 'Diagnóstico', Estado_Paciente: 'Activo'
-    }})
-  });
-  const dataProceso = await resProceso.json();
-  console.log('ZOHO PROCESO:', JSON.stringify(dataProceso));
-  return { contactoID, dataProceso };
-}
-
-// ─── ZOHO CALENDARIO ──────────────────────────────────────────────────────────
-async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contactoID, nombreNino }) {
-  const token = await getZohoAccessToken();
-  const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
-  let hIni, mIni;
-  if (typeof horaInicio === 'string' && horaInicio.includes(':')) {
-    [hIni, mIni] = horaInicio.split(':').map(Number);
-  } else { hIni = Math.floor(horaInicio); mIni = (horaInicio % 1) * 60; }
-  const meses = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const d = new Date(fechaISO + 'T00:00:00');
-  const dd = String(d.getDate()).padStart(2,'0');
-  const mmm = meses[d.getMonth()];
-  const yyyy = d.getFullYear();
-  const pad = n => String(n).padStart(2,'0');
-  const fmt = (h,m) => `${dd}-${mmm}-${yyyy} ${pad(h)}:${pad(m)}:00`;
-  const diaStr = `${dd}-${mmm}-${yyyy}`;
-  const fin1H = mIni+30>=60 ? hIni+1 : hIni; const fin1M = (mIni+30)%60;
-  const ini2H = fin1H; const ini2M = fin1M;
-  const fin2H = ini2M+60>=60 ? ini2H+1 : ini2H; const fin2M = (ini2M+60)%60;
-  const base = { Tipo:'Presencial', Contacto: contactoID||'', Email: email||'',
-    Estado:'Programada', Observaciones:'NHC Kids - Agendado por Carolina IA', Dia: diaStr, Nombre: nombreNino || '' };
-  const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
-    method:'POST', headers, body: JSON.stringify({ data: { ...base,
-      Inicio: fmt(hIni,mIni), Fin: fmt(fin1H,fin1M), Duraci_n:'30 minutos',
-      Consultor: ID_CONSULTOR_JUAN_ESTEBAN, Espacio: '3572150000004826074'
-    }})
-  });
-  const data1 = await res1.json(); console.log('CITA 1 PRE:', JSON.stringify(data1));
-  const res2 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
-    method:'POST', headers, body: JSON.stringify({ data: { ...base,
-      Inicio: fmt(ini2H,ini2M), Fin: fmt(fin2H,fin2M), Duraci_n:'1 hora',
-      Consultor: ID_CONSULTOR_MAPEOS, Espacio: ID_ESPACIO_MAPEOS
-    }})
-  });
-  const data2 = await res2.json(); console.log('CITA 2 NEUROMAPEO:', JSON.stringify(data2));
-  return { cita1: data1, cita2: data2 };
-}
-
-// ─── DISPONIBILIDAD ───────────────────────────────────────────────────────────
-async function getDisponibilidad(fechaISO) {
-  try {
-    const token = await getZohoAccessToken();
-    const criteria = `(Inicio >= "${fechaISO} 00:00:00" && Inicio <= "${fechaISO} 23:59:59")`;
-    const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=50`;
-    const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-    const data = await res.json();
-    return data.data || [];
-  } catch (err) { console.error('Error disponibilidad:', err.message); return []; }
-}
-
-function calcularSlotsLibres(citas, fechaISO) {
-  const fecha = new Date(fechaISO + 'T00:00:00');
-  const dia = fecha.getDay();
-  const horarios = HORARIOS_NHCK[dia];
-  if (!horarios) return [];
-  const ocupadosJE = [], ocupadosMapeos = [];
-  citas.forEach(c => {
-    const cID = c.Consultor?.ID || '';
-    const tIni = new Date((c.Inicio || '').replace(/-/g,' '));
-    const tFin = new Date((c.Fin || '').replace(/-/g,' '));
-    if (isNaN(tIni)) return;
-    const hIni = tIni.getHours() + tIni.getMinutes()/60;
-    const hFin = isNaN(tFin) ? hIni + 0.5 : tFin.getHours() + tFin.getMinutes()/60;
-    if (cID === ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push({ ini: hIni, fin: hFin });
-    if (cID === ID_CONSULTOR_MAPEOS) ocupadosMapeos.push({ ini: hIni, fin: hFin });
-  });
-  const slots = [];
-  for (const { ini, fin } of horarios) {
-    for (let h = ini; h + 1.5 <= fin; h += 0.5) {
-      const jeLibre = !ocupadosJE.some(o => o.ini < h + 0.5 && o.fin > h);
-      const mapeosLibre = !ocupadosMapeos.some(o => o.ini < h + 1.5 && o.fin > h + 0.5);
-      if (jeLibre && mapeosLibre) {
-        const hh = Math.floor(h); const mm = (h%1)*60;
-        const hh12 = hh > 12 ? hh-12 : hh === 0 ? 12 : hh;
-        slots.push({ label:`${hh12}:${mm===0?'00':'30'}${hh<12?'am':'pm'}`, horaISO:`${String(hh).padStart(2,'0')}:${mm===0?'00':'30'}` });
-      }
-    }
-  }
-  return slots;
-}
-
-// ─── WOMPI ────────────────────────────────────────────────────────────────────
-async function generarLinkPago({ referencia, monto, nombre, email, telefono }) {
-  const montoEnCentavos = monto * 100;
-  const cadena = `${referencia}${montoEnCentavos}COP${WOMPI_INTEGRITY_KEY}`;
-  const firma = crypto.createHash('sha256').update(cadena).digest('hex');
-  const res = await fetch(`${WOMPI_BASE_URL}/payment_links`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${process.env.WOMPI_PRIVATE_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: 'Reserva NHC Kids - Neuromapeo', description: 'Reserva para el proceso de Neuromapeo Kids ($100.000)',
-      single_use: true, collect_shipping: false, currency: 'COP', amount_in_cents: montoEnCentavos,
-      reference: referencia, expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      redirect_url: 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso',
-      signature: { integrity: firma },
-      customer_data: { customer_name: nombre||'', customer_last_name:'', customer_legal_id:'',
-        customer_legal_id_type:'CC', customer_email: email||'',
-        customer_phone: (telefono||'').replace(/[\s+\(\)\-]/g,'') }
-    })
-  });
-  const data = await res.json();
-  console.log('WOMPI PAYMENT LINK:', JSON.stringify(data));
-  if (data?.data?.id) return { url: `https://checkout.wompi.co/l/${data.data.id}`, linkId: data.data.id };
-  const params = new URLSearchParams({
-    'public-key': WOMPI_PUBLIC_KEY, currency:'COP', 'amount-in-cents': montoEnCentavos, reference: referencia,
-    'signature:integrity': firma, 'customer-data:email': email||'', 'customer-data:full-name': nombre||'',
-    'customer-data:phone-number': (telefono||'').replace(/[\s+\(\)\-]/g,''),
-    'redirect-url': 'https://miraculous-solace-production-47dd.up.railway.app/pago-exitoso'
-  });
-  return { url: `https://checkout.wompi.co/p/?${params.toString()}`, linkId: null };
-}
-
-// ─── OPORTUNIDADES GHL ────────────────────────────────────────────────────────
-async function crearOportunidad(contactId, nombre, stageId) {
-  try {
-    const res = await fetch('https://services.leadconnectorhq.com/opportunities/', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pipelineId: GHL_PIPELINE_ID, locationId: GHL_LOCATION_ID,
-        name: `NHC Kids - ${nombre}`, pipelineStageId: stageId, status: 'open', contactId })
-    });
-    const data = await res.json();
-    console.log('OPORTUNIDAD CREADA:', JSON.stringify(data));
-    return data.opportunity?.id || null;
-  } catch (err) { console.error('Error creando oportunidad:', err.message); return null; }
-}
-
-async function actualizarEtapaOportunidad(contactId, stageId) {
-  try {
-    const res = await fetch(`https://services.leadconnectorhq.com/opportunities/search?location_id=${GHL_LOCATION_ID}&pipeline_id=${GHL_PIPELINE_ID}&contact_id=${contactId}`, {
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28' }
-    });
-    const data = await res.json();
-    const opp = data.opportunities?.[0];
-    if (!opp) return null;
-    const resUpdate = await fetch(`https://services.leadconnectorhq.com/opportunities/${opp.id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pipelineStageId: stageId })
-    });
-    const dataUpdate = await resUpdate.json();
-    console.log('ETAPA ACTUALIZADA:', JSON.stringify(dataUpdate));
-    return opp.id;
-  } catch (err) { console.error('Error actualizando etapa:', err.message); return null; }
-}
-
-// ─── INACTIVIDAD ──────────────────────────────────────────────────────────────
-function limpiarTimers(conversationId) {
-  if (inactivityTimers[conversationId]) {
-    clearTimeout(inactivityTimers[conversationId].timer5);
-    clearTimeout(inactivityTimers[conversationId].timer10);
-    delete inactivityTimers[conversationId];
-  }
-}
-
-function iniciarTimersInactividad(conversationId, contactId) {
-  limpiarTimers(conversationId);
-  inactivityTimers[conversationId] = {
-    timer5: setTimeout(async () => {
-      try { await sendMessage(conversationId, '¿Sigues por ahí? 😊 Quedo pendiente por si tienes alguna duda.', contactId); }
-      catch (err) { console.error('Error timer 5min:', err.message); }
-    }, 5 * 60 * 1000),
-    timer10: setTimeout(async () => {
-      try { await sendMessage(conversationId, 'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso nos escribes y con gusto te ayudamos.', contactId); }
-      catch (err) { console.error('Error timer 10min:', err.message); }
-    }, 10 * 60 * 1000)
-  };
-}
-
-// ─── GHL HELPERS ──────────────────────────────────────────────────────────────
-// CAMBIO #20: 30 segundos entre respuestas
-const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random()*3000)+3000)); // 3-6 segundos
-
-async function getContact(contactId) {
-  const cached = await getCachedContact(contactId);
-  if (cached) return { contact: cached };
-  const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
-    headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
-  });
-  if (res.status === 404) return { contact: null, deleted: true };
-  const data = await res.json();
-  if (data.contact) await setCachedContact(contactId, data.contact);
-  return data;
-}
-
-async function getConversationId(contactId) {
-  const res = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${GHL_LOCATION_ID}`, {
-    headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
-  });
-  const data = await res.json();
-  return data.conversations?.[0]?.id || null;
-}
-
-async function getLastMessage(conversationId) {
-  try {
-    const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
-    });
-    const data = await res.json();
-    const messages = data.messages?.messages || data.messages || [];
-    if (!Array.isArray(messages) || messages.length === 0) return { body:'', id:null };
-    const last = messages.find(m => m.direction === 'inbound') || messages[0];
-    return { body: last?.body||'', id: last?.id||null };
-  } catch (err) { return { body:'', id:null }; }
-}
-
-async function addTag(contactId, tag) {
-  await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tags: [tag] })
-  });
-  await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
-}
-
-async function removeTag(contactId, tag) {
-  await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tags: [tag] })
-  });
-  await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
-}
-
-async function sendMessage(conversationId, message, contactId) {
-  const res = await fetch(`https://services.leadconnectorhq.com/conversations/messages`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type:'WhatsApp', conversationId, contactId, message })
-  });
-  const data = await res.json();
-  console.log('SEND MSG:', JSON.stringify(data));
-}
-
-async function sendMessages(conversationId, messages, contactId) {
-  for (let i = 0; i < messages.length; i++) {
-    await sendMessage(conversationId, messages[i], contactId);
-    if (i < messages.length - 1) await new Promise(r => setTimeout(r, 1500));
-  }
-}
+// ─── HELPERS (webhook-local) ──────────────────────────────────────────────────
+const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000)); // 3-6 seconds
 
 // ─── ENDPOINTS ────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
 app.get('/reset/:conversationId', async (req, res) => {
   try {
-    await pool.query('DELETE FROM conversations WHERE conversation_id=$1', [req.params.conversationId]);
+    await db.pool.query('DELETE FROM conversations WHERE conversation_id=$1', [req.params.conversationId]);
     res.send(`✓ Conversación ${req.params.conversationId} reiniciada`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
@@ -723,16 +39,16 @@ app.get('/reset/:conversationId', async (req, res) => {
 app.get('/test-pago/:contactId', async (req, res) => {
   try {
     const contactId = req.params.contactId;
-    await limpiarContactoDB(contactId);
+    await db.limpiarContactoDB(contactId);
     try {
       await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: ['escalado nhck'] })
+        headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: ['escalado nhck'] }),
       });
-    } catch(e) {}
-    const convRes = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${GHL_LOCATION_ID}`, {
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
+    } catch (e) {}
+    const convRes = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
     });
     const convData = await convRes.json();
     const conversationId = convData.conversations?.[0]?.id;
@@ -743,30 +59,30 @@ app.get('/test-pago/:contactId', async (req, res) => {
     const nombreNino = 'Felipe Test';
     const referencia = `NHCK-TEST-${contactId}-${Date.now()}`;
     const contactRes = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
-      headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15' }
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
     });
     const contactData = await contactRes.json();
     const contact = contactData.contact || {};
-    await savePendingPayment(referencia, {
+    await db.savePendingPayment(referencia, {
       contactId, conversationId, contact, fechaCita, horaCita, edad: '10', genero: 'Masculino',
       ocupacion: 'Estudiante de colegio', sintoma: 'Atención/concentración',
-      nombreNino, nombre: contact.firstName || 'Tester', paymentLinkId: null
+      nombreNino, nombre: contact.firstName || 'Tester', paymentLinkId: null,
     });
-    await saveConversationData(conversationId, contactId, [], triaje, 'esperando_pago', null, contact.phone || '');
+    await db.saveConversationData(conversationId, contactId, [], triaje, 'esperando_pago', null, contact.phone || '');
     res.send(`✓ Modo tester activado para ${contactId}<br>Estado: esperando_pago<br>Niño: ${nombreNino}<br>Cita: ${fechaCita} ${horaCita}<br>Referencia: ${referencia}<br><br>Ahora escribe en WhatsApp para probar el medio de pago.`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
 
 app.get('/reset-contact/:contactId', async (req, res) => {
   try {
-    await limpiarContactoDB(req.params.contactId);
+    await db.limpiarContactoDB(req.params.contactId);
     try {
       await fetch(`https://services.leadconnectorhq.com/contacts/${req.params.contactId}/tags`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: ['escalado nhck'] })
+        headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: ['escalado nhck'] }),
       });
-    } catch(e) {}
+    } catch (e) {}
     res.send(`✓ Contacto ${req.params.contactId} reiniciado`);
   } catch (err) { res.status(500).send('Error: ' + err.message); }
 });
@@ -775,10 +91,13 @@ app.post('/webhook/contact-deleted', async (req, res) => {
   try {
     const contactId = req.body.id || req.body.contactId || req.body.contact?.id || req.body.customData?.contactId || req.body.contact_id;
     if (!contactId) return res.json({ ok: false, reason: 'no contactId' });
-    await limpiarContactoDB(contactId);
+    await db.limpiarContactoDB(contactId);
     res.json({ ok: true, contactId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ─── MESSAGE DEDUP (webhook-local state) ──────────────────────────────────────
+const messageBuffers = {};
 
 // ─── WEBHOOK GHL ──────────────────────────────────────────────────────────────
 app.post('/webhook/ghl', async (req, res) => {
@@ -793,21 +112,21 @@ app.post('/webhook/ghl', async (req, res) => {
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
     const messageType = String(req.body.customData?.messageType || req.body.message?.type || req.body.type || '');
     const imageUrl = req.body.customData?.attachments || null;
-    // messageType=19 viene en TODOS los mensajes de GHL — no es confiable
-    // Solo detectar imagen cuando hay URL de adjunto real
+    // messageType=19 comes in ALL GHL messages — not reliable
+    // Only detect image when there is a real attachment URL
     const isImage = !!imageUrl;
     const isAudio = messageType === '2' || messageType === 'AUDIO';
-    
-    // DEBUG: log completo de cada webhook
-    console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, messageBody: (messageBody||'').substring(0,30), imageUrl }));
+
+    // DEBUG: full log per webhook
+    console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, messageBody: (messageBody || '').substring(0, 30), imageUrl }));
 
     if (isImage && !conversationId) {
-      conversationId = await getConversationId(contactId);
+      conversationId = await ghl.getConversationId(contactId);
       console.log('IMAGEN: conversationId recuperado:', conversationId);
     }
 
-    // Deduplicación
-    const msgSnippet = isImage ? 'img' : isAudio ? 'audio' : (messageBody||'').trim().substring(0,15) || 'nomsg';
+    // Deduplication
+    const msgSnippet = isImage ? 'img' : isAudio ? 'audio' : (messageBody || '').trim().substring(0, 15) || 'nomsg';
     const dedupKey = `proc_${contactId}_${msgSnippet}`;
     if (messageBuffers[dedupKey]) {
       console.log(`DEDUP: ignorado (${dedupKey})`);
@@ -819,46 +138,46 @@ app.post('/webhook/ghl', async (req, res) => {
     if (!conversationId) {
       for (let i = 0; i < 3; i++) {
         await new Promise(r => setTimeout(r, 2000));
-        conversationId = await getConversationId(contactId);
+        conversationId = await ghl.getConversationId(contactId);
         if (conversationId) break;
       }
     }
     if (!conversationId) return;
 
-    const convData = await getConversationData(conversationId);
-    limpiarTimers(conversationId);
+    const convData = await db.getConversationData(conversationId);
+    timers.limpiarTimers(conversationId);
 
-    const contactData = await getContact(contactId);
-    if (contactData.deleted) { await limpiarContactoDB(contactId); return; }
+    const contactData = await ghl.getContact(contactId);
+    if (contactData.deleted) { await db.limpiarContactoDB(contactId); return; }
 
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
     const estado = convData?.estado || 'nuevo';
 
-    // AUDIOS — escalar inmediatamente, NO cerrar conversación
+    // AUDIOS — escalate immediately, do NOT close conversation
     if (isAudio) {
       console.log('AUDIO RECIBIDO — escalando');
       if (!tags.includes('escalado nhck')) {
-        await addTag(contactId, 'escalado nhck');
-        await saveConversationData(conversationId, contactId, convData?.messages||[], convData?.triaje||{}, 'escalado', messageId, contact.phone||'');
+        await ghl.addTag(contactId, 'escalado nhck');
+        await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
         await humanDelay();
-        await sendMessage(conversationId, 'Recibí tu mensaje de voz 😊 En un momento un asesor de nuestro equipo te atiende por aquí.', contactId);
+        await ghl.sendMessage(conversationId, 'Recibí tu mensaje de voz 😊 En un momento un asesor de nuestro equipo te atiende por aquí.', contactId);
       }
       return;
     }
 
-    // Si escalado, no responder (excepto imagen en esperando_pago)
+    // If escalated, do not reply (except image in esperando_pago)
     if (tags.includes('escalado nhck') && !(isImage && estado === 'esperando_pago')) return;
 
     let lastMsg = messageBody;
     let lastMsgId = messageId;
     if (!lastMsg && !isImage) {
-      const fetched = await getLastMessage(conversationId);
+      const fetched = await ghl.getLastMessage(conversationId);
       lastMsg = fetched.body;
       lastMsgId = fetched.id;
     }
 
-    // IMAGEN EN ESPERANDO_PAGO
+    // IMAGE IN esperando_pago
     if (isImage && estado === 'esperando_pago') {
       console.log('IMAGEN RECIBIDA en esperando_pago — procesando comprobante');
       await humanDelay();
@@ -867,64 +186,60 @@ app.post('/webhook/ghl', async (req, res) => {
       const history = convData?.messages || [];
       const phone = contact.phone || '';
 
-      const pending = await pool.query(
-        'SELECT * FROM pending_payments WHERE contact_id=$1 ORDER BY created_at DESC LIMIT 1',
-        [contactId]
-      );
-      const pago = pending.rows[0];
+      const pago = await db.getPendingPaymentsByContact(contactId);
 
       if (pago) {
-        const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-        const [,mm,dd] = (pago.fecha_cita||'').split('-');
-        const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
-        const [hh,min] = (pago.hora_cita||'00:00').split(':');
+        const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        const [, mm, dd] = (pago.fecha_cita || '').split('-');
+        const fechaL = pago.fecha_cita ? `${parseInt(dd)} de ${mesesN[parseInt(mm) - 1]}` : 'la fecha acordada';
+        const [hh, min] = (pago.hora_cita || '00:00').split(':');
         const hN = parseInt(hh);
-        const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
+        const horaL = `${hN > 12 ? hN - 12 : hN === 0 ? 12 : hN}:${min}${hN < 12 ? 'am' : 'pm'}`;
         const nombrePago = pago.nombre || nombre;
 
         let resultado = null;
         try {
-          resultado = await crearEnAnamnesis({
-            nombreNino: pago.nombre_nino||contact.firstName||'',
-            email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
+          resultado = await zoho.crearEnAnamnesis({
+            nombreNino: pago.nombre_nino || contact.firstName || '',
+            email: contact.email || '', movil: contact.phone || '', contactIdGHL: contactId,
             edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
-            estudia: pago.ocupacion === 'Estudiante de colegio'
+            estudia: pago.ocupacion === 'Estudiante de colegio',
           });
-        } catch(err) { console.error('Error Anamnesis:', err.message); }
+        } catch (err) { console.error('Error Anamnesis:', err.message); }
 
         try {
-          await crearCitasCalendario({
-            movil: contact.phone||'', email: contact.email||'',
+          await zoho.crearCitasCalendario({
+            movil: contact.phone || '', email: contact.email || '',
             fechaISO: pago.fecha_cita, horaInicio: pago.hora_cita,
-            contactoID: resultado?.contactoID||null, nombreNino: pago.nombre_nino||''
+            contactoID: resultado?.contactoID || null, nombreNino: pago.nombre_nino || '',
           });
-          await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [pago.fecha_cita]).catch(()=>{});
-        } catch(err) { console.error('Error Citas:', err.message); }
+          await db.deleteAvailabilityCache(pago.fecha_cita);
+        } catch (err) { console.error('Error Citas:', err.message); }
 
-        await addTag(contactId, 'escalado nhck');
-        await addTag(contactId, 'validar pago nhck');
-        actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
-        limpiarTimers(conversationId);
-        await logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
-        await saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
-        await sendMessages(conversationId, [
+        await ghl.addTag(contactId, 'escalado nhck');
+        await ghl.addTag(contactId, 'validar pago nhck');
+        ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
+        timers.limpiarTimers(conversationId);
+        await db.logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
+        await db.saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
+        await ghl.sendMessages(conversationId, [
           `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
           `Tu cita para el ${fechaL} a las ${horaL} está reservada. Un asesor validará el pago y te confirmará en breve 🙌`,
-          `¡Que tengas un excelente día! 😊`
+          `¡Que tengas un excelente día! 😊`,
         ], contactId);
       } else {
-        await addTag(contactId, 'escalado nhck');
-        await addTag(contactId, 'validar pago nhck');
-        await saveConversationData(conversationId, contactId, convData?.messages||[], convData?.triaje||{}, 'escalado', lastMsgId, contact.phone||'');
-        await sendMessages(conversationId, [
+        await ghl.addTag(contactId, 'escalado nhck');
+        await ghl.addTag(contactId, 'validar pago nhck');
+        await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', lastMsgId, contact.phone || '');
+        await ghl.sendMessages(conversationId, [
           `¡Gracias! Recibimos tu comprobante 📋`,
-          `Un asesor lo revisará y te confirmará tu cita en breve 🙌`
+          `Un asesor lo revisará y te confirmará tu cita en breve 🙌`,
         ], contactId);
       }
       return;
     }
 
-    // Ignorar imagen en otros estados
+    // Ignore image in other states
     if (isImage) return;
     if (!lastMsg) return;
 
@@ -933,17 +248,17 @@ app.post('/webhook/ghl', async (req, res) => {
     const triaje = convData?.triaje || {};
     let history = convData?.messages || [];
 
-    // Limpiar registros viejos por teléfono
+    // Clean up old records by phone
     if (!convData && phone) {
       try {
-        const resViejos = await pool.query(
+        const resViejos = await db.pool.query(
           'SELECT conversation_id, contact_id FROM conversations WHERE phone=$1 AND contact_id!=$2',
           [phone, contactId]
         );
         for (const row of resViejos.rows) {
-          await pool.query('DELETE FROM conversations WHERE conversation_id=$1', [row.conversation_id]);
-          await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [row.contact_id]);
-          await pool.query('DELETE FROM pending_payments WHERE contact_id=$1', [row.contact_id]);
+          await db.pool.query('DELETE FROM conversations WHERE conversation_id=$1', [row.conversation_id]);
+          await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [row.contact_id]);
+          await db.pool.query('DELETE FROM pending_payments WHERE contact_id=$1', [row.contact_id]);
         }
       } catch (err) { console.error('Error limpiando registros viejos:', err.message); }
     }
@@ -951,38 +266,38 @@ app.post('/webhook/ghl', async (req, res) => {
     console.log('ESTADO:', estado, '| CONTACTO:', nombre || contactId);
 
     if (!convData) {
-      crearOportunidad(contactId, `${contact.firstName||''} ${contact.lastName||''}`.trim(), STAGE_INICIO).catch(()=>{});
+      ghl.crearOportunidad(contactId, `${contact.firstName || ''} ${contact.lastName || ''}`.trim(), constants.STAGE_INICIO).catch(() => {});
     }
 
-    // Comando reset
+    // Reset command
     if (lastMsg.trim().toLowerCase() === '/reset') {
-      await limpiarContactoDB(contactId);
-      await removeTag(contactId, 'escalado nhck');
-      await sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
+      await db.limpiarContactoDB(contactId);
+      await ghl.removeTag(contactId, 'escalado nhck');
+      await ghl.sendMessage(conversationId, '✓ Conversación reiniciada', contactId);
       return;
     }
 
-    history.push({ role:'user', content:[{ type:'text', text:lastMsg }] });
+    history.push({ role: 'user', content: [{ type: 'text', text: lastMsg }] });
     if (history.length > 20) history = history.slice(-20);
 
-    // Disponibilidad
+    // Availability
     let disponibilidadTexto = '';
     if (estado === 'agendando' || estado === 'triaje_completo') {
       try {
         const hoy = new Date();
-        const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-        const diasN = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+        const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        const diasN = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
         let offset = 1, diasOk = 0;
         while (diasOk < 3 && offset <= 14) {
-          const f = new Date(hoy); f.setDate(hoy.getDate()+offset);
+          const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
           const ds = f.getDay();
-          if (HORARIOS_NHCK[ds]) {
+          if (constants.HORARIOS_NHCK[ds]) {
             const fISO = f.toISOString().split('T')[0];
-            let citas = await getCachedDisponibilidad(fISO);
-            if (!citas) { citas = await getDisponibilidad(fISO); await setCachedDisponibilidad(fISO, citas); }
-            const slots = calcularSlotsLibres(citas, fISO);
+            let citas = await db.getCachedDisponibilidad(fISO);
+            if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
+            const slots = zoho.calcularSlotsLibres(citas, fISO);
             if (slots.length > 0) {
-              disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0,4).map(s=>s.label).join(', ')}\n`;
+              disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
               diasOk++;
             }
           }
@@ -992,151 +307,8 @@ app.post('/webhook/ghl', async (req, res) => {
       } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
     }
 
-    // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────
-    const reglasBase = `
-REGLAS CRÍTICAS:
-- Máximo 3 líneas por mensaje. Si necesitas más, separa con ---
-- Sin asteriscos ni negritas
-- Tono cálido, cercano, humano — como una asesora real
-- NUNCA repitas en el mismo mensaje información que ya diste en ese mensaje
-- NUNCA repitas en tu respuesta lo que acabas de decir en el mensaje anterior
-- NUNCA inventes precios, datos o información — usa solo el CONOCIMIENTO BASE
-- NUNCA digas que eres IA
-- NUNCA uses el término "asesores humanos" — solo "un asesor" o "nuestro equipo"
-- NUNCA muestres tags internos como [ESCALAR] al usuario
-- Usa el nombre del NIÑO correctamente — no lo confundas con el nombre del adulto
-- Solo español`;
-
-    let systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp.
-${reglasBase}
-
-CONOCIMIENTO BASE:
-${CONOCIMIENTO_NHC}`;
-
-    if (estado === 'nuevo') {
-      systemPrompt += `
-
-TU TAREA (primera interacción):
-1. Saluda cálidamente y preséntate como Carolina de NHC Kids
-2. En un mensaje breve menciona que al continuar aceptan las políticas de privacidad: https://neurohackingcenter.co/politicas-de-privacidad/
-3. Pregunta: "¿Con quién tengo el gusto de hablar?"
-
-Cuando responda con su nombre → incluye al final: [NOMBRE_PADRE: <nombre>]
-
-Si pide llamada o hablar con alguien → [ESCALAR]`;
-
-    } else if (estado === 'triaje_p1') {
-      systemPrompt += `
-
-CONTEXTO: Hablas con ${nombre || 'el padre/madre'}.
-
-TU TAREA — LEE TODO EL HISTORIAL antes de responder:
-Si el padre ya mencionó la dificultad, NO vuelvas a preguntarlo — extrae directamente.
-
-Pregunta conversacional: "¿Cuál es la principal dificultad que están observando en su hijo/a?"
-Opciones: ${TRIAJE_P1.join(', ')}
-
-Si ya respondió P1, mapea e inmediatamente haz P2 en el mismo mensaje:
-"¿Hace cuánto tiempo vienen observando esto?"
-Opciones: ${TRIAJE_P2.join(', ')}
-
-Al tener P1: [TRIAJE_P1: <opción exacta>]
-Al tener P2 también: [TRIAJE_P2: <opción exacta>]
-
-Si pide llamada → [ESCALAR]`;
-
-    } else if (estado === 'triaje_p2') {
-      systemPrompt += `
-
-TRIAJE para ${nombre || 'el padre/madre'}:
-- Dificultad: ${triaje.triaje1}
-
-Interpreta el tiempo → [TRIAJE_P2: <opción>]
-Luego pregunta: "¿Qué han intentado hasta ahora para ayudar a su hijo/a?"
-Opciones: ${TRIAJE_P3.join(', ')}
-
-Si pide llamada → [ESCALAR]`;
-
-    } else if (estado === 'triaje_p3') {
-      systemPrompt += `
-
-TRIAJE para ${nombre || 'el padre/madre'}:
-- Dificultad: ${triaje.triaje1} | Tiempo: ${triaje.triaje2}
-
-Interpreta lo que han intentado → [TRIAJE_P3: <opción>]
-Muestra empatía y presenta el proceso de evaluación con precio ($395.000 todo incluido).
-Menciona qué incluye: Neuromapeo + entrevista con psicólogo + pruebas psicológicas + devolución de resultados.
-Pregunta si quiere agendar.
-
-Al final: [TRIAJE_P3: <opción exacta>] y [TRIAJE_COMPLETO]
-
-Si pide llamada → [ESCALAR]`;
-
-    } else if (estado === 'triaje_completo' || estado === 'agendando') {
-      systemPrompt += `
-
-CONTEXTO de ${nombre || 'el padre/madre'}:
-- Dificultad: ${triaje.triaje1} | Tiempo: ${triaje.triaje2} | Han intentado: ${triaje.triaje3}
-
-DISPONIBILIDAD REAL (usa SOLO estos horarios):
-${disponibilidadTexto}
-NUNCA confirmes horarios que no estén en esa lista.
-
-VALIDACIÓN DE CIUDAD — cuando la mencionen:
-Ciudades ACEPTADAS: Medellín, Bello, La Estrella, Copacabana, Envigado, Itagüí, Sabaneta, Barbosa, Caldas, Rionegro, La Ceja, Guarne, El Retiro, Marinilla, El Carmen de Viboral, San Vicente, Santuario, municipios cercanos de Antioquia.
-Otras ciudades → [CIUDAD_NO_DISPONIBLE]
-
-DATOS — pedir TODO en UN SOLO MENSAJE con este formato exacto:
-"Agradecemos tu colaboración con el envío de la siguiente información 🤗
-Paciente:
-- Nombre completo:
-- Documento de identidad:
-- Fecha de nacimiento:
-- Edad:
-- Celular:
-- Correo electrónico:
-- Ocupación:"
-
-Cuando confirme el horario → pedir confirmación → cuando diga sí:
-[CITA_CONFIRMADA]
-fecha: <YYYY-MM-DD>
-hora: <HH:MM>
-nombre_nino: <nombre>
-edad: <edad>
-genero: <Masculino/Femenino/Otro>
-estudia: <si/no>
-nombre_padre: <nombre completo>
-email: <correo>
-ciudad: <ciudad>
-
-Solo el bloque exacto, sin texto adicional.
-
-Si preguntan por COMFAMA o FEISA → escalar al asesor → [ESCALAR]
-Si pide llamada → [ESCALAR]`;
-
-    } else if (estado === 'esperando_pago') {
-      systemPrompt += `
-
-CONTEXTO: ${nombre || 'el padre/madre'} debe hacer la reserva de $100.000.
-
-Según su respuesta:
-Opción 1 (Link/Wompi/virtual) → [MEDIO_WOMPI]
-Opción 2 (Transferencia/Bancolombia) → [MEDIO_TRANSFERENCIA]
-Opción 3 (QR) → [MEDIO_QR]
-Si pide llamada o hablar → [ESCALAR]
-Si quiere cambiar la cita → [ESCALAR]
-Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
-    }
-
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{ 'x-api-key':ANTHROPIC_KEY, 'anthropic-version':'2023-06-01', 'Content-Type':'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-5', max_tokens:600, system:systemPrompt, messages:history })
-    });
-
-    const claudeData = await claudeRes.json();
-    console.log('CLAUDE:', JSON.stringify(claudeData));
-    const rawReply = claudeData.content[0].text;
+    const systemPrompt = buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto });
+    const rawReply = await callClaude(systemPrompt, history);
 
     let nuevoEstado = estado;
     let nuevoTriaje = { ...triaje };
@@ -1150,11 +322,11 @@ Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
         const partes = nombreCapturado.split(' ');
         await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
           method: 'PUT',
-          headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ firstName: partes[0], lastName: partes.slice(1).join(' ') || '' })
+          headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ firstName: partes[0], lastName: partes.slice(1).join(' ') || '' }),
         });
-        await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
-      } catch(e) {}
+        await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+      } catch (e) {}
     }
 
     const matchP1 = rawReply.match(/\[TRIAJE_P1:\s*(.+?)\]/);
@@ -1167,19 +339,19 @@ Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
     if (matchP3) { nuevoTriaje.triaje3 = matchP3[1].trim(); }
     if (triajeCompleto) {
       nuevoEstado = 'triaje_completo';
-      addTag(contactId, `nhck-triaje-${nuevoTriaje.triaje1?.toLowerCase().replace(/[^a-z0-9]/g,'-').substring(0,20)||'ok'}`).catch(()=>{});
-      actualizarEtapaOportunidad(contactId, STAGE_INICIO).catch(()=>{});
+      ghl.addTag(contactId, `nhck-triaje-${nuevoTriaje.triaje1?.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 20) || 'ok'}`).catch(() => {});
+      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_INICIO).catch(() => {});
     }
 
-    // Cita confirmada
+    // Appointment confirmed
     if (rawReply.includes('[CITA_CONFIRMADA]')) {
       const extract = f => { const m = rawReply.match(new RegExp(`${f}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
       const fechaCita = extract('fecha'), horaCita = extract('hora');
       const nombreNino = extract('nombre_nino'), edad = extract('edad');
       const genero = extract('genero');
-      const estudia = ['si','sí'].includes(extract('estudia').toLowerCase());
+      const estudia = ['si', 'sí'].includes(extract('estudia').toLowerCase());
       const emailCita = extract('email') || contact.email || '';
-      const nombrePadreCita = extract('nombre_padre') || `${contact.firstName||''} ${contact.lastName||''}`.trim();
+      const nombrePadreCita = extract('nombre_padre') || `${contact.firstName || ''} ${contact.lastName || ''}`.trim();
       const ciudadCita = extract('ciudad') || contact.city || '';
 
       const ghlUpdate = {};
@@ -1192,119 +364,126 @@ Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
       }
       if (Object.keys(ghlUpdate).length > 0) {
         fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
-          method: 'PUT', headers: { 'Authorization': `Bearer ${GHL_KEY}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-          body: JSON.stringify(ghlUpdate)
-        }).catch(()=>{});
-        await pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(()=>{});
+          method: 'PUT', headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+          body: JSON.stringify(ghlUpdate),
+        }).catch(() => {});
+        await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
       }
 
-      await guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
-      actualizarEtapaOportunidad(contactId, STAGE_INFO_COMPLETA).catch(()=>{});
+      await ghl.guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
+      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_INFO_COMPLETA).catch(() => {});
 
       const referencia = `NHCK-${contactId}-${Date.now()}`;
-      await logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
+      await db.logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
 
       let linkPago = null;
       try {
-        const pagoResult = await generarLinkPago({ referencia, monto:100000,
-          nombre: nombrePadreCita || `${contact.firstName||''} ${contact.lastName||''}`.trim(),
-          email: emailCita || contact.email||'', telefono: contact.phone||'' });
+        const pagoResult = await pagos.generarLinkPago({
+          referencia, monto: 100000,
+          nombre: nombrePadreCita || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+          email: emailCita || contact.email || '', telefono: contact.phone || '',
+        });
         linkPago = pagoResult.url;
-        const contactConDatos = { ...contact, email: emailCita||contact.email||'', city: ciudadCita||contact.city||'' };
-        await savePendingPayment(referencia, { contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
-          edad, genero, ocupacion: mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
-          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: pagoResult.linkId });
+        const contactConDatos = { ...contact, email: emailCita || contact.email || '', city: ciudadCita || contact.city || '' };
+        await db.savePendingPayment(referencia, {
+          contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
+          edad, genero, ocupacion: ghl.mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
+          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: pagoResult.linkId,
+        });
       } catch (err) {
-        const contactConDatos = { ...contact, email: emailCita||contact.email||'' };
-        await savePendingPayment(referencia, { contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
-          edad, genero, ocupacion: mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
-          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: null });
+        const contactConDatos = { ...contact, email: emailCita || contact.email || '' };
+        await db.savePendingPayment(referencia, {
+          contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
+          edad, genero, ocupacion: ghl.mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
+          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: null,
+        });
       }
 
-      history.push({ role:'assistant', content:[{ type:'text', text:'Cita confirmada, preguntando medio de pago.' }] });
-      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+      history.push({ role: 'assistant', content: [{ type: 'text', text: 'Cita confirmada, preguntando medio de pago.' }] });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
       await humanDelay();
-      await sendMessage(conversationId,
+      await ghl.sendMessage(conversationId,
         `Para confirmar tu cupo necesitamos la reserva de $100.000 💳\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
         contactId);
-      actualizarEtapaOportunidad(contactId, STAGE_LINK_PAGO).catch(()=>{});
-      iniciarTimersInactividad(conversationId, contactId);
+      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
+      timers.iniciarTimersInactividad(conversationId, contactId);
       return;
     }
 
-    // Medios de pago
+    // Payment methods
     if (estado === 'esperando_pago') {
-      const pendingRes = await pool.query('SELECT * FROM pending_payments WHERE contact_id=$1 ORDER BY created_at DESC LIMIT 1', [contactId]);
-      const pending = pendingRes.rows[0];
+      const pending = await db.getPendingPaymentsByContact(contactId);
 
       if (rawReply.includes('[MEDIO_WOMPI]') && pending) {
-        const pagoResult = await generarLinkPago({ referencia: pending.referencia, monto: 100000,
-          nombre: `${contact.firstName||''} ${contact.lastName||''}`.trim(),
-          email: pending.contact_data?.email || contact.email || '', telefono: contact.phone || '' }).catch(() => null);
+        const pagoResult = await pagos.generarLinkPago({
+          referencia: pending.referencia, monto: 100000,
+          nombre: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+          email: pending.contact_data?.email || contact.email || '', telefono: contact.phone || '',
+        }).catch(() => null);
         const linkPago = pagoResult?.url;
         await humanDelay();
         if (linkPago) {
-          await sendMessages(conversationId, [
+          await ghl.sendMessages(conversationId, [
             `Aquí tienes tu link de pago seguro 👇\n${linkPago}`,
-            `Una vez completado te envío los detalles de tu cita 🙌`
+            `Una vez completado te envío los detalles de tu cita 🙌`,
           ], contactId);
         }
-        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+        await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
         return;
       }
 
       if (rawReply.includes('[MEDIO_TRANSFERENCIA]')) {
         await humanDelay();
-        await sendMessages(conversationId, [
+        await ghl.sendMessages(conversationId, [
           `Puedes hacer la transferencia o consignación por $100.000 a esta cuenta 👇`,
           `Bancolombia — Cuenta de Ahorros\nNúmero: 90790901451\nLlave: 0090435866\nA nombre de: Visión Integral Transformación Personal y Organizacional SAS\nNIT: 901164425`,
-          `Una vez realizado el pago envíame aquí la foto del comprobante y confirmo tu cita 📸`
+          `Una vez realizado el pago envíame aquí la foto del comprobante y confirmo tu cita 📸`,
         ], contactId);
-        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+        await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
         return;
       }
 
       if (rawReply.includes('[MEDIO_QR]')) {
         await humanDelay();
-        await sendMessages(conversationId, [
+        await ghl.sendMessages(conversationId, [
           `Aquí está el QR para pagar $100.000 👇\nhttps://neurohackingcenter.co/wp-content/uploads/2026/05/WhatsApp-Image-2026-05-29-at-11.00.03-AM.jpeg`,
           `Ábrelo, toma captura y escanéalo con tu app bancaria 📱\nO usa la llave Bancolombia: 0090435866`,
-          `Cuando pagues envíame el comprobante aquí y confirmo tu cita 📸`
+          `Cuando pagues envíame el comprobante aquí y confirmo tu cita 📸`,
         ], contactId);
-        await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
+        await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
         return;
       }
     }
 
-    // Ciudad no disponible
+    // City not available
     if (rawReply.includes('[CIUDAD_NO_DISPONIBLE]')) {
       const replyLimpio = rawReply.replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '').trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
-      history.push({ role:'assistant', content:[{ type:'text', text: replyLimpio }] });
-      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
-      await addTag(contactId, 'escalado nhck');
+      history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
+      await ghl.addTag(contactId, 'escalado nhck');
       await humanDelay();
-      await sendMessages(conversationId, partes, contactId);
+      await ghl.sendMessages(conversationId, partes, contactId);
       return;
     }
 
-    // Escalar — NO iniciar timers de inactividad
+    // Escalate — do NOT start inactivity timers
     if (rawReply.includes('[ESCALAR]')) {
-      await addTag(contactId, 'escalado nhck');
-      await logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
-      await saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
+      await ghl.addTag(contactId, 'escalado nhck');
+      await db.logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
       await humanDelay();
       const replyLimpio = rawReply.replace(/\[ESCALAR\]/g, '').trim();
       if (replyLimpio) {
         const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
-        await sendMessages(conversationId, partes, contactId);
+        await ghl.sendMessages(conversationId, partes, contactId);
       } else {
-        await sendMessage(conversationId, 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌', contactId);
+        await ghl.sendMessage(conversationId, 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌', contactId);
       }
       return;
     }
 
-    // Respuesta normal
+    // Normal reply
     const reply = rawReply
       .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
       .replace(/\[TRIAJE_COMPLETO\]/g, '')
@@ -1317,12 +496,12 @@ Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
       .split('\n').filter(l => l.trim() !== '').join('\n');
 
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
-    history.push({ role:'assistant', content:[{ type:'text', text:reply }] });
-    await saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
+    history.push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
+    await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
     await humanDelay();
-    await sendMessages(conversationId, partes, contactId);
-    iniciarTimersInactividad(conversationId, contactId);
-    console.log('RESPUESTA OK:', { reply: reply?.substring(0,60), estado: nuevoEstado });
+    await ghl.sendMessages(conversationId, partes, contactId);
+    timers.iniciarTimersInactividad(conversationId, contactId);
+    console.log('RESPUESTA OK:', { reply: reply?.substring(0, 60), estado: nuevoEstado });
 
   } catch (error) {
     console.error('Error webhook GHL:', error.message);
@@ -1334,7 +513,7 @@ app.post('/webhook/wompi', async (req, res) => {
   console.log('WOMPI WEBHOOK RECIBIDO:', JSON.stringify(req.body));
   try {
     const transaccion = req.body?.data?.transaction;
-    if (!transaccion) return res.json({ received:true });
+    if (!transaccion) return res.json({ received: true });
     const { reference, status } = transaccion;
 
     const checksum = req.body?.signature?.checksum;
@@ -1346,53 +525,57 @@ app.post('/webhook/wompi', async (req, res) => {
         let val = req.body.data;
         for (const k of keys) val = val?.[k];
         return val !== undefined && val !== null ? String(val) : '';
-      }).join('') + String(timestamp) + WOMPI_INTEGRITY_KEY;
+      }).join('') + String(timestamp) + env.wompiIntegrityKey;
       const firmaCalc = crypto.createHash('sha256').update(cadena).digest('hex');
       if (firmaCalc !== checksum && req.body?.environment !== 'test') {
-        return res.status(401).json({ error:'Firma inválida' });
+        return res.status(401).json({ error: 'Firma inválida' });
       }
     }
 
-    if (status !== 'APPROVED') return res.json({ received:true });
+    if (status !== 'APPROVED') return res.json({ received: true });
 
-    const datos = await getPendingPayment(reference);
-    if (!datos) return res.json({ received:true });
+    const datos = await db.getPendingPayment(reference);
+    if (!datos) return res.json({ received: true });
 
     const { contactId, conversationId, contact, fechaCita, horaCita, edad, genero, ocupacion, sintoma, nombreNino, nombre } = datos;
 
     let resultado = null;
     try {
-      resultado = await crearEnAnamnesis({ nombreNino: nombreNino||contact.firstName||'',
-        email: contact.email||'', movil: contact.phone||'', contactIdGHL: contactId,
-        edad, sintoma, genero, estudia: ocupacion === 'Estudiante de colegio' });
+      resultado = await zoho.crearEnAnamnesis({
+        nombreNino: nombreNino || contact.firstName || '',
+        email: contact.email || '', movil: contact.phone || '', contactIdGHL: contactId,
+        edad, sintoma, genero, estudia: ocupacion === 'Estudiante de colegio',
+      });
     } catch (err) { console.error('Error Anamnesis:', err.message); }
 
     try {
-      await crearCitasCalendario({ movil: contact.phone||'', email: contact.email||'',
-        fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID||null, nombreNino: nombreNino||'' });
-      await pool.query('DELETE FROM availability_cache WHERE fecha_iso=$1', [fechaCita]).catch(()=>{});
+      await zoho.crearCitasCalendario({
+        movil: contact.phone || '', email: contact.email || '',
+        fechaISO: fechaCita, horaInicio: horaCita, contactoID: resultado?.contactoID || null, nombreNino: nombreNino || '',
+      });
+      await db.deleteAvailabilityCache(fechaCita);
     } catch (err) { console.error('Error Citas:', err.message); }
 
-    const mesesN = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-    const [,mm,dd] = (fechaCita||'').split('-');
-    const fechaL = fechaCita ? `${parseInt(dd)} de ${mesesN[parseInt(mm)-1]}` : 'la fecha acordada';
-    const [hh,min] = (horaCita||'00:00').split(':');
+    const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const [, mm, dd] = (fechaCita || '').split('-');
+    const fechaL = fechaCita ? `${parseInt(dd)} de ${mesesN[parseInt(mm) - 1]}` : 'la fecha acordada';
+    const [hh, min] = (horaCita || '00:00').split(':');
     const hN = parseInt(hh);
-    const horaL = `${hN>12?hN-12:hN===0?12:hN}:${min}${hN<12?'am':'pm'}`;
+    const horaL = `${hN > 12 ? hN - 12 : hN === 0 ? 12 : hN}:${min}${hN < 12 ? 'am' : 'pm'}`;
 
-    await addTag(contactId, 'escalado nhck');
-    await addTag(contactId, 'pagó 100K nhck');
-    await deletePendingPayment(reference);
-    actualizarEtapaOportunidad(contactId, STAGE_PAGO_PARCIAL).catch(()=>{});
-    limpiarTimers(conversationId);
+    await ghl.addTag(contactId, 'escalado nhck');
+    await ghl.addTag(contactId, 'pagó 100K nhck');
+    await db.deletePendingPayment(reference);
+    ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_PAGO_PARCIAL).catch(() => {});
+    timers.limpiarTimers(conversationId);
 
-    await sendMessages(conversationId, [
+    await ghl.sendMessages(conversationId, [
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
       `Recuerda llegar 10 minutos antes. ¡Nos vemos pronto! 🙌`,
-      `En breve un asesor te escribirá para coordinar los últimos detalles: ubicación del centro, test previo y recomendaciones para el proceso. 🙏`
+      `En breve un asesor te escribirá para coordinar los últimos detalles: ubicación del centro, test previo y recomendaciones para el proceso. 🙏`,
     ], contactId);
 
-    return res.json({ received:true });
+    return res.json({ received: true });
   } catch (error) {
     console.error('Error webhook Wompi:', error);
     res.status(500).json({ error: error.message });
@@ -1403,7 +586,7 @@ app.get('/pago-exitoso', (req, res) => {
   res.send('<h2 style="font-family:sans-serif;text-align:center;margin-top:3rem">¡Pago recibido! Tu cita está confirmada. Puedes cerrar esta ventana.</h2>');
 });
 
-const PORT = process.env.PORT || 3000;
-initDB().then(() => {
-  app.listen(PORT, () => console.log(`Servidor corriendo en puerto ${PORT}`));
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+db.initDB().then(() => {
+  app.listen(env.port, () => console.log(`Servidor corriendo en puerto ${env.port}`));
 }).catch(err => { console.error('Error DB:', err); process.exit(1); });
