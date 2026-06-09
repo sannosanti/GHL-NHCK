@@ -174,4 +174,32 @@ Paciente:
 - Cuando se escala: NO cerrar la conversación por inactividad
 `;
 
-module.exports = { env, constants, CONOCIMIENTO_NHC };
+// ─── MAPPERS ──────────────────────────────────────────────────────────────────
+
+function mapearSintoma(s) {
+  s = (s || '').toLowerCase().trim();
+  if (s.includes('ansiedad') || s.includes('miedo') || s.includes('inseguridad')) return 'Ansiedad';
+  if (s.includes('autis')) return 'Autismo';
+  if (s.includes('autoestima') || s.includes('confianza')) return 'Autoestima';
+  if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('atencion') || s.includes('tdah') || s.includes('concentra')) return 'Déficit de atención';
+  if (s.includes('depres')) return 'Depresión1';
+  if (s.includes('rendimiento') || s.includes('aprendizaje') || s.includes('escolar') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
+  if (s.includes('desregul') || s.includes('emocional')) return 'Ansiedad';
+  if (s.includes('conduct') || s.includes('impulsiv')) return 'TOD (Transtorno Oposicion...)';
+  if (s.includes('estrés') || s.includes('estres')) return 'Estrés';
+  if (s.includes('toc') || s.includes('obsesiv')) return 'TOC (Transtorno Obsesivo C...)';
+  return 'Otros';
+}
+
+function mapearGenero(g) {
+  g = (g || '').toLowerCase().trim();
+  if (g.includes('mascul') || g.includes('niño') || g.includes('hombre') || g === 'm') return 'Masculino';
+  if (g.includes('femen') || g.includes('niña') || g.includes('mujer') || g === 'f') return 'Femenino';
+  return 'Otro';
+}
+
+function mapearOcupacionNino(estudia) {
+  return (estudia === true || estudia === 'si' || estudia === 'sí') ? 'Estudiante de colegio' : 'N.A';
+}
+
+module.exports = { env, constants, CONOCIMIENTO_NHC, mapearSintoma, mapearGenero, mapearOcupacionNino };

@@ -1,9 +1,8 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { env, constants } = require('../config');
+const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino } = require('../config');
 const db = require('../db');
-const { mapearSintoma, mapearGenero, mapearOcupacionNino } = require('./ghl');
 
 // ─── ZOHO TOKEN (module-scoped, private) ─────────────────────────────────────
 let zohoAccessToken = null;
