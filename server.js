@@ -6,6 +6,7 @@ const db = require('./db');
 const { removeTag, getContact, getConversationId } = require('./services/ghl');
 const { ghlWebhookHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
+const { startRecoveryJob } = require('./jobs/recoveryJob');
 
 const app = express();
 app.use(express.json());
@@ -72,5 +73,6 @@ app.get('/pago-exitoso', pagoExitosoHandler);
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
 
 db.initDB().then(() => {
+  startRecoveryJob();
   app.listen(env.port, () => console.log(`Servidor corriendo en puerto ${env.port}`));
 }).catch(err => { console.error('Error DB:', err); process.exit(1); });

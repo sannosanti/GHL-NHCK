@@ -71,6 +71,9 @@ async function ghlWebhookHandler(req, res) {
     if (!conversationId) return;
 
     const convData = await db.getConversationData(conversationId);
+    if (convData?.recovery_status) {
+      db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1', [conversationId]).catch(() => {});
+    }
     timers.limpiarTimers(conversationId);
 
     const contactData = await ghl.getContact(contactId);
