@@ -11,7 +11,7 @@ function limpiarTimers(conversationId) {
   }
 }
 
-function iniciarTimersInactividad(conversationId, contactId, sendMessage) {
+function iniciarTimersInactividad(conversationId, contactId, sendMessage, onCierre) {
   limpiarTimers(conversationId);
   inactivityTimers[conversationId] = {
     timer5: setTimeout(async () => {
@@ -19,7 +19,10 @@ function iniciarTimersInactividad(conversationId, contactId, sendMessage) {
       catch (err) { console.error('Error timer 5min:', err.message); }
     }, 5 * 60 * 1000),
     timer10: setTimeout(async () => {
-      try { await sendMessage(conversationId, 'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso nos escribes y con gusto te ayudamos.', contactId); }
+      try {
+        await sendMessage(conversationId, 'Por ahora cerramos la conversación pero quedamos atentos 🙌\nCuando quieras retomar el proceso nos escribes y con gusto te ayudamos.', contactId);
+        if (onCierre) await onCierre(conversationId);
+      }
       catch (err) { console.error('Error timer 10min:', err.message); }
     }, 10 * 60 * 1000),
   };

@@ -70,6 +70,7 @@ async function wompiWebhookHandler(req, res) {
     await db.deletePendingPayment(reference);
     ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_PAGO_PARCIAL).catch(() => {});
     timers.limpiarTimers(conversationId);
+    await db.marcarCompletado(conversationId);
 
     await ghl.sendMessages(conversationId, [
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,

@@ -22,7 +22,7 @@ function isWithinOperatingHours() {
   return hour >= 7 && hour < 22;
 }
 
-const EXCLUDED_STATES = ['escalado', 'esperando_pago', 'pagado', 'completado'];
+const EXCLUDED_STATES = ['escalado', 'esperando_pago', 'pagado', 'completado', 'cerrado'];
 
 const SYSTEM_PROMPT_ATTEMPT_1 = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp.
 

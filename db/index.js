@@ -186,6 +186,24 @@ async function getPendingPaymentsByContact(contactId) {
   } catch { return null; }
 }
 
+async function marcarCerrado(conversationId) {
+  try {
+    await pool.query(
+      "UPDATE conversations SET estado='cerrado', updated_at=NOW() WHERE conversation_id=$1",
+      [conversationId]
+    );
+  } catch (err) { console.error('Error marcando cerrado:', err.message); }
+}
+
+async function marcarCompletado(conversationId) {
+  try {
+    await pool.query(
+      "UPDATE conversations SET estado='completado', updated_at=NOW() WHERE conversation_id=$1",
+      [conversationId]
+    );
+  } catch (err) { console.error('Error marcando completado:', err.message); }
+}
+
 module.exports = {
   pool,
   initDB,
@@ -202,4 +220,6 @@ module.exports = {
   logEvent,
   deleteAvailabilityCache,
   getPendingPaymentsByContact,
+  marcarCerrado,
+  marcarCompletado,
 };

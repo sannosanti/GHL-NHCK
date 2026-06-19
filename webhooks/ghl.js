@@ -70,11 +70,24 @@ async function ghlWebhookHandler(req, res) {
     }
     if (!conversationId) return;
 
-    const convData = await db.getConversationData(conversationId);
+    let convData = await db.getConversationData(conversationId);
     if (convData?.recovery_status) {
       db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1', [conversationId]).catch(() => {});
     }
     timers.limpiarTimers(conversationId);
+
+    // If conversation was closed by inactivity and user writes again → restart keeping triaje
+    if (convData?.estado === 'cerrado') {
+      const t = convData.triaje || {};
+      const estadoRetoma = (t.triaje1 && t.triaje2 && t.triaje3)
+        ? 'triaje_completo'
+        : (t.triaje1 && t.triaje2 ? 'triaje_p3' : (t.triaje1 ? 'triaje_p2' : 'nuevo'));
+      await db.pool.query(
+        'UPDATE conversations SET estado=$1, messages=\'[]\'::jsonb, recovery_status=NULL, updated_at=NOW() WHERE conversation_id=$2',
+        [estadoRetoma, conversationId]
+      );
+      convData = { ...convData, estado: estadoRetoma, messages: [] };
+    }
 
     const contactData = await ghl.getContact(contactId);
     if (contactData.deleted) { await db.limpiarContactoDB(contactId); return; }
@@ -335,7 +348,7 @@ async function ghlWebhookHandler(req, res) {
         `Para confirmar tu cupo necesitamos la reserva de $100.000 💳\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
         contactId);
       ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
-      timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage);
+      timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, db.marcarCerrado);
       return;
     }
 
@@ -384,13 +397,54 @@ async function ghlWebhookHandler(req, res) {
       }
     }
 
-    // City not available
+    // Cierre: ciudad fuera de cobertura
     if (rawReply.includes('[CIUDAD_NO_DISPONIBLE]')) {
       const replyLimpio = rawReply.replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '').trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', lastMsgId, phone);
+      await ghl.addTag(contactId, 'fuera-ciudad nhck');
+      await db.logEvent(contactId, conversationId, 'cierre_fuera_ciudad', {});
+      await humanDelay();
+      await ghl.sendMessages(conversationId, partes, contactId);
+      return;
+    }
+
+    // Cierre: sin presupuesto
+    if (rawReply.includes('[SIN_PRESUPUESTO]')) {
+      const replyLimpio = rawReply.replace(/\[SIN_PRESUPUESTO\]/g, '').trim();
+      const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
+      history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', lastMsgId, phone);
+      await ghl.addTag(contactId, 'sin-presupuesto nhck');
+      await db.logEvent(contactId, conversationId, 'cierre_sin_presupuesto', {});
+      await humanDelay();
+      await ghl.sendMessages(conversationId, partes, contactId);
+      return;
+    }
+
+    // Cierre: fuera de segmento (edad mínima, no lee)
+    if (rawReply.includes('[FUERA_SEGMENTO]')) {
+      const replyLimpio = rawReply.replace(/\[FUERA_SEGMENTO\]/g, '').trim();
+      const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
+      history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', lastMsgId, phone);
+      await ghl.addTag(contactId, 'fuera-segmento nhck');
+      await db.logEvent(contactId, conversationId, 'cierre_fuera_segmento', {});
+      await humanDelay();
+      await ghl.sendMessages(conversationId, partes, contactId);
+      return;
+    }
+
+    // Escalado: busca servicio para adultos → línea NHC
+    if (rawReply.includes('[NHC_ADULTOS]')) {
+      const replyLimpio = rawReply.replace(/\[NHC_ADULTOS\]/g, '').trim();
+      const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
+      history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
+      await ghl.addTag(contactId, 'nhc-adultos');
       await ghl.addTag(contactId, 'escalado nhck');
+      await db.logEvent(contactId, conversationId, 'escalado_nhc_adultos', {});
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId);
       return;
@@ -421,6 +475,9 @@ async function ghlWebhookHandler(req, res) {
       .replace(/\[MEDIO_TRANSFERENCIA\]/g, '')
       .replace(/\[MEDIO_QR\]/g, '')
       .replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '')
+      .replace(/\[SIN_PRESUPUESTO\]/g, '')
+      .replace(/\[FUERA_SEGMENTO\]/g, '')
+      .replace(/\[NHC_ADULTOS\]/g, '')
       .replace(/\[ESCALAR\]/g, '')
       .split('\n').filter(l => l.trim() !== '').join('\n');
 
@@ -429,7 +486,7 @@ async function ghlWebhookHandler(req, res) {
     await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
     await humanDelay();
     await ghl.sendMessages(conversationId, partes, contactId);
-    timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage);
+    timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, db.marcarCerrado);
     console.log('RESPUESTA OK:', { reply: reply?.substring(0, 60), estado: nuevoEstado });
 
   } catch (error) {
