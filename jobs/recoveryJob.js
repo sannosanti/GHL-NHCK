@@ -5,6 +5,8 @@ const { pool } = require('../db');
 const { sendMessage, addTag } = require('../services/ghl');
 const { callClaude } = require('../ai/claude');
 const { CONOCIMIENTO_NHC } = require('../config');
+const { triggerAnalysis } = require('./insightJob');
+const { notifyError } = require('../services/notifier');
 
 // Colombia is UTC-5 year-round (no DST)
 const COLOMBIA_OFFSET_HOURS = -5;
@@ -144,11 +146,13 @@ async function runRecoveryJob() {
           'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2',
           ['intento-2', conversation_id]
         );
+        triggerAnalysis(conversation_id, contact_id, 'recovery_fallido');
       }
 
       console.log(`[recoveryJob] Attempt ${attempt} sent for conversation ${conversation_id}`);
     } catch (err) {
       console.error(`[recoveryJob] Error processing ${conversation_id}:`, err.message);
+      notifyError(`recoveryJob conv ${conversation_id}`, err).catch(() => {});
     }
   }
 }

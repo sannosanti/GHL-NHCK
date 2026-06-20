@@ -190,7 +190,7 @@ function mapearSintoma(s) {
   if (s.includes('autis')) return 'Autismo';
   if (s.includes('autoestima') || s.includes('confianza')) return 'Autoestima';
   if (s.includes('deficit') || s.includes('déficit') || s.includes('atención') || s.includes('atencion') || s.includes('tdah') || s.includes('concentra')) return 'Déficit de atención';
-  if (s.includes('depres')) return 'Depresión1';
+  if (s.includes('depres')) return 'Depresión';
   if (s.includes('rendimiento') || s.includes('aprendizaje') || s.includes('escolar') || s.includes('dislexia')) return 'Dificultades de aprendizaje';
   if (s.includes('desregul') || s.includes('emocional')) return 'Ansiedad';
   if (s.includes('conduct') || s.includes('impulsiv')) return 'TOD (Transtorno Oposicion...)';

@@ -60,6 +60,32 @@ async function initDB() {
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_link_id TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phone TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS recovery_status VARCHAR(50) DEFAULT NULL`).catch(() => {});
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS conversation_insights (
+      id SERIAL PRIMARY KEY,
+      conversation_id TEXT UNIQUE,
+      contact_id TEXT,
+      outcome TEXT,
+      estado_final TEXT,
+      drop_off_point TEXT,
+      root_cause TEXT,
+      missed_questions JSONB DEFAULT '[]',
+      what_worked TEXT,
+      improvement_suggestion TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS knowledge_gaps (
+      id SERIAL PRIMARY KEY,
+      pregunta TEXT UNIQUE,
+      frecuencia INT DEFAULT 1,
+      sugerencia_respuesta TEXT,
+      aprobada BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_conv ON conversation_insights (conversation_id)`).catch(() => {});
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_gaps_pregunta ON knowledge_gaps (pregunta)`).catch(() => {});
   console.log('Base de datos inicializada ✓');
 }
 
@@ -186,6 +212,54 @@ async function getPendingPaymentsByContact(contactId) {
   } catch { return null; }
 }
 
+async function saveConversationInsight(conversationId, contactId, outcome, estadoFinal, analysis) {
+  try {
+    await pool.query(`
+      INSERT INTO conversation_insights
+        (conversation_id, contact_id, outcome, estado_final, drop_off_point, root_cause, missed_questions, what_worked, improvement_suggestion)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      ON CONFLICT (conversation_id) DO NOTHING
+    `, [
+      conversationId, contactId, outcome, estadoFinal,
+      analysis.drop_off_point || null,
+      analysis.root_cause || null,
+      JSON.stringify(analysis.missed_questions || []),
+      analysis.what_worked || null,
+      analysis.improvement_suggestion || null,
+    ]);
+  } catch (err) { console.error('Error guardando insight:', err.message); }
+}
+
+async function getWeeklyInsights() {
+  try {
+    const res = await pool.query(`
+      SELECT * FROM conversation_insights
+      WHERE created_at > NOW() - INTERVAL '7 days'
+      ORDER BY created_at DESC
+    `);
+    return res.rows;
+  } catch { return []; }
+}
+
+async function saveKnowledgeGap(pregunta, sugerencia) {
+  try {
+    await pool.query(`
+      INSERT INTO knowledge_gaps (pregunta, frecuencia, sugerencia_respuesta)
+      VALUES ($1, 1, $2)
+      ON CONFLICT DO NOTHING
+    `, [pregunta, sugerencia]);
+  } catch (err) { console.error('Error guardando gap:', err.message); }
+}
+
+async function getKnowledgeGaps() {
+  try {
+    const res = await pool.query(`
+      SELECT * FROM knowledge_gaps WHERE aprobada = FALSE ORDER BY frecuencia DESC
+    `);
+    return res.rows;
+  } catch { return []; }
+}
+
 async function marcarCerrado(conversationId) {
   try {
     await pool.query(
@@ -222,4 +296,8 @@ module.exports = {
   getPendingPaymentsByContact,
   marcarCerrado,
   marcarCompletado,
+  saveConversationInsight,
+  getWeeklyInsights,
+  saveKnowledgeGap,
+  getKnowledgeGaps,
 };

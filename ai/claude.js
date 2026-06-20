@@ -10,7 +10,7 @@ const { env } = require('../config');
  * @param {Array} history - Array of message objects (role/content)
  * @returns {Promise<string>} raw reply text
  */
-async function callClaude(systemPrompt, history) {
+async function callClaude(systemPrompt, history, maxTokens = 600) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -20,7 +20,7 @@ async function callClaude(systemPrompt, history) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-5',
-      max_tokens: 600,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: history,
     }),

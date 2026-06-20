@@ -9,6 +9,8 @@ const pagos = require('../services/pagos');
 const timers = require('../services/timers');
 const { buildSystemPrompt } = require('../ai/prompt');
 const { callClaude } = require('../ai/claude');
+const { triggerAnalysis } = require('../jobs/insightJob');
+const { notifyError } = require('../services/notifier');
 
 // ─── MODULE-LOCAL STATE ───────────────────────────────────────────────────────
 
@@ -102,6 +104,7 @@ async function ghlWebhookHandler(req, res) {
       if (!tags.includes('escalado nhck')) {
         await ghl.addTag(contactId, 'escalado nhck');
         await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
+        triggerAnalysis(conversationId, contactId, 'audio_escalado');
         await humanDelay();
         await ghl.sendMessage(conversationId, 'Recibí tu mensaje de voz 😊 En un momento un asesor de nuestro equipo te atiende por aquí.', contactId);
       }
@@ -164,6 +167,7 @@ async function ghlWebhookHandler(req, res) {
         timers.limpiarTimers(conversationId);
         await db.logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
         await db.saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
+        triggerAnalysis(conversationId, contactId, 'pago_manual');
         await ghl.sendMessages(conversationId, [
           `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
           `Tu cita para el ${fechaL} a las ${horaL} está reservada. Un asesor validará el pago y te confirmará en breve 🙌`,
@@ -348,7 +352,10 @@ async function ghlWebhookHandler(req, res) {
         `Para confirmar tu cupo necesitamos la reserva de $100.000 💳\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
         contactId);
       ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
-      timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, db.marcarCerrado);
+      timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, async (convId, ctId) => {
+      await db.marcarCerrado(convId);
+      triggerAnalysis(convId, ctId || contactId, 'inactividad');
+    });
       return;
     }
 
@@ -405,6 +412,7 @@ async function ghlWebhookHandler(req, res) {
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', lastMsgId, phone);
       await ghl.addTag(contactId, 'fuera-ciudad nhck');
       await db.logEvent(contactId, conversationId, 'cierre_fuera_ciudad', {});
+      triggerAnalysis(conversationId, contactId, 'fuera_ciudad');
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId);
       return;
@@ -418,6 +426,7 @@ async function ghlWebhookHandler(req, res) {
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', lastMsgId, phone);
       await ghl.addTag(contactId, 'sin-presupuesto nhck');
       await db.logEvent(contactId, conversationId, 'cierre_sin_presupuesto', {});
+      triggerAnalysis(conversationId, contactId, 'sin_presupuesto');
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId);
       return;
@@ -431,6 +440,7 @@ async function ghlWebhookHandler(req, res) {
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', lastMsgId, phone);
       await ghl.addTag(contactId, 'fuera-segmento nhck');
       await db.logEvent(contactId, conversationId, 'cierre_fuera_segmento', {});
+      triggerAnalysis(conversationId, contactId, 'fuera_segmento');
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId);
       return;
@@ -445,6 +455,7 @@ async function ghlWebhookHandler(req, res) {
       await ghl.addTag(contactId, 'nhc-adultos');
       await ghl.addTag(contactId, 'escalado nhck');
       await db.logEvent(contactId, conversationId, 'escalado_nhc_adultos', {});
+      triggerAnalysis(conversationId, contactId, 'nhc_adultos');
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId);
       return;
@@ -455,6 +466,7 @@ async function ghlWebhookHandler(req, res) {
       await ghl.addTag(contactId, 'escalado nhck');
       await db.logEvent(contactId, conversationId, 'escalado', { motivo: lastMsg });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', lastMsgId, phone);
+      triggerAnalysis(conversationId, contactId, 'escalado');
       await humanDelay();
       const replyLimpio = rawReply.replace(/\[ESCALAR\]/g, '').trim();
       if (replyLimpio) {
@@ -486,11 +498,15 @@ async function ghlWebhookHandler(req, res) {
     await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
     await humanDelay();
     await ghl.sendMessages(conversationId, partes, contactId);
-    timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, db.marcarCerrado);
+    timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, async (convId, ctId) => {
+      await db.marcarCerrado(convId);
+      triggerAnalysis(convId, ctId || contactId, 'inactividad');
+    });
     console.log('RESPUESTA OK:', { reply: reply?.substring(0, 60), estado: nuevoEstado });
 
   } catch (error) {
     console.error('Error webhook GHL:', error.message);
+    notifyError('webhook GHL', error).catch(() => {});
   }
 }
 

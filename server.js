@@ -7,6 +7,9 @@ const { removeTag, getContact, getConversationId } = require('./services/ghl');
 const { ghlWebhookHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
+const { startWeeklyReport } = require('./jobs/weeklyReport');
+const { startDailyReport } = require('./jobs/dailyReport');
+const { notifyError } = require('./services/notifier');
 
 const app = express();
 app.use(express.json());
@@ -72,7 +75,19 @@ app.get('/pago-exitoso', pagoExitosoHandler);
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
 
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException:', err.message);
+  notifyError('uncaughtException', err).catch(() => {});
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandledRejection:', reason);
+  notifyError('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason))).catch(() => {});
+});
+
 db.initDB().then(() => {
   startRecoveryJob();
+  startWeeklyReport();
+  startDailyReport();
   app.listen(env.port, () => console.log(`Servidor corriendo en puerto ${env.port}`));
 }).catch(err => { console.error('Error DB:', err); process.exit(1); });

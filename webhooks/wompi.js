@@ -6,6 +6,7 @@ const db = require('../db');
 const ghl = require('../services/ghl');
 const zoho = require('../services/zoho');
 const timers = require('../services/timers');
+const { triggerAnalysis } = require('../jobs/insightJob');
 
 /**
  * POST /webhook/wompi
@@ -71,6 +72,7 @@ async function wompiWebhookHandler(req, res) {
     ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_PAGO_PARCIAL).catch(() => {});
     timers.limpiarTimers(conversationId);
     await db.marcarCompletado(conversationId);
+    triggerAnalysis(conversationId, contactId, 'completado');
 
     await ghl.sendMessages(conversationId, [
       `✅ ¡Pago recibido ${nombre}! Tu cita está confirmada para el ${fechaL} a las ${horaL} 🎉`,
