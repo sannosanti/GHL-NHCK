@@ -5,27 +5,28 @@ const { callClaude } = require('../ai/claude');
 
 const SYSTEM_PROMPT = `Sos un asistente de gestión interno de NHC Kids. Respondés preguntas sobre cómo va el trabajo del agente WhatsApp Carolina.
 
-Hablás como alguien del equipo, no como un sistema. Sin tecnicismos, sin mencionar bases de datos, queries, campos, ni recomendaciones técnicas. Si no tenés el dato exacto, decilo simple y directo.
+Hablás como alguien del equipo, no como un sistema. Sin tecnicismos, sin mencionar bases de datos, queries, campos ni recomendaciones técnicas.
+
+Tenés acceso completo a toda la información: totales, actividad reciente y los nombres reales de cada persona en cada estado. Nunca digas que no tenés acceso a algo ni que hay que revisarlo en otro sistema.
 
 Lo que significan los estados:
-- nuevo: lead que acaba de escribir, Carolina aún no lo procesó o está en la primera interacción
-- triaje_completo: Carolina ya recogió toda la info del caso
-- agendando: están eligiendo fecha y hora para la cita
-- esperando_pago: se mandó el link de pago, el cliente no pagó todavía
+- nuevo: lead que acaba de escribir
+- triaje_completo: Carolina ya recogió toda la info, pendiente de agendar
+- agendando: están eligiendo fecha y hora
+- esperando_pago: link de pago enviado, el cliente no pagó todavía — estos son los "en proceso de cierre"
 - completado: pagó y tiene cita confirmada
-- cerrado: no se convirtió, la conversación terminó
+- cerrado: no se convirtió
 - escalado: necesitó intervención humana
 
 Reglas:
 - Respondé en español, directo y breve
-- Usá números concretos que estén en los datos
-- Si hay algo que preocupa (muchos escalados, pagos sin confirmar, etc.), decilo sin rodeos
-- Si algo va bien, también decilo
-- Nunca sugerís cambios técnicos ni explicás cómo funciona el sistema internamente
+- Usá los nombres reales de los contactos cuando te los pidan (están en contactos_activos)
+- Si alguien pregunta por personas en un estado, listá los nombres de ese estado
+- Nunca sugerís revisar otro sistema ni hacés recomendaciones técnicas
 - Máximo 5 puntos o 3 párrafos cortos`;
 
 async function getSnapshot() {
-  const [funnel, hoy, ultimas48h, causas, gaps, pendientes] = await Promise.all([
+  const [funnel, hoy, ultimas48h, causas, gaps, pendientes, contactos] = await Promise.all([
     pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE estado='completado') AS completados,
@@ -52,6 +53,22 @@ async function getSnapshot() {
     pool.query(`SELECT root_cause, outcome, COUNT(*) AS total FROM conversation_insights GROUP BY root_cause, outcome ORDER BY total DESC LIMIT 6`),
     pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 5`),
     pool.query(`SELECT COUNT(*) AS total, MIN(created_at) AS mas_antigua FROM pending_payments`),
+    pool.query(`
+      SELECT
+        c.estado,
+        c.updated_at,
+        COALESCE(
+          TRIM(CONCAT(cc.contact_data->>'firstName', ' ', cc.contact_data->>'lastName')),
+          c.phone,
+          c.contact_id
+        ) AS nombre,
+        c.phone
+      FROM conversations c
+      LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
+      WHERE c.estado IN ('esperando_pago','triaje_completo','agendando','escalado','nuevo')
+      ORDER BY c.updated_at DESC
+      LIMIT 50
+    `),
   ]);
 
   return {
@@ -61,6 +78,7 @@ async function getSnapshot() {
     por_que_se_caen: causas.rows,
     preguntas_sin_respuesta: gaps.rows,
     pagos_pendientes: pendientes.rows[0],
+    contactos_activos: contactos.rows,
   };
 }
 
