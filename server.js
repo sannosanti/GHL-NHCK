@@ -11,9 +11,11 @@ const { startRecoveryJob } = require('./jobs/recoveryJob');
 const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
 const { notify, notifyError } = require('./services/notifier');
+const { answerQuestion } = require('./services/cliqBot');
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/public', express.static('public'));
 
 // ─── UTILITY ROUTES ──────────────────────────────────────────────────────────
@@ -166,6 +168,21 @@ app.get('/informe/triaje-completo', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+// ─── CLIQ BOT ─────────────────────────────────────────────────────────────────
+
+app.post('/cliq/bot', async (req, res) => {
+  const { type, text } = req.body;
+  if (type !== 'message' || !text?.trim()) return res.json({ text: '' });
+
+  try {
+    const answer = await answerQuestion(text.trim());
+    res.json({ text: answer });
+  } catch (err) {
+    console.error('[cliqBot] Error:', err.message);
+    res.json({ text: '⚠️ No pude consultar los datos en este momento. Intentá de nuevo.' });
+  }
+});
 
 // ─── ANALYTICS ────────────────────────────────────────────────────────────────
 
