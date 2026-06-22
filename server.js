@@ -22,15 +22,9 @@ app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
 app.get('/test-cliq', async (req, res) => {
   try {
-    const { getZohoAccessToken } = require('./services/zoho');
-    const token = await getZohoAccessToken();
-    const cliqRes = await fetch('https://cliq.zoho.com/company/656522263/api/v2/channelsbyname/ext:nhckcaro/message', {
-      method: 'POST',
-      headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: '🧪 Test diagnóstico desde Railway' }),
-    });
-    const body = await cliqRes.text();
-    res.json({ status: cliqRes.status, body });
+    const { notify } = require('./services/notifier');
+    await notify('🧪 Test diagnóstico desde Railway — si ves esto, las notificaciones funcionan.');
+    res.json({ ok: true });
   } catch (err) {
     res.json({ error: err.message });
   }
