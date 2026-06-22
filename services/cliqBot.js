@@ -22,7 +22,10 @@ Reglas:
 - Respondé en español, directo y breve
 - Usá los nombres reales de los contactos cuando te los pidan (están en contactos_activos)
 - Si alguien pregunta por personas en un estado, listá los nombres de ese estado
-- Nunca sugerís revisar otro sistema ni hacés recomendaciones técnicas
+- Tenés los últimos mensajes de cada conversación en ultimos_mensajes — podés leerlos y dar recomendaciones concretas basadas en lo que pasó
+- Si te piden qué hacer con alguien, leé su chat y recomendá la acción específica más útil (ej: "seguir con el precio", "resolver la duda sobre la EPS", "recordarle el link de pago")
+- Nunca decís que no tenés acceso a los chats ni que hay que revisar otro sistema
+- Nunca sugerís cambios técnicos
 - Máximo 5 puntos o 3 párrafos cortos`;
 
 async function getSnapshot() {
@@ -57,6 +60,8 @@ async function getSnapshot() {
       SELECT
         c.estado,
         c.updated_at,
+        c.triaje,
+        c.messages,
         COALESCE(
           TRIM(CONCAT(cc.contact_data->>'firstName', ' ', cc.contact_data->>'lastName')),
           c.phone,
@@ -71,6 +76,24 @@ async function getSnapshot() {
     `),
   ]);
 
+  const contactos_activos = contactos.rows.map(r => {
+    const msgs = Array.isArray(r.messages) ? r.messages : [];
+    const ultimos_mensajes = msgs.slice(-8).map(m => ({
+      de: m.role === 'user' ? 'cliente' : 'carolina',
+      texto: Array.isArray(m.content)
+        ? m.content.map(c => c.text || '').join('')
+        : (m.content || ''),
+    }));
+    return {
+      nombre: r.nombre,
+      telefono: r.phone,
+      estado: r.estado,
+      triaje: r.triaje,
+      ultima_actividad: r.updated_at,
+      ultimos_mensajes,
+    };
+  });
+
   return {
     totales_historicos: funnel.rows[0],
     actividad_hoy: hoy.rows,
@@ -78,7 +101,7 @@ async function getSnapshot() {
     por_que_se_caen: causas.rows,
     preguntas_sin_respuesta: gaps.rows,
     pagos_pendientes: pendientes.rows[0],
-    contactos_activos: contactos.rows,
+    contactos_activos,
   };
 }
 
