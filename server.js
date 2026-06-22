@@ -22,9 +22,27 @@ app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
 
 app.get('/test-cliq', async (req, res) => {
   try {
-    const { notify } = require('./services/notifier');
-    await notify('🧪 Test diagnóstico desde Railway — si ves esto, las notificaciones funcionan.');
-    res.json({ ok: true });
+    const { env } = require('./config');
+    const tokenRes = await fetch('https://accounts.zoho.com/oauth/v2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: env.zohoCliqClientId,
+        client_secret: env.zohoCliqClientSecret,
+        refresh_token: env.zohoCliqRefreshToken,
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return res.json({ step: 'token', error: tokenData });
+
+    const cliqRes = await fetch('https://cliq.zoho.com/company/656522263/api/v2/channelsbyname/logcarolinanhck/message', {
+      method: 'POST',
+      headers: { 'Authorization': `Zoho-oauthtoken ${tokenData.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: '🧪 Test diagnóstico desde Railway' }),
+    });
+    const body = await cliqRes.text();
+    res.json({ step: 'cliq', status: cliqRes.status, body });
   } catch (err) {
     res.json({ error: err.message });
   }
