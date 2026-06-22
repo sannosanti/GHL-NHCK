@@ -6,6 +6,7 @@ const db = require('./db');
 const { removeTag, getContact, getConversationId } = require('./services/ghl');
 const { ghlWebhookHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
+const analyticsRouter = require('./analytics');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
 const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
@@ -137,6 +138,10 @@ app.get('/informe/triaje-completo', async (req, res) => {
     res.json({ total: result.length, conversaciones: result });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ─── ANALYTICS ────────────────────────────────────────────────────────────────
+
+app.use('/dashboard', analyticsRouter);
 
 // ─── WEBHOOK ROUTES ───────────────────────────────────────────────────────────
 
