@@ -95,6 +95,49 @@ app.get('/informe', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/informe/triaje-completo', async (req, res) => {
+  try {
+    const { rows } = await db.pool.query(`
+      SELECT
+        c.conversation_id,
+        c.contact_id,
+        c.estado,
+        c.triaje,
+        c.messages,
+        c.updated_at,
+        c.recovery_status,
+        cc.contact_data
+      FROM conversations c
+      LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
+      WHERE c.estado = 'triaje_completo'
+      ORDER BY c.updated_at DESC
+    `);
+
+    const result = rows.map(r => {
+      const msgs = Array.isArray(r.messages) ? r.messages : [];
+      const cd = r.contact_data || {};
+      const lastMessages = msgs.slice(-6).map(m => ({
+        rol: m.role === 'user' ? 'CLIENTE' : 'CAROLINA',
+        texto: Array.isArray(m.content)
+          ? m.content.map(c => c.text || '').join('')
+          : (m.content || ''),
+      }));
+      const minutosInactivo = Math.round((Date.now() - new Date(r.updated_at).getTime()) / 60000);
+      return {
+        contacto: cd.firstName ? `${cd.firstName} ${cd.lastName || ''}`.trim() : r.contact_id,
+        telefono: cd.phone || null,
+        triaje: r.triaje,
+        recovery: r.recovery_status,
+        inactivo_minutos: minutosInactivo,
+        total_mensajes: msgs.length,
+        ultimos_mensajes: lastMessages,
+      };
+    });
+
+    res.json({ total: result.length, conversaciones: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── WEBHOOK ROUTES ───────────────────────────────────────────────────────────
 
 app.post('/webhook/ghl', ghlWebhookHandler);
