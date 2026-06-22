@@ -197,7 +197,7 @@ app.get('/migrate-stages', async (req, res) => {
         const updateRes = await fetch(`https://services.leadconnectorhq.com/opportunities/${opp.id}`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${cfg.ghlKey}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pipelineStageId: targetStage }),
+          body: JSON.stringify({ pipelineStageId: targetStage, monetaryValue: 395000 }),
         });
         const updateData = await updateRes.json();
         if (updateData.opportunity?.id) {
