@@ -4,11 +4,12 @@ const fetch = require('node-fetch');
 const { getZohoAccessToken } = require('./zoho');
 
 const CLIQ_CHANNEL = 'ext:nhckcaro';
+const CLIQ_COMPANY_ID = '656522263';
 
 async function notify(text) {
   try {
     const token = await getZohoAccessToken();
-    const res = await fetch(`https://cliq.zoho.com/api/v2/channelsbyname/${CLIQ_CHANNEL}/message`, {
+    const res = await fetch(`https://cliq.zoho.com/company/${CLIQ_COMPANY_ID}/api/v2/channelsbyname/${CLIQ_CHANNEL}/message`, {
       method: 'POST',
       headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
