@@ -123,6 +123,7 @@ async function crearOportunidad(contactId, nombre, stageId) {
       body: JSON.stringify({
         pipelineId: constants.GHL_PIPELINE_ID, locationId: env.ghlLocationId,
         name: `NHC Kids - ${nombre}`, pipelineStageId: stageId, status: 'open', contactId,
+        monetaryValue: 395000,
       }),
     });
     const data = await res.json();
