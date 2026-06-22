@@ -100,7 +100,10 @@ router.get('/', (_req, res) => {
 
 <header>
   <h1>Carolina Dashboard <small>NHC Kids</small></h1>
-  <div id="badge"><span class="spin"></span>Cargando…</div>
+  <div style="display:flex;align-items:center;gap:0.5rem">
+    <button id="refresh-btn" onclick="load()" style="font-size:0.75rem;padding:0.25rem 0.75rem;background:var(--blue);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">↻ Actualizar ahora</button>
+    <div id="badge">—</div>
+  </div>
 </header>
 
 <div id="err"></div>
@@ -366,7 +369,6 @@ function tick() {
 }
 
 load();
-setInterval(load, 60000);
 setInterval(tick, 1000);
 </script>
 </body>
