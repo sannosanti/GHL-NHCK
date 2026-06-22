@@ -10,7 +10,7 @@ const analyticsRouter = require('./analytics');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
 const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
-const { notifyError } = require('./services/notifier');
+const { notify, notifyError } = require('./services/notifier');
 
 const app = express();
 app.use(express.json());
@@ -19,6 +19,32 @@ app.use('/public', express.static('public'));
 // ─── UTILITY ROUTES ──────────────────────────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Servidor NHC Kids activo ✓'));
+
+// ─── GITHUB DEPLOY NOTIFICATIONS ─────────────────────────────────────────────
+
+app.post('/github-webhook', async (req, res) => {
+  const event = req.headers['x-github-event'];
+  if (event !== 'push') return res.sendStatus(200);
+
+  const { ref, commits = [], pusher, repository, compare } = req.body;
+  if (!commits.length) return res.sendStatus(200);
+
+  const branch = ref?.replace('refs/heads/', '') || 'main';
+  const repo = repository?.name || 'GHL-NHCK';
+  const autor = pusher?.name || 'desconocido';
+  const fecha = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'short', timeStyle: 'short' });
+
+  const lista = commits.slice(0, 6).map(c => `• ${c.message.split('\n')[0]}`).join('\n');
+  const mas = commits.length > 6 ? `\n_...y ${commits.length - 6} más_` : '';
+
+  const msg =
+    `🚀 *Nuevo push — ${repo}*\n` +
+    `Branch: \`${branch}\` | Autor: ${autor} | ${fecha}\n\n` +
+    `*Cambios (${commits.length}):*\n${lista}${mas}`;
+
+  await notify(msg).catch(() => {});
+  res.sendStatus(200);
+});
 
 app.get('/reset/:conversationId', async (req, res) => {
   try {
