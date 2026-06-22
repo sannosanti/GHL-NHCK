@@ -9,7 +9,7 @@ const env = {
   zohoRefreshToken: process.env.ZOHO_REFRESH_TOKEN || '1000.18ea8055151efce1711489d0475df2c9.6533e8fc2ee705c2af94f5a108312d26',
   zohoCliqClientId: process.env.ZOHO_CLIQ_CLIENT_ID || '1000.IQBE40KJAZZ15JG809DER7OUC1CH1N',
   zohoCliqClientSecret: process.env.ZOHO_CLIQ_CLIENT_SECRET || 'ab2b12c10de5f7b6efde84d5d2ed0f394e0716415c',
-  zohoCliqRefreshToken: process.env.ZOHO_CLIQ_REFRESH_TOKEN || '1000.e515f685ecf8a055c261c42c3e367c03.abce62a0c478a0d2c5f2ace8b33ccfe9',
+  zohoCliqRefreshToken: process.env.ZOHO_CLIQ_REFRESH_TOKEN || '1000.952f03a1c0385a876c72655c27041d55.a1bdccced92b569a5708a71b9fbf4e1e',
   wompiPublicKey: process.env.WOMPI_PUBLIC_KEY,
   wompiIntegrityKey: process.env.WOMPI_INTEGRITY_KEY,
   wompiPrivateKey: process.env.WOMPI_PRIVATE_KEY,
