@@ -24,6 +24,28 @@ async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNin
   } catch (err) { console.error('Error guardando campos niño GHL:', err.message); }
 }
 
+async function guardarSintomaGHL(contactId, sintoma) {
+  try {
+    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customFields: [{ id: 'nhck__sntoma_principal', value: mapearSintoma(sintoma) }] }),
+    });
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+  } catch (err) { console.error('Error guardando síntoma GHL:', err.message); }
+}
+
+async function guardarCiudadGHL(contactId, ciudad) {
+  try {
+    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city: ciudad }),
+    });
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+  } catch (err) { console.error('Error guardando ciudad GHL:', err.message); }
+}
+
 // ─── GHL API HELPERS ─────────────────────────────────────────────────────────
 async function getContact(contactId) {
   const cached = await db.getCachedContact(contactId);
@@ -133,6 +155,8 @@ module.exports = {
   mapearGenero,
   mapearOcupacionNino,
   guardarCamposNinoGHL,
+  guardarSintomaGHL,
+  guardarCiudadGHL,
   getContact,
   getConversationId,
   getLastMessage,

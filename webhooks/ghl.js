@@ -163,7 +163,7 @@ async function ghlWebhookHandler(req, res) {
 
         await ghl.addTag(contactId, 'escalado nhck');
         await ghl.addTag(contactId, 'validar pago nhck');
-        ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
+        ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_PAGO_PARCIAL).catch(() => {});
         timers.limpiarTimers(conversationId);
         await db.logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
         await db.saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
@@ -275,18 +275,27 @@ async function ghlWebhookHandler(req, res) {
       } catch (e) {}
     }
 
+    const matchCiudad = rawReply.match(/\[CIUDAD_VALIDA:\s*(.+?)\]/);
+    if (matchCiudad) {
+      ghl.guardarCiudadGHL(contactId, matchCiudad[1].trim()).catch(() => {});
+    }
+
     const matchP1 = rawReply.match(/\[TRIAJE_P1:\s*(.+?)\]/);
     const matchP2 = rawReply.match(/\[TRIAJE_P2:\s*(.+?)\]/);
     const matchP3 = rawReply.match(/\[TRIAJE_P3:\s*(.+?)\]/);
     const triajeCompleto = rawReply.includes('[TRIAJE_COMPLETO]');
 
-    if (matchP1) { nuevoTriaje.triaje1 = matchP1[1].trim(); nuevoEstado = 'triaje_p2'; }
+    if (matchP1) {
+      nuevoTriaje.triaje1 = matchP1[1].trim();
+      nuevoEstado = 'triaje_p2';
+      ghl.guardarSintomaGHL(contactId, matchP1[1].trim()).catch(() => {});
+    }
     if (matchP2) { nuevoTriaje.triaje2 = matchP2[1].trim(); nuevoEstado = 'triaje_p3'; }
     if (matchP3) { nuevoTriaje.triaje3 = matchP3[1].trim(); }
     if (triajeCompleto) {
       nuevoEstado = 'triaje_completo';
       ghl.addTag(contactId, `nhck-triaje-${nuevoTriaje.triaje1?.toLowerCase().replace(/[^a-z0-9]/g, '-').substring(0, 20) || 'ok'}`).catch(() => {});
-      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_INICIO).catch(() => {});
+      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_INFO_COMPLETA).catch(() => {});
     }
 
     // Appointment confirmed
@@ -317,7 +326,7 @@ async function ghlWebhookHandler(req, res) {
       }
 
       await ghl.guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
-      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_INFO_COMPLETA).catch(() => {});
+      ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
 
       const referencia = `NHCK-${contactId}-${Date.now()}`;
       await db.logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
@@ -483,6 +492,7 @@ async function ghlWebhookHandler(req, res) {
       .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
       .replace(/\[TRIAJE_COMPLETO\]/g, '')
       .replace(/\[NOMBRE_PADRE:[^\]]+\]/g, '')
+      .replace(/\[CIUDAD_VALIDA:[^\]]+\]/g, '')
       .replace(/\[MEDIO_WOMPI\]/g, '')
       .replace(/\[MEDIO_TRANSFERENCIA\]/g, '')
       .replace(/\[MEDIO_QR\]/g, '')
