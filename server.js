@@ -67,6 +67,34 @@ app.post('/webhook/contact-deleted', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/informe', async (req, res) => {
+  try {
+    const [estados, eventos, causas, sintomas, recovery, funnel, gaps, pendientes, recientes] = await Promise.all([
+      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations GROUP BY estado ORDER BY total DESC`),
+      db.pool.query(`SELECT event_type, COUNT(*) as total FROM transaction_logs GROUP BY event_type ORDER BY total DESC`),
+      db.pool.query(`SELECT root_cause, outcome, COUNT(*) as total FROM conversation_insights GROUP BY root_cause, outcome ORDER BY total DESC`),
+      db.pool.query(`SELECT triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY sintoma ORDER BY total DESC`),
+      db.pool.query(`SELECT recovery_status, COUNT(*) as total FROM conversations WHERE recovery_status IS NOT NULL GROUP BY recovery_status`),
+      db.pool.query(`SELECT COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations`),
+      db.pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 10`),
+      db.pool.query(`SELECT COUNT(*) as total, MIN(created_at) as mas_antigua FROM pending_payments`),
+      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations WHERE updated_at > NOW() - INTERVAL '72 hours' GROUP BY estado ORDER BY total DESC`),
+    ]);
+    res.json({
+      generado: new Date().toISOString(),
+      funnel: funnel.rows[0],
+      estados: estados.rows,
+      recientes_72h: recientes.rows,
+      eventos: eventos.rows,
+      root_causes: causas.rows,
+      sintomas: sintomas.rows,
+      recovery: recovery.rows,
+      pagos_pendientes: pendientes.rows[0],
+      knowledge_gaps: gaps.rows,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── WEBHOOK ROUTES ───────────────────────────────────────────────────────────
 
 app.post('/webhook/ghl', ghlWebhookHandler);

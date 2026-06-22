@@ -98,7 +98,7 @@ async function ghlWebhookHandler(req, res) {
     const tags = contact.tags || [];
     const estado = convData?.estado || 'nuevo';
 
-    // AUDIOS — escalate immediately, do NOT close conversation
+    // AUDIOS — notify asesor, keep conversation alive, offer text alternative
     if (isAudio) {
       console.log('AUDIO RECIBIDO — escalando');
       if (!tags.includes('escalado nhck')) {
@@ -106,7 +106,7 @@ async function ghlWebhookHandler(req, res) {
         await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
         triggerAnalysis(conversationId, contactId, 'audio_escalado');
         await humanDelay();
-        await ghl.sendMessage(conversationId, 'Recibí tu mensaje de voz 😊 En un momento un asesor de nuestro equipo te atiende por aquí.', contactId);
+        await ghl.sendMessage(conversationId, '¡Hola! Por el momento no puedo escuchar audios, pero con gusto te atiendo por escrito. ¿Puedes contarme qué necesitas? Si prefieres, te puedo conectar con un asesor de nuestro equipo 😊', contactId);
       }
       return;
     }
@@ -349,7 +349,7 @@ async function ghlWebhookHandler(req, res) {
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', lastMsgId, phone);
       await humanDelay();
       await ghl.sendMessage(conversationId,
-        `Para confirmar tu cupo necesitamos la reserva de $100.000 💳\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
+        `Para confirmar tu cupo necesitamos un abono de $100.000 💳\nEl saldo restante ($295.000) se cancela el día de la cita.\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
         contactId);
       ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
       timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, async (convId, ctId) => {
