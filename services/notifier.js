@@ -3,7 +3,7 @@
 const fetch = require('node-fetch');
 const { getZohoAccessToken } = require('./zoho');
 
-const CLIQ_CHANNEL = 'NHCKCARO';
+const CLIQ_CHANNEL = 'ext:nhckcaro';
 
 async function notify(text) {
   try {
