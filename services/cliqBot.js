@@ -3,32 +3,29 @@
 const { pool } = require('../db');
 const { callClaude } = require('../ai/claude');
 
-const SYSTEM_PROMPT = `Sos un asistente interno de NHC Kids que analiza la gestión del agente WhatsApp "Carolina".
-Recibís datos reales de la base de datos y respondés preguntas sobre el estado de las conversaciones.
+const SYSTEM_PROMPT = `Sos un asistente de gestión interno de NHC Kids. Respondés preguntas sobre cómo va el trabajo del agente WhatsApp Carolina.
 
-Datos disponibles:
-- funnel: totales por etapa del proceso
-- estados: distribución de todas las conversaciones
-- recientes_72h: actividad de las últimas 72 horas
-- root_causes: por qué se caen las conversaciones (de conversation_insights)
-- knowledge_gaps: preguntas que Carolina no supo responder
-- pagos_pendientes: pagos sin confirmar
+Hablás como alguien del equipo, no como un sistema. Sin tecnicismos, sin mencionar bases de datos, queries, campos, ni recomendaciones técnicas. Si no tenés el dato exacto, decilo simple y directo.
 
-Estados del funnel:
-- nuevo → el cliente acaba de escribir
-- triaje_completo → Carolina recogió síntomas y situación
-- agendando → en proceso de elegir fecha/hora
-- esperando_pago → link de pago enviado, sin confirmar
-- completado → pago confirmado, cita agendada
-- cerrado → conversación terminó sin agendar
-- escalado → requirió intervención humana
+Lo que significan los estados:
+- nuevo: lead que acaba de escribir, Carolina aún no lo procesó o está en la primera interacción
+- triaje_completo: Carolina ya recogió toda la info del caso
+- agendando: están eligiendo fecha y hora para la cita
+- esperando_pago: se mandó el link de pago, el cliente no pagó todavía
+- completado: pagó y tiene cita confirmada
+- cerrado: no se convirtió, la conversación terminó
+- escalado: necesitó intervención humana
 
-Respondé en español neutro, de forma directa y concisa. Usá bullets si hay varios puntos.
-Si hay señales de alarma (muchos escalados, pagos sin confirmar hace mucho tiempo, gaps frecuentes), marcalos claramente.
-Si la gestión va bien, decilo. Máximo 4-5 puntos o 3 párrafos cortos.`;
+Reglas:
+- Respondé en español, directo y breve
+- Usá números concretos que estén en los datos
+- Si hay algo que preocupa (muchos escalados, pagos sin confirmar, etc.), decilo sin rodeos
+- Si algo va bien, también decilo
+- Nunca sugerís cambios técnicos ni explicás cómo funciona el sistema internamente
+- Máximo 5 puntos o 3 párrafos cortos`;
 
 async function getSnapshot() {
-  const [funnel, estados, recientes, causas, gaps, pendientes] = await Promise.all([
+  const [funnel, hoy, ultimas48h, causas, gaps, pendientes] = await Promise.all([
     pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE estado='completado') AS completados,
@@ -40,19 +37,29 @@ async function getSnapshot() {
         COUNT(*) AS total
       FROM conversations
     `),
-    pool.query(`SELECT estado, COUNT(*) AS total FROM conversations GROUP BY estado ORDER BY total DESC`),
-    pool.query(`SELECT estado, COUNT(*) AS total FROM conversations WHERE updated_at > NOW() - INTERVAL '72 hours' GROUP BY estado ORDER BY total DESC`),
+    pool.query(`
+      SELECT estado, COUNT(*) AS total
+      FROM conversations
+      WHERE updated_at > NOW() - INTERVAL '24 hours'
+      GROUP BY estado ORDER BY total DESC
+    `),
+    pool.query(`
+      SELECT estado, COUNT(*) AS total
+      FROM conversations
+      WHERE updated_at > NOW() - INTERVAL '48 hours'
+      GROUP BY estado ORDER BY total DESC
+    `),
     pool.query(`SELECT root_cause, outcome, COUNT(*) AS total FROM conversation_insights GROUP BY root_cause, outcome ORDER BY total DESC LIMIT 6`),
     pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 5`),
     pool.query(`SELECT COUNT(*) AS total, MIN(created_at) AS mas_antigua FROM pending_payments`),
   ]);
 
   return {
-    funnel: funnel.rows[0],
-    estados: estados.rows,
-    recientes_72h: recientes.rows,
-    root_causes: causas.rows,
-    knowledge_gaps: gaps.rows,
+    totales_historicos: funnel.rows[0],
+    actividad_hoy: hoy.rows,
+    actividad_48h: ultimas48h.rows,
+    por_que_se_caen: causas.rows,
+    preguntas_sin_respuesta: gaps.rows,
     pagos_pendientes: pendientes.rows[0],
   };
 }
@@ -68,7 +75,7 @@ async function answerQuestion(question) {
     },
   ];
 
-  return callClaude(SYSTEM_PROMPT, history, 600);
+  return callClaude(SYSTEM_PROMPT, history, 500);
 }
 
 module.exports = { answerQuestion };
