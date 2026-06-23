@@ -27,6 +27,9 @@ async function callClaude(systemPrompt, history, maxTokens = 600) {
   });
   const data = await res.json();
   console.log('CLAUDE:', JSON.stringify(data));
+  if (data.type === 'error' || !data.content) {
+    throw new Error(`Claude API error: ${data.error?.message || 'unknown'}`);
+  }
   return data.content[0].text;
 }
 
