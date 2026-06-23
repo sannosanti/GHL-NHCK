@@ -67,6 +67,16 @@ async function getConversationId(contactId) {
   return data.conversations?.[0]?.id || null;
 }
 
+async function getConversationChannel(conversationId) {
+  try {
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}`, {
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
+    });
+    const data = await res.json();
+    return data.conversation?.type || 'WhatsApp';
+  } catch { return 'WhatsApp'; }
+}
+
 async function getLastMessage(conversationId) {
   try {
     const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
@@ -98,19 +108,19 @@ async function removeTag(contactId, tag) {
   await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
 }
 
-async function sendMessage(conversationId, message, contactId) {
+async function sendMessage(conversationId, message, contactId, channel = 'WhatsApp') {
   const res = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'WhatsApp', conversationId, contactId, message }),
+    body: JSON.stringify({ type: channel, conversationId, contactId, message }),
   });
   const data = await res.json();
   console.log('SEND MSG:', JSON.stringify(data));
 }
 
-async function sendMessages(conversationId, messages, contactId) {
+async function sendMessages(conversationId, messages, contactId, channel = 'WhatsApp') {
   for (let i = 0; i < messages.length; i++) {
-    await sendMessage(conversationId, messages[i], contactId);
+    await sendMessage(conversationId, messages[i], contactId, channel);
     if (i < messages.length - 1) await new Promise(r => setTimeout(r, 1500));
   }
 }
@@ -160,6 +170,7 @@ module.exports = {
   guardarCiudadGHL,
   getContact,
   getConversationId,
+  getConversationChannel,
   getLastMessage,
   addTag,
   removeTag,
