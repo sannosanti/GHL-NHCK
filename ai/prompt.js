@@ -119,15 +119,29 @@ Si pide llamada → [ESCALAR]`;
 CONTEXTO de ${nombre || 'el padre/madre'}:
 - Dificultad: ${triaje.triaje1} | Tiempo: ${triaje.triaje2} | Han intentado: ${triaje.triaje3}
 
-DISPONIBILIDAD REAL (usa SOLO estos horarios):
+DISPONIBILIDAD (próximos 14 días — usa SOLO estos horarios, NUNCA inventes):
 ${disponibilidadTexto}
-NUNCA confirmes horarios que no estén en esa lista.
 
 VALIDACIÓN DE CIUDAD — cuando la mencionen:
 Ciudades ACEPTADAS: Medellín, Bello, La Estrella, Copacabana, Envigado, Itagüí, Sabaneta, Barbosa, Caldas, Rionegro, La Ceja, Guarne, El Retiro, Marinilla, El Carmen de Viboral, San Vicente, Santuario, municipios cercanos de Antioquia.
 Otras ciudades → [CIUDAD_NO_DISPONIBLE]
 
-DATOS — pedir TODO en UN SOLO MENSAJE con este formato exacto:
+FLUJO DE AGENDAMIENTO — sigue este orden estrictamente:
+
+PASO 1 — MOSTRAR FECHAS:
+Si el cliente todavía no eligió horario → presenta las primeras 3 fechas disponibles de la lista con sus horarios.
+Preguntá cuál le queda mejor.
+Si la disponibilidad está vacía → disculpate, informá que no hay cupos en los próximos días y escalá: [ESCALAR]
+
+PASO 2 — FECHA ESPECÍFICA:
+Si el cliente pide un día o fecha que no está en la lista → respondé que ese día no tiene disponibilidad y ofrecé las opciones más cercanas de la lista.
+Si el cliente pide una fecha que SÍ está en la lista → mostrá los horarios de ese día y preguntá cuál elige.
+
+PASO 3 — CONFIRMAR HORARIO:
+Cuando el cliente elija un horario → confirmá: "Perfecto, ¿confirmás tu cita para el [día] a las [hora]?"
+
+PASO 4 — PEDIR DATOS (solo después de que confirme):
+Cuando el cliente confirme el horario → pedí TODOS los datos en UN SOLO MENSAJE con este formato exacto:
 "Agradecemos tu colaboración con el envío de la siguiente información 🤗
 
 *Paciente*
@@ -148,7 +162,8 @@ DATOS — pedir TODO en UN SOLO MENSAJE con este formato exacto:
 - Teléfono:
 - Parentesco:"
 
-Cuando confirme el horario → pedir confirmación → cuando diga sí:
+PASO 5 — CONFIRMAR CITA:
+Cuando el cliente envíe los datos completos → emitís EXACTAMENTE este bloque sin texto adicional:
 [CITA_CONFIRMADA]
 fecha: <YYYY-MM-DD>
 hora: <HH:MM>
@@ -160,9 +175,7 @@ nombre_padre: <nombre completo>
 email: <correo>
 ciudad: <ciudad>
 
-Solo el bloque exacto, sin texto adicional.
-
-Si preguntan por COMFAMA o FEISA → escalar al asesor → [ESCALAR]
+Si preguntan por COMFAMA o FEISA → [ESCALAR]
 Si pide llamada → [ESCALAR]`;
 
   } else if (estado === 'esperando_pago') {

@@ -235,8 +235,7 @@ async function ghlWebhookHandler(req, res) {
         const hoy = new Date();
         const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
         const diasN = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-        let offset = 1, diasOk = 0;
-        while (diasOk < 3 && offset <= 14) {
+        for (let offset = 1; offset <= 14; offset++) {
           const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
           const ds = f.getDay();
           if (constants.HORARIOS_NHCK[ds]) {
@@ -246,12 +245,10 @@ async function ghlWebhookHandler(req, res) {
             const slots = zoho.calcularSlotsLibres(citas, fISO);
             if (slots.length > 0) {
               disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
-              diasOk++;
             }
           }
-          offset++;
         }
-        if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos días.';
+        if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos 14 días.';
       } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
     }
 
