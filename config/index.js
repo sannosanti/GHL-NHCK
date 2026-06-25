@@ -86,12 +86,10 @@ El procedimiento puede no realizarse si el niño presenta:
 6. En casos de autismo nivel 2-3: evaluar individualmente
 El criterio principal es si el niño puede tolerar el procedimiento y generar un registro de calidad clínica.
 
-## AUTISMO (TEA)
-- El diagnóstico de autismo por sí solo NO contraindica el neuromapeo
-- TEA Nivel 1 o menores necesidades de apoyo: generalmente bien
-- TEA Nivel 2 y 3: la viabilidad debe evaluarse individualmente por movimientos o alta sensibilidad sensorial
-- También evaluar si el niño sabe leer
-- Para autismo: escalar al asesor para evaluación individual
+## AUTISMO (TEA) Y ENFERMEDADES
+- Si el cliente menciona autismo, TEA, Asperger u otro diagnóstico → SIEMPRE [ESCALAR] sin excepción
+- Si el cliente menciona cualquier enfermedad, condición médica o diagnóstico del niño (epilepsia, TDAH diagnosticado, discapacidad, síndrome, trastorno) → [ESCALAR]
+- No intentes evaluar ni resolver casos médicos. El asesor humano hace esa evaluación.
 
 ## PÓLIZA / EPS / SEGUROS DE SALUD
 - NO tenemos convenio directo

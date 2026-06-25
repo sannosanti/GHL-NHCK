@@ -361,6 +361,33 @@ app.post('/cliq/bot', async (req, res) => {
   }
 });
 
+// ─── LEARNING TEST ────────────────────────────────────────────────────────────
+
+app.get('/admin/test-learning', async (req, res) => {
+  try {
+    const crypto = require('crypto');
+    const { notify } = require('./services/notifier');
+    const id = crypto.randomUUID();
+    const approvalKey = crypto.randomBytes(20).toString('hex');
+    const recommendation = 'Cuando el cliente pregunte por el precio y no responda de inmediato, Carolina debería enviar un mensaje de seguimiento 24 horas después recordando los beneficios del neuromapeo y ofreciendo resolver dudas.';
+    const reason = 'Se detectaron 5 conversaciones donde el cliente desapareció después de recibir el precio sin objeción explícita.';
+    const rootCause = 'precio';
+    await db.savePendingUpdate(id, approvalKey, rootCause, recommendation, reason);
+    const approvalUrl = `https://miraculous-solace-production-47dd.up.railway.app/admin/update/${id}?key=${approvalKey}`;
+    await notify(
+      `🧠 *Sugerencia de aprendizaje para Carolina* _(PRUEBA)_\n\n` +
+      `*Patrón detectado:* 5 conversaciones con causa raíz "precio"\n\n` +
+      `*Motivo:* ${reason}\n\n` +
+      `*Recomendación:*\n${recommendation}\n\n` +
+      `✅ *Aprobar:* ${approvalUrl}\n\n` +
+      `_Si no hacés nada, la sugerencia queda pendiente._`
+    );
+    res.send('✓ Prueba enviada a Cliq. Revisá el canal logcarolinanhck.');
+  } catch (err) {
+    res.status(500).send('Error: ' + err.message);
+  }
+});
+
 // ─── LEARNING APPROVAL ────────────────────────────────────────────────────────
 
 app.get('/admin/update/:id', async (req, res) => {
