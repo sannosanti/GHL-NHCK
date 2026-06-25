@@ -540,8 +540,9 @@ async function ghlCrearEnCreatorHandler(req, res) {
   res.json({ success: true });
 
   try {
+    console.log('[CrearEnCreator] Body recibido:', JSON.stringify(req.body));
     const contactId = req.body.contactId || req.body.contact_id || req.body.contact?.id;
-    if (!contactId) return;
+    if (!contactId) { console.log('[CrearEnCreator] Sin contactId — saliendo'); return; }
 
     // Always fetch fresh — the tag was just applied so cache won't have it
     await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
