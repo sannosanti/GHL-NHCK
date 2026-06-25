@@ -540,29 +540,21 @@ async function ghlCrearEnCreatorHandler(req, res) {
   res.json({ success: true });
 
   try {
-    console.log('[CrearEnCreator] Body recibido:', JSON.stringify(req.body));
-    const contactId = req.body.contactId || req.body.contact_id || req.body.contact?.id;
-    if (!contactId) { console.log('[CrearEnCreator] Sin contactId — saliendo'); return; }
+    const b = req.body;
+    const contactId = b.contact_id || b.contactId || b.customData?.contactId;
+    if (!contactId) return;
 
-    // Always fetch fresh — the tag was just applied so cache won't have it
-    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
-    const contactData = await ghl.getContact(contactId);
-    if (contactData.deleted) return;
+    // GHL sends all data flat in the body — read directly, no API call needed
+    const tagsStr = (b.tags || '').toLowerCase();
+    if (!tagsStr.includes('crear en creator')) return;
 
-    const contact = contactData.contact || {};
-    const tags = contact.tags || [];
-    if (!tags.includes('Crear en Creator')) return;
-
-    const cf = {};
-    (contact.customFields || []).forEach(f => { cf[f.id] = f.value; });
-
-    const nombreNino = cf['nhck__nombre_del_nio'] || contact.firstName || '';
-    const edad       = cf['nhck__edad_del_nio']   || '';
-    const genero     = cf['nhck__gnero_del_nio']  || '';
-    const estudia    = cf['nhck__estudia'] === 'Sí';
-    const sintoma    = cf['nhck__sntoma_principal'] || '';
-    const movil      = contact.phone  || '';
-    const email      = contact.email  || '';
+    const nombreNino = b['NHCK - Nombre del niño'] || '';
+    const edad       = b['NHCK - Edad del niño']   || '';
+    const genero     = b['NHCK - Género del niño'] || '';
+    const estudia    = b['NHCK - Estudia'] === 'Sí';
+    const sintoma    = b['NHCK - Síntoma principal'] || '';
+    const movil      = b.phone  || '';
+    const email      = b.email  || '';
 
     const faltantes = [
       !nombreNino && 'Nombre del niño',
@@ -572,6 +564,7 @@ async function ghlCrearEnCreatorHandler(req, res) {
     ].filter(Boolean);
 
     if (faltantes.length) {
+      console.log('[CrearEnCreator] Campos faltantes:', faltantes);
       const conversationId = await ghl.getConversationId(contactId);
       if (conversationId) {
         await ghl.sendInternalNote(conversationId, contactId,
@@ -582,12 +575,9 @@ async function ghlCrearEnCreatorHandler(req, res) {
     }
 
     console.log('[CrearEnCreator] Iniciando para contacto:', contactId, { nombreNino, edad, genero, estudia, sintoma });
-
     await zoho.crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL: contactId, edad, sintoma, genero, estudia });
-
-    await ghl.removeTag(contactId, 'Crear en Creator');
+    await ghl.removeTag(contactId, 'crear en creator');
     await ghl.addTag(contactId, 'creado-en-creator');
-
     console.log('[CrearEnCreator] Contacto creado en Zoho Creator:', contactId);
   } catch (err) {
     console.error('[CrearEnCreator] Error:', err.message);
