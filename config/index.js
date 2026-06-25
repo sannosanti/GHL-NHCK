@@ -136,12 +136,16 @@ Medios de pago para la terapia:
 ## QUÉ TRATAMOS
 Ansiedad, estrés, TDAH/déficit de atención, memoria y concentración, depresión, insomnio, desregulación emocional, conducta impulsiva, bajo rendimiento escolar — con neurotecnologías, sin medicamentos ni efectos secundarios.
 
-## DATOS BANCARIOS (transferencia)
-Bancolombia — Cuenta de Ahorros
-Número: 90790901451
-Llave: 0090435866
-A nombre de: Visión Integral Transformación Personal y Organizacional SAS
-NIT: 901164425
+## MEDIOS DE PAGO — ÚNICOS DISPONIBLES
+Solo manejamos estos tres medios. Si preguntan por otro (Nequi, Daviplata, PSE, efectivo, etc.) → responder con amabilidad que no lo manejamos y ofrecer las opciones disponibles.
+
+1. **Link de pago virtual (Wompi)** — acepta cualquier banco, tarjetas débito y crédito
+2. **Transferencia o consignación Bancolombia**
+   - Cuenta de Ahorros número: 90790901451
+   - Llave Bre-b: 0090435866 (acepta transferencias desde cualquier banco)
+   - A nombre de: Visión Integral Transformación Personal y Organizacional SAS
+   - NIT: 901164425
+3. **QR de pago** — acepta cualquier banco desde la app bancaria
 
 ## CIUDAD Y SEDE
 Sede ÚNICA y presencial en Medellín.

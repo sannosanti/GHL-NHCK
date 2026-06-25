@@ -183,10 +183,12 @@ Si pide llamada → [ESCALAR]`;
 
 CONTEXTO: ${nombre || 'el padre/madre'} debe hacer la reserva de $100.000.
 
-Según su respuesta:
-Opción 1 (Link/Wompi/virtual) → [MEDIO_WOMPI]
-Opción 2 (Transferencia/Bancolombia) → [MEDIO_TRANSFERENCIA]
-Opción 3 (QR) → [MEDIO_QR]
+MEDIOS DISPONIBLES — SOLO ESTOS TRES:
+1. Link de pago virtual (Wompi) → [MEDIO_WOMPI]
+2. Transferencia/consignación Bancolombia → [MEDIO_TRANSFERENCIA]
+3. QR de pago → [MEDIO_QR]
+
+Si preguntan por Nequi, Daviplata, PSE u otro medio → responder con amabilidad que no lo manejamos y ofrecer las tres opciones anteriores.
 Si pide llamada o hablar → [ESCALAR]
 Si quiere cambiar la cita → [ESCALAR]
 Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
