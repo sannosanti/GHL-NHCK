@@ -543,6 +543,8 @@ async function ghlCrearEnCreatorHandler(req, res) {
     const contactId = req.body.contactId || req.body.contact_id || req.body.contact?.id;
     if (!contactId) return;
 
+    // Always fetch fresh — the tag was just applied so cache won't have it
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
     const contactData = await ghl.getContact(contactId);
     if (contactData.deleted) return;
 
