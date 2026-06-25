@@ -154,10 +154,10 @@ async function addNote(contactId, body) {
 
 async function sendInternalNote(conversationId, contactId, message) {
   try {
-    const res = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+    const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'Activity', conversationId, contactId, message }),
+      body: JSON.stringify({ type: 'InternalComment', contactId, message }),
     });
     const data = await res.json();
     console.log('[sendInternalNote] Response:', JSON.stringify(data));

@@ -563,12 +563,14 @@ async function ghlCrearEnCreatorHandler(req, res) {
       !sintoma    && 'Síntoma principal',
     ].filter(Boolean);
 
-    const { notify } = require('../services/notifier');
-    const nombreContacto = `${b.first_name || ''} ${b.last_name || ''}`.trim() || contactId;
-
     if (faltantes.length) {
       console.log('[CrearEnCreator] Campos faltantes:', faltantes);
-      await notify(`⚠️ *Crear en Creator — campos incompletos*\nContacto: ${nombreContacto}\nFaltan: ${faltantes.join(', ')}\nCompletá los campos y volvé a poner la etiqueta.`);
+      const conversationId = await ghl.getConversationId(contactId);
+      if (conversationId) {
+        await ghl.sendInternalNote(conversationId, contactId,
+          `⚠️ Etiqueta "Crear en Creator" aplicada pero la información NO se envió a Zoho Creator.\n\nCampos faltantes: ${faltantes.join(', ')}.\n\nCompletá esos campos y volvé a poner la etiqueta.`
+        );
+      }
       return;
     }
 
@@ -576,7 +578,13 @@ async function ghlCrearEnCreatorHandler(req, res) {
     await zoho.crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL: contactId, edad, sintoma, genero, estudia });
     await ghl.removeTag(contactId, 'crear en creator');
     await ghl.addTag(contactId, 'creado-en-creator');
-    await notify(`✅ *Crear en Creator — contacto creado*\nContacto: ${nombreContacto}\nNiño: ${nombreNino} | Edad: ${edad} | Síntoma: ${sintoma}`);
+
+    const conversationId = await ghl.getConversationId(contactId);
+    if (conversationId) {
+      await ghl.sendInternalNote(conversationId, contactId,
+        `✅ Contacto creado exitosamente en Zoho Creator.\n\nNiño: ${nombreNino} | Edad: ${edad} | Síntoma: ${sintoma}`
+      );
+    }
     console.log('[CrearEnCreator] Contacto creado en Zoho Creator:', contactId);
   } catch (err) {
     console.error('[CrearEnCreator] Error:', err.message);
