@@ -142,6 +142,16 @@ async function crearOportunidad(contactId, nombre, stageId) {
   } catch (err) { console.error('Error creando oportunidad:', err.message); return null; }
 }
 
+async function addNote(contactId, body) {
+  try {
+    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/notes`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+  } catch (err) { console.error('Error agregando nota GHL:', err.message); }
+}
+
 async function actualizarEtapaOportunidad(contactId, stageId) {
   try {
     const res = await fetch(`https://services.leadconnectorhq.com/opportunities/search?location_id=${env.ghlLocationId}&pipeline_id=${constants.GHL_PIPELINE_ID}&contact_id=${contactId}`, {
@@ -174,6 +184,7 @@ module.exports = {
   getLastMessage,
   addTag,
   removeTag,
+  addNote,
   sendMessage,
   sendMessages,
   crearOportunidad,

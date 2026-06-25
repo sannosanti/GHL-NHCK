@@ -569,9 +569,7 @@ async function ghlCrearEnCreatorHandler(req, res) {
     ].filter(Boolean);
 
     if (faltantes.length) {
-      const nombreContacto = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contactId;
-      const { notify } = require('../services/notifier');
-      await notify(`⚠️ *Crear en Creator — campos incompletos*\nContacto: ${nombreContacto}\nFaltan: ${faltantes.join(', ')}\nCompletá los campos y volvé a poner la etiqueta.`);
+      await ghl.addNote(contactId, `⚠️ Etiqueta "Crear en Creator" aplicada pero la información NO se envió a Zoho Creator.\n\nCampos faltantes: ${faltantes.join(', ')}.\n\nCompletá esos campos y volvé a poner la etiqueta.`);
       return;
     }
 
