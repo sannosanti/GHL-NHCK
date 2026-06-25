@@ -534,4 +534,45 @@ function mountDebugRoutes(app) {
   // intentionally left empty — routes stay in server.js per composition spec
 }
 
-module.exports = { ghlWebhookHandler, mountDebugRoutes };
+// ─── TAG: CREAR EN CREATOR ───────────────────────────────────────────────────
+
+async function ghlCrearEnCreatorHandler(req, res) {
+  res.json({ success: true });
+
+  try {
+    const contactId = req.body.contactId || req.body.contact_id || req.body.contact?.id;
+    if (!contactId) return;
+
+    const contactData = await ghl.getContact(contactId);
+    if (contactData.deleted) return;
+
+    const contact = contactData.contact || {};
+    const tags = contact.tags || [];
+    if (!tags.includes('Crear en Creator')) return;
+
+    const cf = {};
+    (contact.customFields || []).forEach(f => { cf[f.id] = f.value; });
+
+    const nombreNino = cf['nhck__nombre_del_nio'] || contact.firstName || '';
+    const edad       = cf['nhck__edad_del_nio']   || '';
+    const genero     = cf['nhck__gnero_del_nio']  || '';
+    const estudia    = cf['nhck__estudia'] === 'Sí';
+    const sintoma    = cf['nhck__sntoma_principal'] || '';
+    const movil      = contact.phone  || '';
+    const email      = contact.email  || '';
+
+    console.log('[CrearEnCreator] Iniciando para contacto:', contactId, { nombreNino, edad, genero, estudia, sintoma });
+
+    await zoho.crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL: contactId, edad, sintoma, genero, estudia });
+
+    await ghl.removeTag(contactId, 'Crear en Creator');
+    await ghl.addTag(contactId, 'creado-en-creator');
+
+    console.log('[CrearEnCreator] Contacto creado en Zoho Creator:', contactId);
+  } catch (err) {
+    console.error('[CrearEnCreator] Error:', err.message);
+    notifyError('ghl-crear-en-creator', err).catch(() => {});
+  }
+}
+
+module.exports = { ghlWebhookHandler, ghlCrearEnCreatorHandler, mountDebugRoutes };

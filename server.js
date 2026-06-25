@@ -4,7 +4,7 @@ const express = require('express');
 const { env } = require('./config');
 const db = require('./db');
 const { removeTag, getContact, getConversationId } = require('./services/ghl');
-const { ghlWebhookHandler } = require('./webhooks/ghl');
+const { ghlWebhookHandler, ghlCrearEnCreatorHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
 const analyticsRouter = require('./analytics');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
@@ -12,6 +12,8 @@ const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
+const { getZohoAccessToken, crearEnAnamnesis, buscarOCrearContactoHistoria } = require('./services/zoho');
+const fetch = require('node-fetch');
 
 const app = express();
 app.use(express.json());
@@ -169,6 +171,181 @@ app.get('/informe/triaje-completo', async (req, res) => {
 });
 
 
+// ─── EVALUACION NHCK ──────────────────────────────────────────────────────────
+
+// Alias used by historia-clinica.html
+app.get('/zoho-creator-token', async (req, res) => {
+  try {
+    const token = await getZohoAccessToken();
+    res.json({ access_token: token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/historia-clinica', async (req, res) => {
+  const d = req.body;
+
+  // ── 1. Validate required fields ──────────────────────────────────────────
+  const REQUIRED = ['fechaElaboracion', 'nombreConsultante', 'edadConsultante', 'motivoConsulta', 'expectativasProceso', 'comoSupo'];
+  const missing = REQUIRED.filter(k => !d[k] || String(d[k]).trim() === '');
+  if (missing.length) {
+    return res.status(400).json({ ok: false, stage: 'validation', missing, error: `Campos requeridos faltantes: ${missing.join(', ')}` });
+  }
+
+  // ── 2. Zoho token ─────────────────────────────────────────────────────────
+  let token;
+  try { token = await getZohoAccessToken(); }
+  catch (err) { return res.status(500).json({ ok: false, stage: 'token', error: err.message }); }
+
+  // ── 3. Find or create Contacto in Creator ────────────────────────────────
+  let contactoID = null;
+  try {
+    contactoID = await buscarOCrearContactoHistoria({
+      nombre: d.nombreConsultante,
+      movil:  d.movilConsultante  || '',
+      email:  d.emailConsultante  || '',
+      edad:   d.edadConsultante   || '',
+    });
+    if (contactoID) console.log('[/historia-clinica] Contacto ID:', contactoID);
+  } catch (err) {
+    console.warn('[/historia-clinica] Contacto lookup/create failed:', err.message);
+  }
+
+  // ── 4. Build Creator payload ──────────────────────────────────────────────
+  const creatorPayload = {
+    Fecha_elaboracion:             d.fechaElaboracion,
+    Nombre_consultante:            contactoID || d.nombreConsultante,
+    Edad_consultante:              d.edadConsultante,
+    Edad_padres_cuidadores:        d.edadPadresCuidadores        || '',
+    Lateralidad:                   d.lateralidad                 || '',
+    Dedicacion_padres:             d.dedicacionPadres            || '',
+    Con_quien_vive:                d.conQuienVive                || '',
+    Motivo_consulta:               d.motivoConsulta,
+    Estado_actual_antecedentes:    d.estadoActualAntecedentes    || '',
+    Num_embarazos:                 d.numEmbarazos                || '',
+    Medicamentos_embarazo:         d.medicamentosEmbarazo        || '',
+    Complicaciones_embarazo:       d.complicacionesEmbarazo      || '',
+    Duracion_embarazo:             d.duracionEmbarazo            || '',
+    Complicaciones_nacimiento:     d.complicacionesNacimiento     || '',
+    Incubadora_enfermedades:       d.incubadoraEnfermedades      || '',
+    Controles_desarrollo:          d.controlesDesarrollo         || '',
+    Dificultades_gateo:            d.dificultadesGateo           || '',
+    Control_esfinteres:            d.controlEsfinteres           || '',
+    Primeras_palabras:             d.primerasPalabras            || '',
+    Temperamento:                  d.temperamento                || '',
+    Conformacion_familia:          d.conformacionFamilia         || '',
+    Infancia_desarrollo:           d.infanciaDesarrollo          || '',
+    Dinamica_familiar:             d.dinamicaFamiliar            || '',
+    Relaciones_pares:              d.relacionesPares             || '',
+    Pautas_crianza:                d.pautasCrianza               || '',
+    Abusos_violencia:              d.abusosViolencia             || '',
+    Grado_institucion:             d.gradoInstitucion            || '',
+    Rendimiento_academico:         d.rendimientoAcademico        || '',
+    Enfermedades:                  d.enfermedades                || '',
+    Restricciones_tecnologia:      Array.isArray(d.restriccionesTecnologia)
+                                     ? d.restriccionesTecnologia.join(', ')
+                                     : (d.restriccionesTecnologia || ''),
+    Trabajo_psicologico:           d.trabajoPsicologico          || '',
+    Medicamentos:                  d.medicamentos                || '',
+    Antecedentes_salud:            d.antecedentesSalud           || '',
+    Actividades_extracurriculares: d.actividadesExtracurriculares || '',
+    Factores_motivacion:           d.factoresMotivacion          || '',
+    Alimentacion:                  d.alimentacion                || '',
+    Sueno:                         d.sueno                       || '',
+    Consume_sustancias:            d.consumeSustancias           || '',
+    Exposicion_pantallas:          d.exposicionPantallas         || '',
+    Expectativas_proceso:          d.expectativasProceso,
+    Agregar_algo:                  d.agregarAlgo                 || '',
+    Comentarios_profesional:       d.comentariosProfesional      || '',
+    Test_BASCH:                    d.testBASCH                   || '',
+    Como_supo:                     d.comoSupo,
+    Comentario_devolucion:         d.comentarioDevolucion        || '',
+    Recomendaciones_terapeuticas:  d.recomendacionesTerapeuticas || '',
+    Neurotecnologias_no_usar:      d.neurotecnologiasNoUsar      || '',
+  };
+
+  // Conditional: only include substance fields when consumeSustancias = 'Sí'
+  if (d.consumeSustancias === 'Sí') {
+    creatorPayload.Tipo_sustancias      = d.tipoSustancias      || '';
+    creatorPayload.Periodicidad_consumo = d.periodicidadConsumo || '';
+  }
+
+  // ── 5. Submit to Creator ──────────────────────────────────────────────────
+  try {
+    const cr = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Historia_Clinica', {
+      method: 'POST',
+      headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: creatorPayload }),
+    });
+    const crData = await cr.json();
+    console.log('[/historia-clinica] Creator response:', JSON.stringify(crData));
+
+    if (crData.code === 3000 || crData.data?.ID) {
+      return res.json({ ok: true, id: crData.data?.ID, contactoID });
+    }
+    if (crData.code === 3100) {
+      return res.status(401).json({ ok: false, stage: 'auth', error: 'Token Zoho inválido o expirado — reintentá en unos segundos' });
+    }
+    return res.status(422).json({ ok: false, stage: 'creator', error: crData.message || JSON.stringify(crData), details: crData });
+  } catch (err) {
+    res.status(500).json({ ok: false, stage: 'creator', error: err.message });
+  }
+});
+
+app.get('/zoho-token', async (req, res) => {
+  try {
+    const token = await getZohoAccessToken();
+    res.json({ access_token: token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/evaluacion', async (req, res) => {
+  try {
+    const { nombreNino, email, movil, edad, sintoma, genero, estudia } = req.body;
+    if (!nombreNino || !movil) {
+      return res.status(400).json({ ok: false, error: 'Nombre y celular son requeridos.' });
+    }
+
+    // Create GHL contact first so Creator's required CRM lookup field has a valid ID.
+    let contactIdGHL = '';
+    if (env.ghlKey && env.ghlLocationId) {
+      try {
+        const ghlRes = await fetch('https://services.leadconnectorhq.com/contacts/', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.ghlKey}`,
+            'Version': '2021-04-15',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            firstName: nombreNino,
+            phone: movil,
+            email: email || undefined,
+            locationId: env.ghlLocationId,
+            tags: ['formulario-evaluacion'],
+          }),
+        });
+        const ghlData = await ghlRes.json();
+        contactIdGHL = ghlData?.contact?.id || '';
+        console.log('[/evaluacion] GHL contact:', contactIdGHL || 'not created');
+      } catch (ghlErr) {
+        console.warn('[/evaluacion] GHL contact creation failed:', ghlErr.message);
+      }
+    }
+
+    const result = await crearEnAnamnesis({
+      nombreNino, email, movil, edad, sintoma, genero, estudia, contactIdGHL,
+    });
+    res.json({ ok: true, contactoID: result.contactoID, ghlId: contactIdGHL });
+  } catch (err) {
+    console.error('[/evaluacion]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── CLIQ BOT ─────────────────────────────────────────────────────────────────
 
 app.post('/cliq/bot', async (req, res) => {
@@ -191,6 +368,7 @@ app.use('/dashboard', analyticsRouter);
 // ─── WEBHOOK ROUTES ───────────────────────────────────────────────────────────
 
 app.post('/webhook/ghl', ghlWebhookHandler);
+app.post('/webhook/ghl-crear-contacto', ghlCrearEnCreatorHandler);
 app.post('/webhook/wompi', wompiWebhookHandler);
 app.get('/pago-exitoso', pagoExitosoHandler);
 
