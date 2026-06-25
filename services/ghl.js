@@ -152,6 +152,16 @@ async function addNote(contactId, body) {
   } catch (err) { console.error('Error agregando nota GHL:', err.message); }
 }
 
+async function sendInternalNote(conversationId, contactId, message) {
+  try {
+    await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'Note', conversationId, contactId, message }),
+    });
+  } catch (err) { console.error('Error enviando nota interna GHL:', err.message); }
+}
+
 async function actualizarEtapaOportunidad(contactId, stageId) {
   try {
     const res = await fetch(`https://services.leadconnectorhq.com/opportunities/search?location_id=${env.ghlLocationId}&pipeline_id=${constants.GHL_PIPELINE_ID}&contact_id=${contactId}`, {
@@ -185,6 +195,7 @@ module.exports = {
   addTag,
   removeTag,
   addNote,
+  sendInternalNote,
   sendMessage,
   sendMessages,
   crearOportunidad,

@@ -569,7 +569,12 @@ async function ghlCrearEnCreatorHandler(req, res) {
     ].filter(Boolean);
 
     if (faltantes.length) {
-      await ghl.addNote(contactId, `⚠️ Etiqueta "Crear en Creator" aplicada pero la información NO se envió a Zoho Creator.\n\nCampos faltantes: ${faltantes.join(', ')}.\n\nCompletá esos campos y volvé a poner la etiqueta.`);
+      const conversationId = await ghl.getConversationId(contactId);
+      if (conversationId) {
+        await ghl.sendInternalNote(conversationId, contactId,
+          `⚠️ Etiqueta "Crear en Creator" aplicada pero la información NO se envió a Zoho Creator.\n\nCampos faltantes: ${faltantes.join(', ')}.\n\nCompletá esos campos y volvé a poner la etiqueta.`
+        );
+      }
       return;
     }
 
