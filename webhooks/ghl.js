@@ -252,7 +252,7 @@ async function ghlWebhookHandler(req, res) {
       } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
     }
 
-    const systemPrompt = buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto });
+    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto });
     const rawReply = await callClaude(systemPrompt, history);
 
     let nuevoEstado = estado;

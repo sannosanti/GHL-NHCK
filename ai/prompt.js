@@ -1,6 +1,18 @@
 'use strict';
 
 const { constants, CONOCIMIENTO_NHC } = require('../config');
+const db = require('../db');
+
+let learnedRulesCache = [];
+let learnedRulesExpiry = 0;
+
+async function refreshLearnedRules() {
+  if (Date.now() < learnedRulesExpiry) return;
+  try {
+    learnedRulesCache = await db.getLearnedRules();
+    learnedRulesExpiry = Date.now() + 60 * 60 * 1000;
+  } catch { /* keep previous cache */ }
+}
 
 /**
  * Build the system prompt for a given conversation state.
@@ -10,7 +22,8 @@ const { constants, CONOCIMIENTO_NHC } = require('../config');
  * @param {{ nombre?: string, triaje?: object, disponibilidadTexto?: string }} ctx
  * @returns {string}
  */
-function buildSystemPrompt(estado, ctx) {
+async function buildSystemPrompt(estado, ctx) {
+  await refreshLearnedRules();
   const { nombre = '', triaje = {}, disponibilidadTexto = '' } = ctx;
 
   const reglasBase = `
@@ -192,6 +205,13 @@ Si preguntan por Nequi, Daviplata, PSE u otro medio → responder con amabilidad
 Si pide llamada o hablar → [ESCALAR]
 Si quiere cambiar la cita → [ESCALAR]
 Si pregunta por COMFAMA o FEISA → [ESCALAR]`;
+  }
+
+  if (learnedRulesCache.length > 0) {
+    systemPrompt += `\n\nREGLAS APRENDIDAS DE CONVERSACIONES REALES (aprobadas por el equipo — aplicar siempre):\n`;
+    learnedRulesCache.forEach((rule, i) => {
+      systemPrompt += `${i + 1}. ${rule}\n`;
+    });
   }
 
   return systemPrompt;

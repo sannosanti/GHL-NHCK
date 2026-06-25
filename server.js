@@ -361,6 +361,29 @@ app.post('/cliq/bot', async (req, res) => {
   }
 });
 
+// ─── LEARNING APPROVAL ────────────────────────────────────────────────────────
+
+app.get('/admin/update/:id', async (req, res) => {
+  const { id } = req.params;
+  const { key } = req.query;
+  if (!key) return res.status(400).send('Clave de aprobación requerida.');
+  try {
+    const update = await db.approveUpdate(id, key);
+    if (!update) return res.status(404).send('Sugerencia no encontrada o ya procesada.');
+    res.send(`
+      <html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
+        <h2>✅ Aprobado</h2>
+        <p><strong>Patrón:</strong> ${update.root_cause}</p>
+        <p><strong>Regla aplicada a Carolina:</strong></p>
+        <blockquote style="background:#f5f5f5;padding:16px;border-left:4px solid #4CAF50">${update.recommendation}</blockquote>
+        <p style="color:#666">Carolina aplicará esta regla a partir del próximo mensaje.</p>
+      </body></html>
+    `);
+  } catch (err) {
+    res.status(500).send('Error al aprobar: ' + err.message);
+  }
+});
+
 // ─── ANALYTICS ────────────────────────────────────────────────────────────────
 
 app.use('/dashboard', analyticsRouter);

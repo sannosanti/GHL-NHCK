@@ -86,6 +86,25 @@ async function initDB() {
   `);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_conv ON conversation_insights (conversation_id)`).catch(() => {});
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_gaps_pregunta ON knowledge_gaps (pregunta)`).catch(() => {});
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS prompt_updates (
+      id TEXT PRIMARY KEY,
+      approval_key TEXT NOT NULL,
+      root_cause TEXT,
+      recommendation TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW(),
+      approved_at TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS learned_rules (
+      id SERIAL PRIMARY KEY,
+      rule TEXT NOT NULL,
+      source_update_id TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
   console.log('Base de datos inicializada ✓');
 }
 
@@ -278,6 +297,76 @@ async function marcarCompletado(conversationId) {
   } catch (err) { console.error('Error marcando completado:', err.message); }
 }
 
+async function countInsightsByRootCause(rootCause, days = 30) {
+  try {
+    const res = await pool.query(
+      `SELECT COUNT(*) FROM conversation_insights
+       WHERE root_cause=$1 AND created_at > NOW() - INTERVAL '${days} days'`,
+      [rootCause]
+    );
+    return parseInt(res.rows[0].count, 10);
+  } catch { return 0; }
+}
+
+async function hasPendingUpdateForRootCause(rootCause) {
+  try {
+    const res = await pool.query(
+      `SELECT id FROM prompt_updates WHERE root_cause=$1 AND status='pending'`,
+      [rootCause]
+    );
+    return res.rows.length > 0;
+  } catch { return false; }
+}
+
+async function savePendingUpdate(id, approvalKey, rootCause, recommendation, reason) {
+  try {
+    await pool.query(
+      `INSERT INTO prompt_updates (id, approval_key, root_cause, recommendation, reason)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
+      [id, approvalKey, rootCause, recommendation, reason]
+    );
+  } catch (err) { console.error('Error guardando update:', err.message); }
+}
+
+async function approveUpdate(id, approvalKey) {
+  try {
+    const res = await pool.query(
+      `UPDATE prompt_updates SET status='approved', approved_at=NOW()
+       WHERE id=$1 AND approval_key=$2 AND status='pending' RETURNING *`,
+      [id, approvalKey]
+    );
+    const update = res.rows[0];
+    if (!update) return null;
+    await pool.query(
+      `INSERT INTO learned_rules (rule, source_update_id) VALUES ($1,$2)`,
+      [update.recommendation, id]
+    );
+    return update;
+  } catch (err) { console.error('Error aprobando update:', err.message); return null; }
+}
+
+async function getLearnedRules() {
+  try {
+    const res = await pool.query(
+      `SELECT rule FROM learned_rules ORDER BY created_at ASC`
+    );
+    return res.rows.map(r => r.rule);
+  } catch { return []; }
+}
+
+async function getRecentInsightSuggestions(rootCause, days = 30) {
+  try {
+    const res = await pool.query(
+      `SELECT improvement_suggestion, drop_off_point, what_worked
+       FROM conversation_insights
+       WHERE root_cause=$1 AND created_at > NOW() - INTERVAL '${days} days'
+       ORDER BY created_at DESC LIMIT 10`,
+      [rootCause]
+    );
+    return res.rows;
+  } catch { return []; }
+}
+
 module.exports = {
   pool,
   initDB,
@@ -300,4 +389,10 @@ module.exports = {
   getWeeklyInsights,
   saveKnowledgeGap,
   getKnowledgeGaps,
+  countInsightsByRootCause,
+  hasPendingUpdateForRootCause,
+  savePendingUpdate,
+  approveUpdate,
+  getLearnedRules,
+  getRecentInsightSuggestions,
 };
