@@ -144,12 +144,14 @@ async function crearOportunidad(contactId, nombre, stageId) {
 
 async function addNote(contactId, body) {
   try {
-    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/notes`, {
+    const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/notes`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     });
-  } catch (err) { console.error('Error agregando nota GHL:', err.message); }
+    const data = await res.json();
+    console.log('[addNote] Response:', JSON.stringify(data));
+  } catch (err) { console.error('[addNote] Error:', err.message); }
 }
 
 async function sendInternalNote(conversationId, contactId, message) {
