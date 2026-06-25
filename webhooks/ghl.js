@@ -566,6 +566,7 @@ async function ghlCrearEnCreatorHandler(req, res) {
     if (faltantes.length) {
       console.log('[CrearEnCreator] Campos faltantes:', faltantes);
       const conversationId = await ghl.getConversationId(contactId);
+      console.log('[CrearEnCreator] conversationId:', conversationId);
       if (conversationId) {
         await ghl.sendInternalNote(conversationId, contactId,
           `⚠️ Etiqueta "Crear en Creator" aplicada pero la información NO se envió a Zoho Creator.\n\nCampos faltantes: ${faltantes.join(', ')}.\n\nCompletá esos campos y volvé a poner la etiqueta.`
