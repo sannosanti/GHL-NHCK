@@ -561,6 +561,20 @@ async function ghlCrearEnCreatorHandler(req, res) {
     const movil      = contact.phone  || '';
     const email      = contact.email  || '';
 
+    const faltantes = [
+      !nombreNino && 'Nombre del niño',
+      !edad       && 'Edad del niño',
+      !genero     && 'Género',
+      !sintoma    && 'Síntoma principal',
+    ].filter(Boolean);
+
+    if (faltantes.length) {
+      const nombreContacto = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contactId;
+      const { notify } = require('../services/notifier');
+      await notify(`⚠️ *Crear en Creator — campos incompletos*\nContacto: ${nombreContacto}\nFaltan: ${faltantes.join(', ')}\nCompletá los campos y volvé a poner la etiqueta.`);
+      return;
+    }
+
     console.log('[CrearEnCreator] Iniciando para contacto:', contactId, { nombreNino, edad, genero, estudia, sintoma });
 
     await zoho.crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL: contactId, edad, sintoma, genero, estudia });
