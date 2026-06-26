@@ -84,10 +84,14 @@ async function getLastMessage(conversationId) {
     });
     const data = await res.json();
     const messages = data.messages?.messages || data.messages || [];
-    if (!Array.isArray(messages) || messages.length === 0) return { body: '', id: null };
+    if (!Array.isArray(messages) || messages.length === 0) return { body: '', id: null, attachmentUrl: null };
     const last = messages.find(m => m.direction === 'inbound') || messages[0];
-    return { body: last?.body || '', id: last?.id || null };
-  } catch (err) { return { body: '', id: null }; }
+    const rawAttachments = last?.attachments || [];
+    const attachmentUrl = Array.isArray(rawAttachments) && rawAttachments.length > 0
+      ? rawAttachments[0]
+      : (typeof rawAttachments === 'string' && rawAttachments ? rawAttachments : null);
+    return { body: last?.body || '', id: last?.id || null, attachmentUrl };
+  } catch (err) { return { body: '', id: null, attachmentUrl: null }; }
 }
 
 async function addTag(contactId, tag) {

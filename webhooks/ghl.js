@@ -40,16 +40,16 @@ async function ghlWebhookHandler(req, res) {
     let messageBody = req.body.message?.body || req.body.customData?.message || '';
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
     const messageType = String(req.body.customData?.messageType || req.body.message?.type || req.body.type || '');
-    const imageUrl = req.body.customData?.attachments || null;
+    let imageUrl = req.body.customData?.attachments || null;
     // messageType=19 is GHL's generic media type — not reliable for distinguishing audio vs image.
     // Detect audio by file extension in the attachment URL instead.
+    // When GHL omits the URL entirely (type=19, empty body, empty attachment), flag for API lookup.
+    const isPotentialMedia = messageType === '19' && !messageBody && !imageUrl;
     const isAudioUrl = /\.(ogg|opus|mp3|mp4|m4a|wav|webm|aac|amr)(\?|$)/i.test(imageUrl || '');
-    const isAudio = messageType === '2' || messageType === 'AUDIO' || isAudioUrl;
+    const isAudio = messageType === '2' || messageType === 'AUDIO' || isAudioUrl || isPotentialMedia;
     const isImage = !!imageUrl && !isAudio;
 
-    // DEBUG: full log per webhook
-    console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, messageBody: (messageBody || '').substring(0, 30), imageUrl }));
-    console.log('WEBHOOK_BODY:', JSON.stringify(req.body));
+    console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, isPotentialMedia, messageBody: (messageBody || '').substring(0, 30), imageUrl }));
 
     if (isImage && !conversationId) {
       conversationId = await ghl.getConversationId(contactId);
@@ -105,12 +105,30 @@ async function ghlWebhookHandler(req, res) {
 
     // AUDIOS — transcribe with Whisper, then continue normal flow
     if (isAudio) {
-      const audioUrl =
+      let audioUrl =
         imageUrl ||
         (Array.isArray(req.body.message?.attachments) && req.body.message.attachments[0]) ||
         (typeof req.body.message?.attachments === 'string' && req.body.message.attachments) ||
         (typeof req.body.message?.body === 'string' && req.body.message.body.startsWith('http') && req.body.message.body) ||
         null;
+
+      // GHL webhook omits the media URL for type=19 — fetch from API
+      if (!audioUrl && isPotentialMedia) {
+        try {
+          await new Promise(r => setTimeout(r, 1500)); // brief wait for GHL to index the message
+          const lastMsg = await ghl.getLastMessage(conversationId);
+          const candidate = lastMsg.attachmentUrl || (lastMsg.body?.startsWith('http') ? lastMsg.body : null);
+          if (candidate && /\.(ogg|opus|mp3|mp4|m4a|wav|webm|aac|amr)(\?|$)/i.test(candidate)) {
+            audioUrl = candidate;
+          } else {
+            console.log('MEDIA19: attachment found but not audio, ignoring');
+            return;
+          }
+        } catch (e) {
+          console.error('MEDIA19 lookup error:', e.message);
+          return;
+        }
+      }
 
       console.log('AUDIO RECIBIDO — URL:', audioUrl ? audioUrl.substring(0, 60) : 'NO encontrada');
 
