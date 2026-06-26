@@ -49,6 +49,7 @@ async function ghlWebhookHandler(req, res) {
 
     // DEBUG: full log per webhook
     console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, messageBody: (messageBody || '').substring(0, 30), imageUrl }));
+    console.log('WEBHOOK_BODY:', JSON.stringify(req.body));
 
     if (isImage && !conversationId) {
       conversationId = await ghl.getConversationId(contactId);
