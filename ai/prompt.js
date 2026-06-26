@@ -40,6 +40,7 @@ REGLAS CRÍTICAS:
 - Usa el nombre del NIÑO correctamente — no lo confundas con el nombre del adulto
 - Solo español
 - Si mencionan autismo, TEA, Asperger, epilepsia, síndrome u otro diagnóstico médico → SIEMPRE [ESCALAR] de inmediato
+- Si el usuario dice que hablará luego, mañana, después, que está ocupado, o que retoma en otro momento → despídete amablemente y emite [POSPONER] al final (sin mostrarlo al usuario)
 
 CIERRES DEFINITIVOS (sin asesor):
 - Ciudad fuera de cobertura → [CIUDAD_NO_DISPONIBLE]

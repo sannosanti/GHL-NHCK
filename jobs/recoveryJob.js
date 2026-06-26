@@ -93,7 +93,11 @@ async function runRecoveryJob() {
       SELECT conversation_id, contact_id, phone, messages, triaje, estado, recovery_status, updated_at
       FROM conversations
       WHERE estado NOT IN (${EXCLUDED_STATES.map((_, i) => `$${i + 1}`).join(',')})
-        AND (recovery_status IS NULL OR recovery_status = 'intento-1')
+        AND (
+          recovery_status IS NULL
+          OR recovery_status = 'intento-1'
+          OR (recovery_status = 'pospuesto' AND updated_at <= NOW() - INTERVAL '24 hours')
+        )
     `, EXCLUDED_STATES);
     rows = result.rows;
   } catch (err) {

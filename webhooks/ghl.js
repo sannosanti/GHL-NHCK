@@ -540,6 +540,22 @@ async function ghlWebhookHandler(req, res) {
       return;
     }
 
+    // Deferred — user said they'll talk later: suppress timers and recovery for 24h
+    if (rawReply.includes('[POSPONER]')) {
+      const replyLimpio = rawReply.replace(/\[POSPONER\]/g, '').trim();
+      const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
+      history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, lastMsgId, phone);
+      await db.pool.query(
+        'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2',
+        ['pospuesto', conversationId]
+      );
+      await humanDelay();
+      await ghl.sendMessages(conversationId, partes, contactId, channel);
+      console.log('POSPONER: timers y recovery suprimidos para', conversationId);
+      return;
+    }
+
     // Normal reply
     const reply = rawReply
       .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
@@ -554,6 +570,7 @@ async function ghlWebhookHandler(req, res) {
       .replace(/\[FUERA_SEGMENTO\]/g, '')
       .replace(/\[NHC_ADULTOS\]/g, '')
       .replace(/\[ESCALAR\]/g, '')
+      .replace(/\[POSPONER\]/g, '')
       .split('\n').filter(l => l.trim() !== '').join('\n');
 
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
