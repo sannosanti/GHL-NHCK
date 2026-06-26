@@ -11,6 +11,7 @@ const { buildSystemPrompt } = require('../ai/prompt');
 const { callClaude } = require('../ai/claude');
 const { triggerAnalysis } = require('../jobs/insightJob');
 const { notifyError } = require('../services/notifier');
+const whisper = require('../services/whisper');
 
 // ─── MODULE-LOCAL STATE ───────────────────────────────────────────────────────
 
@@ -100,17 +101,50 @@ async function ghlWebhookHandler(req, res) {
     const tags = contact.tags || [];
     const estado = convData?.estado || 'nuevo';
 
-    // AUDIOS — notify asesor, keep conversation alive, offer text alternative
+    // AUDIOS — transcribe with Whisper, then continue normal flow
     if (isAudio) {
-      console.log('AUDIO RECIBIDO — escalando');
-      if (!tags.includes('escalado nhck')) {
-        await ghl.addTag(contactId, 'escalado nhck');
-        await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
-        triggerAnalysis(conversationId, contactId, 'audio_escalado');
-        await humanDelay();
-        await ghl.sendMessage(conversationId, '¡Hola! Por el momento no puedo escuchar audios, pero con gusto te atiendo por escrito. ¿Puedes contarme qué necesitas? Si prefieres, te puedo conectar con un asesor de nuestro equipo 😊', contactId, channel);
+      const audioUrl =
+        (Array.isArray(req.body.message?.attachments) && req.body.message.attachments[0]) ||
+        (typeof req.body.message?.attachments === 'string' && req.body.message.attachments) ||
+        req.body.customData?.attachments ||
+        (typeof req.body.message?.body === 'string' && req.body.message.body.startsWith('http') && req.body.message.body) ||
+        null;
+
+      console.log('AUDIO RECIBIDO — URL:', audioUrl ? audioUrl.substring(0, 60) : 'NO encontrada');
+
+      if (audioUrl) {
+        try {
+          const transcription = await whisper.transcribeAudio(audioUrl);
+          if (transcription) {
+            console.log('AUDIO TRANSCRITO:', transcription.substring(0, 80));
+            messageBody = transcription;
+            // fall through to normal processing
+          } else {
+            await humanDelay();
+            await ghl.sendMessage(conversationId, 'No pude entender el audio 🎙️ ¿Me lo podés escribir?', contactId, channel);
+            return;
+          }
+        } catch (err) {
+          console.error('Whisper error:', err.message);
+          if (!tags.includes('escalado nhck')) {
+            await ghl.addTag(contactId, 'escalado nhck');
+            await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
+            triggerAnalysis(conversationId, contactId, 'audio_escalado');
+            await humanDelay();
+            await ghl.sendMessage(conversationId, '¡Hola! Por el momento no puedo escuchar audios, pero con gusto te atiendo por escrito. ¿Puedes contarme qué necesitas? Si prefieres, te puedo conectar con un asesor de nuestro equipo 😊', contactId, channel);
+          }
+          return;
+        }
+      } else {
+        if (!tags.includes('escalado nhck')) {
+          await ghl.addTag(contactId, 'escalado nhck');
+          await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
+          triggerAnalysis(conversationId, contactId, 'audio_escalado');
+          await humanDelay();
+          await ghl.sendMessage(conversationId, '¡Hola! Por el momento no puedo escuchar audios, pero con gusto te atiendo por escrito. ¿Puedes contarme qué necesitas? Si prefieres, te puedo conectar con un asesor de nuestro equipo 😊', contactId, channel);
+        }
+        return;
       }
-      return;
     }
 
     // If escalated, do not reply (except image in esperando_pago)

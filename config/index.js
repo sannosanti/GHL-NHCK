@@ -2,6 +2,7 @@
 
 const env = {
   anthropicKey: process.env.ANTHROPIC_API_KEY,
+  groqKey: process.env.GROQ_API_KEY,
   ghlKey: process.env.GHL_API_KEY,
   ghlLocationId: process.env.GHL_LOCATION_ID,
   zohoClientId: process.env.ZOHO_CLIENT_ID || '1000.YU4EF3FZ0RS8NAEMKVPVNTS7DU23WK',
