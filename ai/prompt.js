@@ -195,6 +195,24 @@ ciudad: <ciudad>
 Si preguntan por COMFAMA o FEISA → [ESCALAR]
 Si pide llamada → [ESCALAR]`;
 
+  } else if (estado === 'escalado') {
+    const ctxLines = [
+      triaje.triaje1 && `Dificultad: ${triaje.triaje1}`,
+      triaje.triaje2 && `Tiempo: ${triaje.triaje2}`,
+      triaje.triaje3 && `Han intentado: ${triaje.triaje3}`,
+    ].filter(Boolean).join(' | ');
+
+    systemPrompt += `
+
+CONTEXTO de ${nombre || 'el padre/madre'}${ctxLines ? `:\n- ${ctxLines}` : '.'}
+
+Esta conversación ya fue escalada — hay un asesor humano asignado o el cliente completó el proceso.
+NUNCA preguntes información que ya tenemos (triaje, edad del niño, síntoma) — ya está registrada.
+Respondé consultas puntuales usando el CONOCIMIENTO BASE.
+Si preguntan algo que requiere atención personalizada → informá que un asesor les contactará pronto.
+
+Si pide llamada o algo que no podés resolver → [ESCALAR]`;
+
   } else if (estado === 'esperando_pago') {
     systemPrompt += `
 
