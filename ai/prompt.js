@@ -47,7 +47,10 @@ CIERRES DEFINITIVOS (sin asesor):
 - Busca servicio para adultos → [NHC_ADULTOS]
 - Niño menor de 7 años o que no sabe leer → [FUERA_SEGMENTO]`;
 
+  const today = new Date().toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Bogota' });
+
   let systemPrompt = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp.
+Hoy es ${today}.
 ${reglasBase}
 
 CONOCIMIENTO BASE:
