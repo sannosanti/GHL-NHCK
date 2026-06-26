@@ -41,10 +41,11 @@ async function ghlWebhookHandler(req, res) {
     const messageId = req.body.message?.id || req.body.customData?.messageId || null;
     const messageType = String(req.body.customData?.messageType || req.body.message?.type || req.body.type || '');
     const imageUrl = req.body.customData?.attachments || null;
-    // messageType=19 comes in ALL GHL messages — not reliable
-    // Only detect image when there is a real attachment URL
-    const isImage = !!imageUrl;
-    const isAudio = messageType === '2' || messageType === 'AUDIO';
+    // messageType=19 is GHL's generic media type — not reliable for distinguishing audio vs image.
+    // Detect audio by file extension in the attachment URL instead.
+    const isAudioUrl = /\.(ogg|opus|mp3|mp4|m4a|wav|webm|aac|amr)(\?|$)/i.test(imageUrl || '');
+    const isAudio = messageType === '2' || messageType === 'AUDIO' || isAudioUrl;
+    const isImage = !!imageUrl && !isAudio;
 
     // DEBUG: full log per webhook
     console.log('WEBHOOK:', JSON.stringify({ contactId, messageType, isImage, isAudio, messageBody: (messageBody || '').substring(0, 30), imageUrl }));
@@ -104,9 +105,9 @@ async function ghlWebhookHandler(req, res) {
     // AUDIOS — transcribe with Whisper, then continue normal flow
     if (isAudio) {
       const audioUrl =
+        imageUrl ||
         (Array.isArray(req.body.message?.attachments) && req.body.message.attachments[0]) ||
         (typeof req.body.message?.attachments === 'string' && req.body.message.attachments) ||
-        req.body.customData?.attachments ||
         (typeof req.body.message?.body === 'string' && req.body.message.body.startsWith('http') && req.body.message.body) ||
         null;
 
