@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { callClaude } = require('../ai/claude');
 const db = require('../db');
+const ghl = require('../services/ghl');
 const { notify } = require('../services/notifier');
 
 const SERVER_URL = 'https://miraculous-solace-production-47dd.up.railway.app';
@@ -149,10 +150,95 @@ Generá una recomendación concreta para mejorar el comportamiento de Carolina. 
   }
 }
 
+const ASESOR_SYSTEM = `Eres un experto en optimización de asesoras de ventas IA para centros de salud infantil. Tu tarea es analizar cómo un asesor humano manejó un caso que Carolina (IA) escaló, e identificar si Carolina puede aprender a manejarlo sola en el futuro.
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional.`;
+
+async function analyzeAsesorResponse(conversationId, contactId) {
+  try {
+    if (!conversationId) return;
+    if (await db.hasAsesorAnalysis(conversationId)) return;
+
+    const messages = await ghl.getConversationMessages(conversationId, 40);
+    const asesorMessages = messages.filter(m =>
+      (m.direction === 'outbound' || m.messageType === 'outbound') &&
+      (m.body || m.text || '').trim().length > 10
+    );
+    if (asesorMessages.length === 0) return;
+
+    await db.markAsesorAnalyzed(conversationId);
+
+    const asesorText = asesorMessages
+      .slice(0, 10)
+      .map(m => `ASESOR: ${(m.body || m.text || '').trim()}`)
+      .join('\n');
+
+    const convData = await db.getConversationData(conversationId);
+    const carolinaMessages = (convData?.messages || []).slice(-8).map(m => {
+      const role = m.role === 'user' ? 'CLIENTE' : 'CAROLINA';
+      const text = Array.isArray(m.content) ? m.content.map(c => c.text || '').join('') : (m.content || '');
+      return `${role}: ${text}`;
+    }).join('\n');
+
+    const history = [{
+      role: 'user',
+      content: [{
+        type: 'text',
+        text: `CONVERSACIÓN ANTES DE ESCALAR (últimos mensajes):
+${carolinaMessages || '(sin historial local)'}
+
+MENSAJES DEL ASESOR HUMANO DESPUÉS DE ESCALAR:
+${asesorText}
+
+Analizá si Carolina podría haber manejado esto sin escalar y respondé con este JSON:
+{
+  "puede_aprender": true/false,
+  "motivo_escalacion": "Por qué Carolina escaló este caso (1 oración)",
+  "que_hizo_el_asesor": "Qué respondió el asesor para resolver (1-2 oraciones)",
+  "regla_para_carolina": "Si puede aprender: la regla exacta que Carolina debería aplicar en casos similares. Máximo 3 oraciones en español neutro. Si no puede aprender, dejar vacío.",
+  "razon": "Por qué se recomienda este aprendizaje (o por qué no aplica)"
+}`
+      }]
+    }];
+
+    const raw = await callClaude(ASESOR_SYSTEM, history, 500);
+    let result;
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      result = match ? JSON.parse(match[0]) : null;
+    } catch { result = null; }
+
+    if (!result?.puede_aprender || !result.regla_para_carolina) return;
+
+    const id = crypto.randomUUID();
+    const approvalKey = crypto.randomBytes(20).toString('hex');
+    await db.savePendingUpdate(id, approvalKey, 'asesor_aprendizaje', result.regla_para_carolina, result.razon);
+
+    const SERVER_URL = 'https://miraculous-solace-production-47dd.up.railway.app';
+    const approvalUrl = `${SERVER_URL}/admin/update/${id}?key=${approvalKey}`;
+    await notify(
+      `🎓 *Aprendizaje del asesor detectado*\n\n` +
+      `*Caso:* ${result.motivo_escalacion}\n\n` +
+      `*Qué hizo el asesor:* ${result.que_hizo_el_asesor}\n\n` +
+      `*Regla propuesta para Carolina:*\n${result.regla_para_carolina}\n\n` +
+      `✅ *Aprobar:* ${approvalUrl}\n\n` +
+      `_Si aprobás, Carolina aprende esto para futuros casos similares._`
+    );
+  } catch (err) {
+    console.error('[insightJob] Error analizando respuesta del asesor:', err.message);
+  }
+}
+
 function triggerAnalysis(conversationId, contactId, outcome) {
   setImmediate(() => {
     analyzeConversation(conversationId, contactId, outcome).catch(() => {});
   });
 }
 
-module.exports = { triggerAnalysis };
+function triggerAsesorAnalysis(conversationId, contactId) {
+  setImmediate(() => {
+    analyzeAsesorResponse(conversationId, contactId).catch(() => {});
+  });
+}
+
+module.exports = { triggerAnalysis, triggerAsesorAnalysis };

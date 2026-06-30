@@ -60,6 +60,7 @@ async function initDB() {
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_link_id TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phone TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS recovery_status VARCHAR(50) DEFAULT NULL`).catch(() => {});
+  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS asesor_analyzed BOOLEAN DEFAULT FALSE`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS conversation_insights (
@@ -354,6 +355,25 @@ async function getLearnedRules() {
   } catch { return []; }
 }
 
+async function hasAsesorAnalysis(conversationId) {
+  try {
+    const res = await pool.query(
+      `SELECT asesor_analyzed FROM conversations WHERE conversation_id = $1`,
+      [conversationId]
+    );
+    return res.rows[0]?.asesor_analyzed === true;
+  } catch { return false; }
+}
+
+async function markAsesorAnalyzed(conversationId) {
+  try {
+    await pool.query(
+      `UPDATE conversations SET asesor_analyzed = TRUE WHERE conversation_id = $1`,
+      [conversationId]
+    );
+  } catch { /* non-critical */ }
+}
+
 async function getRecentInsightSuggestions(rootCause, days = 30) {
   try {
     const res = await pool.query(
@@ -395,4 +415,6 @@ module.exports = {
   approveUpdate,
   getLearnedRules,
   getRecentInsightSuggestions,
+  hasAsesorAnalysis,
+  markAsesorAnalyzed,
 };

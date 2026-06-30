@@ -94,6 +94,17 @@ async function getLastMessage(conversationId) {
   } catch (err) { return { body: '', id: null, attachmentUrl: null }; }
 }
 
+async function getConversationMessages(conversationId, limit = 30) {
+  try {
+    const res = await fetch(
+      `https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=${limit}`,
+      { headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' } }
+    );
+    const data = await res.json();
+    return data.messages?.messages || data.messages || [];
+  } catch { return []; }
+}
+
 async function addTag(contactId, tag) {
   await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
     method: 'POST',
@@ -200,6 +211,7 @@ module.exports = {
   getConversationId,
   getConversationChannel,
   getLastMessage,
+  getConversationMessages,
   addTag,
   removeTag,
   addNote,
