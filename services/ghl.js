@@ -8,12 +8,24 @@ const db = require('../db');
 // in a bad state, which node-fetch later surfaces as "Premature close" on an
 // unrelated request reusing that same pooled connection. Retry once on any
 // network-level failure (the drain itself can also hit a dead socket).
+//
+// IMPORTANT: only a SyntaxError (body received but isn't valid JSON — e.g. a
+// genuinely empty 204 response) is safe to swallow into `data: null`. Any other
+// error thrown by res.json() is the body READ itself failing mid-stream (the
+// same "Premature close" class this function exists to retry) — that must
+// reach the outer catch/retry below, not be silently treated as "no data".
+// (Previously this was swallowed unconditionally, which masked real fetch
+// failures as an empty-but-successful response to every caller.)
 async function fetchGHL(url, options = {}, retries = 1) {
   for (let attempt = 0; ; attempt++) {
     try {
       const res = await fetch(url, options);
       let data = null;
-      try { data = await res.json(); } catch { /* empty or non-JSON body */ }
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        if (!(parseErr instanceof SyntaxError)) throw parseErr;
+      }
       return { res, data };
     } catch (err) {
       if (attempt >= retries) throw err;
@@ -77,16 +89,24 @@ async function getContact(contactId) {
 }
 
 async function getConversationId(contactId) {
-  const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
-    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
-  });
-  // A missing `conversations` array on a non-200 (rate limit, auth, GHL-side error)
-  // looks identical to "not indexed yet" if left unlogged — surface it so retries
-  // aren't silently masking a real API failure.
-  if (!data || !Array.isArray(data.conversations)) {
-    console.error(`getConversationId: unexpected response for contactId=${contactId}, status=${res.status}, body=${JSON.stringify(data).substring(0, 300)}`);
+  try {
+    const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
+    });
+    // A missing `conversations` array on a non-200 (rate limit, auth, GHL-side error)
+    // looks identical to "not indexed yet" if left unlogged — surface it so retries
+    // aren't silently masking a real API failure.
+    if (!data || !Array.isArray(data.conversations)) {
+      console.error(`getConversationId: unexpected response for contactId=${contactId}, status=${res.status}, body=${JSON.stringify(data).substring(0, 300)}`);
+    }
+    return data?.conversations?.[0]?.id || null;
+  } catch (err) {
+    // Callers (ghlWebhookHandler's retry loop, pendingWebhookJob) treat null the
+    // same as "not ready yet" and retry — don't let a fetch failure here abort
+    // the whole webhook instead of being retried.
+    console.error(`getConversationId: fetch failed for contactId=${contactId}:`, err.message);
+    return null;
   }
-  return data?.conversations?.[0]?.id || null;
 }
 
 // Maps GHL's search-endpoint conversation "type" (a readable string, e.g.
