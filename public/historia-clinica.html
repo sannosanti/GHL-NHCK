@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NHC Kids · Historia Clínica Infantil</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f9ff;
+      min-height: 100vh;
+      padding: 24px 16px 48px;
+    }
+
+    .container { width: 100%; max-width: 600px; margin: 0 auto; }
+
+    /* ── Header ── */
+    .header { text-align: center; margin-bottom: 28px; }
+    .logo { font-size: 24px; font-weight: 800; color: #0ea5e9; letter-spacing: -0.5px; }
+    .logo span { color: #1e293b; }
+    .tagline { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+    /* ── Progress ── */
+    .progress-wrap { margin-bottom: 20px; }
+    .progress-info { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 7px; }
+    .progress-bar { height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #0ea5e9, #38bdf8); border-radius: 2px; transition: width 0.35s ease; }
+
+    /* ── Card ── */
+    .card {
+      background: #fff;
+      border-radius: 22px;
+      padding: 28px 24px 24px;
+      box-shadow: 0 4px 32px rgba(14,165,233,.08);
+    }
+
+    /* ── Step label / section title ── */
+    .step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #0ea5e9; margin-bottom: 8px; }
+    .section-title { font-size: 21px; font-weight: 800; color: #1e293b; line-height: 1.3; margin-bottom: 4px; }
+    .section-subtitle { font-size: 13px; color: #64748b; margin-bottom: 6px; }
+
+    /* ── Professional banner ── */
+    .pro-banner { background: #fef3c7; border: 1.5px solid #fbbf24; border-radius: 10px; padding: 10px 14px; margin: 14px 0; font-size: 13px; color: #92400e; display: flex; align-items: center; gap: 8px; }
+
+    /* ── Divider ── */
+    .section-divider { height: 1px; background: #f1f5f9; margin: 16px 0 20px; }
+
+    /* ── Fields ── */
+    .fields-container { display: flex; flex-direction: column; gap: 16px; }
+
+    .field-group {}
+    .field-label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 7px; line-height: 1.4; }
+    .field-label .req { color: #ef4444; margin-left: 2px; }
+
+    .field-input,
+    .field-textarea,
+    .field-select {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 15px;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      outline: none;
+      color: #1e293b;
+      background: #f8fafc;
+      transition: border-color .2s, box-shadow .2s;
+      font-family: inherit;
+    }
+    .field-input:focus, .field-textarea:focus, .field-select:focus {
+      border-color: #0ea5e9;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(14,165,233,.1);
+    }
+    .field-textarea { resize: vertical; min-height: 80px; line-height: 1.55; }
+    .field-select { appearance: none; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px; }
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+
+    /* ── Checkboxes ── */
+    .checkboxes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    @media (max-width: 440px) { .checkboxes-grid { grid-template-columns: 1fr; } }
+
+    .checkbox-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 12px;
+      border: 2px solid #e2e8f0;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      background: #f8fafc;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .checkbox-item:hover { border-color: #bae6fd; background: #f0f9ff; }
+    .checkbox-item.checked { border-color: #0ea5e9; background: #f0f9ff; }
+    .checkbox-mark {
+      width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px;
+      border: 2px solid #cbd5e1; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .checkbox-item.checked .checkbox-mark { border-color: #0ea5e9; background: #0ea5e9; }
+    .checkbox-item.checked .checkbox-mark::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+    .checkbox-text { font-size: 13px; color: #1e293b; font-weight: 500; line-height: 1.35; }
+
+    /* ── Radio options (same as amnesis-form) ── */
+    .options { display: flex; flex-direction: row; gap: 10px; }
+    .option {
+      flex: 1; display: flex; align-items: center; gap: 12px;
+      padding: 13px 14px; border: 2px solid #e2e8f0; border-radius: 12px;
+      cursor: pointer; transition: border-color .15s, background .15s;
+      background: #f8fafc; -webkit-tap-highlight-color: transparent;
+    }
+    .option:hover { border-color: #bae6fd; background: #f0f9ff; }
+    .option.selected { border-color: #0ea5e9; background: #f0f9ff; }
+    .option-dot {
+      width: 19px; height: 19px; border-radius: 50%; border: 2px solid #cbd5e1;
+      flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .option.selected .option-dot { border-color: #0ea5e9; background: #0ea5e9; }
+    .option.selected .option-dot::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #fff; }
+    .option-text { font-size: 15px; color: #1e293b; font-weight: 500; }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      width: 100%; padding: 16px; background: #0ea5e9; color: #fff;
+      border: none; border-radius: 13px; font-size: 16px; font-weight: 700;
+      cursor: pointer; margin-top: 24px; transition: background .2s, transform .1s;
+      font-family: inherit; letter-spacing: 0.1px;
+    }
+    .btn-primary:hover:not(:disabled) { background: #0284c7; }
+    .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    .btn-back {
+      width: 100%; padding: 11px; background: transparent; color: #94a3b8;
+      border: none; font-size: 14px; cursor: pointer; margin-top: 8px;
+      border-radius: 8px; transition: color .15s; font-family: inherit;
+    }
+    .btn-back:hover { color: #64748b; }
+
+    .btn-secondary {
+      width: 100%; padding: 14px; background: transparent; color: #0ea5e9;
+      border: 2px solid #0ea5e9; border-radius: 13px; font-size: 15px; font-weight: 600;
+      cursor: pointer; margin-top: 10px; transition: all .2s; font-family: inherit;
+    }
+    .btn-secondary:hover { background: #f0f9ff; }
+
+    /* ── Error msg ── */
+    .error-msg { color: #ef4444; font-size: 13px; margin-top: 10px; padding: 10px 14px; background: #fef2f2; border-radius: 8px; border-left: 3px solid #ef4444; display: none; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block; width: 18px; height: 18px;
+      border: 3px solid rgba(255,255,255,.35); border-top-color: #fff;
+      border-radius: 50%; animation: spin .75s linear infinite;
+      vertical-align: middle; margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Success card ── */
+    .success-card {
+      background: #fff; border-radius: 22px; padding: 40px 28px;
+      box-shadow: 0 4px 32px rgba(14,165,233,.08);
+      text-align: center; display: none;
+    }
+    .success-icon { width: 80px; height: 80px; background: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; font-size: 36px; }
+    .success-card h2 { font-size: 24px; font-weight: 800; color: #1e293b; margin-bottom: 12px; }
+    .success-card p { font-size: 15px; color: #64748b; line-height: 1.65; margin-bottom: 28px; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="logo">NHC <span>Kids</span></div>
+    <div class="tagline">Historia clínica infantil</div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-info">
+      <span id="stepLabel">Sección 0 de 10</span>
+      <span id="stepPct">0%</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div class="card" id="mainCard"></div>
+
+  <div class="success-card" id="successCard">
+    <div class="success-icon">✓</div>
+    <h2>Historia clínica completada</h2>
+    <p>El PDF se descargó automáticamente.<br>Si no aparece, podés volver a descargarlo abajo.</p>
+    <button class="btn-primary" onclick="redownloadPDF()">Descargar PDF de nuevo ↓</button>
+    <button class="btn-secondary" onclick="reiniciar()">Iniciar nueva historia</button>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+// ── Config ───────────────────────────────────────────────────────────────────
+const SERVER_URL   = '';           // empty = same origin
+const CREATOR_FORM = 'Historia_Clinica';
+const TOTAL        = 10;           // last section index
+
+// ── State ────────────────────────────────────────────────────────────────────
+let currentSection = 0;
+let savedPdfDoc    = null;         // jsPDF instance kept for re-download
+
+const formData = {
+  fechaElaboracion:'', nombreConsultante:'', movilConsultante:'', emailConsultante:'',
+  edadConsultante:'', edadPadresCuidadores:'', lateralidad:'', dedicacionPadres:'', conQuienVive:'',
+  motivoConsulta:'', estadoActualAntecedentes:'',
+  numEmbarazos:'', medicamentosEmbarazo:'', complicacionesEmbarazo:'', duracionEmbarazo:'', complicacionesNacimiento:'',
+  incubadoraEnfermedades:'', controlesDesarrollo:'', dificultadesGateo:'', controlEsfinteres:'', primerasPalabras:'', temperamento:'',
+  conformacionFamilia:'', infanciaDesarrollo:'', dinamicaFamiliar:'', relacionesPares:'', pautasCrianza:'', abusosViolencia:'',
+  gradoInstitucion:'', rendimientoAcademico:'',
+  enfermedades:'', restriccionesTecnologia:[], trabajoPsicologico:'', medicamentos:'', antecedentesSalud:'',
+  actividadesExtracurriculares:'', factoresMotivacion:'', alimentacion:'', sueno:'',
+  consumeSustancias:'', tipoSustancias:'', periodicidadConsumo:'', exposicionPantallas:'',
+  expectativasProceso:'', agregarAlgo:'', comentariosProfesional:'', testBASCH:'', comoSupo:'',
+  comentarioDevolucion:'', recomendacionesTerapeuticas:'', neurotecnologiasNoUsar:'',
+};
+
+// ── Sections Definition ───────────────────────────────────────────────────────
+const SECTIONS = [
+  { id:0, title:'Datos de la entrevista', fields:[
+    { key:'fechaElaboracion',   label:'Fecha de elaboración',                              type:'date', required:true },
+    { key:'nombreConsultante',  label:'Nombre completo del consultante',                   type:'text', required:true, placeholder:'Nombre completo del niño o niña' },
+    { key:'movilConsultante',   label:'Celular del consultante (para vincular expediente)', type:'text', placeholder:'Ej: 3001234567' },
+    { key:'emailConsultante',   label:'Email del consultante (opcional)',                   type:'text', placeholder:'correo@ejemplo.com' },
+  ]},
+  { id:1, title:'Información general básica', fields:[
+    { key:'edadConsultante',       label:'¿Qué edad tiene el consultante?',                    type:'number',   required:true, placeholder:'Ej: 9' },
+    { key:'edadPadresCuidadores',  label:'Edad de los padres y/o cuidadores',                 type:'text',     placeholder:'Ej: Mamá 35, Papá 38' },
+    { key:'lateralidad',           label:'Lateralidad',                                       type:'select',   options:['Diestro','Zurdo','Ambidiestro'] },
+    { key:'dedicacionPadres',      label:'¿A qué se dedican los padres y/o cuidadores?',      type:'textarea', placeholder:'Describe la ocupación principal' },
+    { key:'conQuienVive',          label:'¿Con quién vive y dónde vive?',                     type:'textarea', placeholder:'Describe la convivencia y lugar de residencia' },
+  ]},
+  { id:2, title:'Motivo de consulta', fields:[
+    { key:'motivoConsulta',             label:'Motivo de consulta',              type:'textarea', required:true, rows:5, placeholder:'Describe el motivo principal de la consulta' },
+    { key:'estadoActualAntecedentes',   label:'Estado actual y antecedentes',   type:'textarea', rows:5, placeholder:'Describe el estado actual y los antecedentes relevantes' },
+  ]},
+  { id:3, title:'Antecedentes perinatales', fields:[
+    { key:'numEmbarazos',              label:'Número de embarazos de la madre',                                     type:'number',   placeholder:'Ej: 2' },
+    { key:'medicamentosEmbarazo',      label:'¿La madre consumió algún medicamento o sustancia durante el embarazo?', type:'textarea', placeholder:'Describe qué medicamentos o sustancias' },
+    { key:'complicacionesEmbarazo',    label:'¿Cómo fue el embarazo? ¿Hubo alguna complicación médica?',            type:'textarea', placeholder:'Describe el curso del embarazo' },
+    { key:'duracionEmbarazo',          label:'Duración del embarazo (semanas)',                                      type:'number',   placeholder:'Ej: 38' },
+    { key:'complicacionesNacimiento',  label:'¿Cómo fue el nacimiento? ¿Hubo alguna complicación?',                 type:'textarea', placeholder:'Describe el parto o nacimiento' },
+  ]},
+  { id:4, title:'Neurodesarrollo', fields:[
+    { key:'incubadoraEnfermedades',  label:'¿Estuvo en incubadora u hospitalizado? ¿Enfermedades en los primeros meses de vida?', type:'textarea', placeholder:'Describe hospitalizaciones o enfermedades tempranas' },
+    { key:'controlesDesarrollo',     label:'¿Asistió a los controles de crecimiento y desarrollo? ¿Hubo alguna particularidad?',  type:'textarea', placeholder:'Describe la asistencia a controles médicos' },
+    { key:'dificultadesGateo',       label:'¿Tuvo dificultades en el gateo y caminar?',                                           type:'textarea', placeholder:'Describe el desarrollo motor temprano' },
+    { key:'controlEsfinteres',       label:'Control de esfínteres',                                                               type:'text',     placeholder:'Ej: Logrado a los 3 años sin dificultades' },
+    { key:'primerasPalabras',        label:'¿A qué edad dijo sus primeras palabras con sentido?',                                 type:'text',     placeholder:'Ej: Al año y medio aproximadamente' },
+    { key:'temperamento',            label:'¿Cómo era su temperamento? (¿Lloraba constantemente, gritos o era calmado?)',         type:'textarea', placeholder:'Describe el temperamento durante la infancia temprana' },
+  ]},
+  { id:5, title:'Historia familiar y personal', fields:[
+    { key:'conformacionFamilia',   label:'¿Cómo está conformada la familia?',                                          type:'textarea', placeholder:'Describe la estructura familiar' },
+    { key:'infanciaDesarrollo',    label:'¿Dónde ha crecido el consultante y con quién? ¿Cómo ha sido la infancia?',  type:'textarea', placeholder:'Describe el entorno de crianza e historia de vida' },
+    { key:'dinamicaFamiliar',      label:'¿Cómo es la dinámica familiar? ¿Cuáles son los problemas percibidos?',       type:'textarea', placeholder:'Describe las relaciones y dinámicas del hogar' },
+    { key:'relacionesPares',       label:'¿Cómo se relaciona el consultante con sus pares?',                           type:'textarea', placeholder:'Describe las relaciones sociales' },
+    { key:'pautasCrianza',         label:'¿Cómo son las pautas de crianza en la familia?',                             type:'textarea', placeholder:'Describe el estilo de crianza' },
+    { key:'abusosViolencia',       label:'¿El consultante ha sufrido abusos o violencia intrafamiliar?',               type:'textarea', placeholder:'Información confidencial y sensible' },
+  ]},
+  { id:6, title:'Información académica', fields:[
+    { key:'gradoInstitucion',      label:'¿Qué grado/semestre cursa? ¿A qué institución educativa asiste?',           type:'textarea', placeholder:'Ej: Tercer grado — Colegio Los Andes' },
+    { key:'rendimientoAcademico',  label:'¿Cómo ha sido y cómo es el rendimiento académico? ¿Ha perdido años?',       type:'textarea', placeholder:'Describe el desempeño académico' },
+  ]},
+  { id:7, title:'Historial de salud', fields:[
+    { key:'enfermedades',  label:'¿Qué enfermedades sufre o ha sufrido?',  type:'textarea', placeholder:'Lista las enfermedades relevantes' },
+    { key:'restriccionesTecnologia', label:'Restricciones para uso de la tecnología — marca las que apliquen', type:'checkboxes',
+      options:['Dispositivo activo implantado','Ataques epilépticos o convulsivos','Tumor maligno','Fotosensibilidad','Embarazo','Alergias','Migraña severa','Trauma craneoencefálico','Enfermedades autoinmunes','Autismo grado 2 o 3'] },
+    { key:'trabajoPsicologico',  label:'¿El consultante o su familia han hecho algún tipo de trabajo psicológico anteriormente? ¿Qué han descubierto?', type:'textarea', placeholder:'Describe los antecedentes de intervención psicológica' },
+    { key:'medicamentos',        label:'¿Toma algún tipo de medicina o suplemento alimentario?',                                                        type:'textarea', placeholder:'Lista medicamentos y suplementos' },
+    { key:'antecedentesSalud',   label:'¿Qué antecedentes de salud hay en la familia?',                                                                 type:'textarea', placeholder:'Describe enfermedades relevantes en la familia' },
+  ]},
+  { id:8, title:'Hábitos de vida', fields:[
+    { key:'actividadesExtracurriculares', label:'¿Qué actividades extracurriculares realiza?',                                                 type:'textarea', placeholder:'Deportes, arte, música, etc.' },
+    { key:'factoresMotivacion',           label:'¿Cuáles son los factores motivacionales y estresores del consultante?',                      type:'textarea', placeholder:'Qué lo motiva y qué lo estresa' },
+    { key:'alimentacion',                 label:'¿Cómo es la alimentación? ¿Es balanceada? ¿Come en horarios establecidos?',                  type:'textarea', placeholder:'Describe los hábitos alimentarios' },
+    { key:'sueno',                        label:'¿Cómo está durmiendo el consultante? (¿A qué hora se acuesta y a qué hora se levanta?)',     type:'textarea', placeholder:'Describe los hábitos de sueño' },
+    { key:'consumeSustancias',            label:'¿El consultante consume algún tipo de sustancia alucinógena?',                               type:'radio',    options:['Sí','No'] },
+    { key:'tipoSustancias',               label:'¿Cuáles de estas sustancias consume?',      type:'conditional-textarea', condition:'consumeSustancias', conditionValue:'Sí', placeholder:'Describe las sustancias que consume' },
+    { key:'periodicidadConsumo',          label:'¿Cuál es la periodicidad del consumo?',     type:'conditional-textarea', condition:'consumeSustancias', conditionValue:'Sí', placeholder:'Describe la frecuencia de consumo' },
+    { key:'exposicionPantallas',          label:'¿Cuánto tiempo está el consultante expuesto/a a pantallas durante el día?',                  type:'textarea', placeholder:'Ej: 3 horas diarias entre TV y celular' },
+  ]},
+  { id:9, title:'Cierre de la entrevista', fields:[
+    { key:'expectativasProceso',      label:'¿Cuáles son tus expectativas con este proceso?',  type:'textarea', required:true, rows:4, placeholder:'Describe lo que espera lograr con esta evaluación' },
+    { key:'agregarAlgo',              label:'¿Deseas agregar algo más a la entrevista?',        type:'textarea', placeholder:'Información adicional relevante' },
+    { key:'comentariosProfesional',   label:'Comentarios del profesional',                      type:'textarea', placeholder:'Observaciones del profesional durante la entrevista' },
+    { key:'testBASCH',                label:'Test BASCH',                                       type:'textarea', placeholder:'Resultados o notas del test BASCH' },
+    { key:'comoSupo', label:'¿Cómo supo de nosotros?', type:'select', required:true,
+      options:['Recomendación de familiar o amigo','Recomendación médica / profesional','Redes sociales','Búsqueda en Google','Publicidad / medios','Evento o charla','Otro'] },
+  ]},
+  { id:10, title:'Devolución inicial', subtitle:'Uso exclusivo del profesional', fields:[
+    { key:'comentarioDevolucion',         label:'Comentario devolución inicial',                          type:'textarea', rows:5, placeholder:'Observaciones clínicas de la devolución' },
+    { key:'recomendacionesTerapeuticas',  label:'Recomendaciones terapéuticas iniciales',                 type:'textarea', rows:5, placeholder:'Plan de acción recomendado' },
+    { key:'neurotecnologiasNoUsar',       label:'Neurotecnologías que no puede usar el paciente',         type:'textarea', rows:3, placeholder:'Lista las restricciones de neurotecnologías' },
+  ]},
+];
+
+// ── Field rendering ────────────────────────────────────────────────────────────
+function renderField(f) {
+  const req = f.required ? '<span class="req">*</span>' : '';
+  const ph  = f.placeholder || '';
+  const rows = f.rows || 3;
+
+  if (f.type === 'text' || f.type === 'number' || f.type === 'date') {
+    return `<div class="field-group">
+      <label class="field-label" for="${f.key}">${f.label}${req}</label>
+      <input type="${f.type}" id="${f.key}" class="field-input" placeholder="${ph}" />
+    </div>`;
+  }
+  if (f.type === 'textarea') {
+    return `<div class="field-group">
+      <label class="field-label" for="${f.key}">${f.label}${req}</label>
+      <textarea id="${f.key}" class="field-textarea" rows="${rows}" placeholder="${ph}"></textarea>
+    </div>`;
+  }
+  if (f.type === 'select') {
+    const opts = ['<option value="">Seleccionar...</option>',
+      ...f.options.map(o => `<option value="${o}">${o}</option>`)].join('');
+    return `<div class="field-group">
+      <label class="field-label" for="${f.key}">${f.label}${req}</label>
+      <select id="${f.key}" class="field-select">${opts}</select>
+    </div>`;
+  }
+  if (f.type === 'checkboxes') {
+    const items = f.options.map(o =>
+      `<div class="checkbox-item" onclick="toggleCb(this)">
+        <input type="checkbox" name="${f.key}" value="${o}" style="display:none"/>
+        <div class="checkbox-mark"></div>
+        <span class="checkbox-text">${o}</span>
+      </div>`).join('');
+    return `<div class="field-group">
+      <div class="field-label">${f.label}</div>
+      <div class="checkboxes-grid">${items}</div>
+    </div>`;
+  }
+  if (f.type === 'radio') {
+    const radios = f.options.map(o =>
+      `<label class="option" onclick="selectOpt('${f.key}','${o}',this)">
+        <input type="radio" name="${f.key}" value="${o}" style="display:none"/>
+        <div class="option-dot"></div>
+        <span class="option-text">${o}</span>
+      </label>`).join('');
+    return `<div class="field-group">
+      <div class="field-label">${f.label}${req}</div>
+      <div class="options">${radios}</div>
+    </div>`;
+  }
+  if (f.type === 'conditional-textarea') {
+    return `<div class="field-group" id="cond-${f.key}" style="display:none">
+      <label class="field-label" for="${f.key}">${f.label}</label>
+      <textarea id="${f.key}" class="field-textarea" rows="3" placeholder="${ph}"></textarea>
+    </div>`;
+  }
+  return '';
+}
+
+// ── Section rendering ──────────────────────────────────────────────────────────
+function renderSection(idx) {
+  const sec  = SECTIONS[idx];
+  const card = document.getElementById('mainCard');
+  const isLast = idx === TOTAL;
+
+  let html = `<div class="step-label">Sección ${idx} de ${TOTAL}</div>
+    <div class="section-title">${sec.title}</div>`;
+
+  if (sec.subtitle) html += `<div class="section-subtitle">${sec.subtitle}</div>`;
+  if (idx === 10)   html += `<div class="pro-banner">🔒 Esta sección es de uso exclusivo del profesional — campos bloqueados</div>`;
+
+  html += `<div class="section-divider"></div>
+    <div class="fields-container">`;
+  sec.fields.forEach(f => { html += renderField(f); });
+  html += `</div>
+    <div class="error-msg" id="sec-err"></div>
+    <button class="btn-primary" id="btnNext" onclick="${isLast ? 'generateAndSubmit()' : 'nextSection()'}">
+      ${isLast ? 'Generar PDF →' : 'Siguiente →'}
+    </button>`;
+  if (idx > 0) html += `<button class="btn-back" onclick="backSection()">← Atrás</button>`;
+
+  card.innerHTML = html;
+  if (idx === 10) disableProfessionalSection();
+}
+
+function disableProfessionalSection() {
+  const card = document.getElementById('mainCard');
+  card.querySelectorAll('.field-input, .field-textarea, .field-select').forEach(el => {
+    el.disabled = true;
+    el.style.cursor = 'not-allowed';
+    el.style.color = '#94a3b8';
+  });
+  card.querySelectorAll('.fields-container').forEach(el => {
+    el.style.opacity = '0.55';
+    el.style.pointerEvents = 'none';
+  });
+}
+
+// ── Progress ────────────────────────────────────────────────────────────────────
+function updateProgress(idx) {
+  const pct = Math.round((idx / TOTAL) * 100);
+  document.getElementById('stepLabel').textContent  = `Sección ${idx} de ${TOTAL}`;
+  document.getElementById('stepPct').textContent    = `${pct}%`;
+  document.getElementById('progressFill').style.width = `${pct}%`;
+}
+
+// ── Save / Restore section data ────────────────────────────────────────────────
+function saveSection(idx) {
+  SECTIONS[idx].fields.forEach(f => {
+    if (f.type === 'checkboxes') {
+      const checked = [...document.querySelectorAll(`input[name="${f.key}"]:checked`)].map(cb => cb.value);
+      formData[f.key] = checked;
+    } else if (f.type === 'radio') {
+      const sel = document.querySelector(`input[name="${f.key}"]:checked`);
+      formData[f.key] = sel ? sel.value : '';
+    } else if (f.type === 'conditional-textarea') {
+      const el = document.getElementById(f.key);
+      if (el) formData[f.key] = el.value;
+    } else {
+      const el = document.getElementById(f.key);
+      if (el) formData[f.key] = el.value;
+    }
+  });
+}
+
+function restoreSection(idx) {
+  SECTIONS[idx].fields.forEach(f => {
+    const val = formData[f.key];
+    if (f.type === 'checkboxes') {
+      const saved = Array.isArray(val) ? val : [];
+      document.querySelectorAll(`input[name="${f.key}"]`).forEach(cb => {
+        if (saved.includes(cb.value)) {
+          cb.checked = true;
+          cb.closest('.checkbox-item').classList.add('checked');
+        }
+      });
+    } else if (f.type === 'radio') {
+      if (val) {
+        document.querySelectorAll(`input[name="${f.key}"]`).forEach(rb => {
+          if (rb.value === val) {
+            rb.closest('.option').classList.add('selected');
+            updateConditionals(f.key, val, idx);
+          }
+        });
+      }
+    } else if (f.type === 'conditional-textarea') {
+      const el = document.getElementById(f.key);
+      if (el && val) el.value = val;
+      // visibility handled by updateConditionals
+    } else {
+      const el = document.getElementById(f.key);
+      if (el && val) el.value = val;
+    }
+  });
+}
+
+// ── Conditional field show/hide ────────────────────────────────────────────────
+function updateConditionals(key, value, sectionIdx) {
+  const sec = SECTIONS[sectionIdx];
+  sec.fields.filter(f => f.type === 'conditional-textarea' && f.condition === key).forEach(f => {
+    const el = document.getElementById(`cond-${f.key}`);
+    if (el) el.style.display = (value === f.conditionValue) ? 'block' : 'none';
+  });
+}
+
+// ── Interactive handlers ────────────────────────────────────────────────────────
+function toggleCb(label) {
+  label.classList.toggle('checked');
+  label.querySelector('input[type="checkbox"]').checked = label.classList.contains('checked');
+}
+
+function selectOpt(key, value, label) {
+  label.closest('.options').querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+  label.classList.add('selected');
+  updateConditionals(key, value, currentSection);
+}
+
+// ── Validation ─────────────────────────────────────────────────────────────────
+function validateSection(idx) {
+  const required = SECTIONS[idx].fields.filter(f => f.required);
+  for (const f of required) {
+    let val;
+    if (f.type === 'radio') {
+      const sel = document.querySelector(`input[name="${f.key}"]:checked`);
+      val = sel ? sel.value : '';
+    } else {
+      const el = document.getElementById(f.key);
+      val = el ? el.value.trim() : '';
+    }
+    if (!val) {
+      const errEl = document.getElementById('sec-err');
+      errEl.textContent = `"${f.label}" es requerido.`;
+      errEl.style.display = 'block';
+      const el = document.getElementById(f.key);
+      if (el) { el.focus(); el.scrollIntoView({ behavior:'smooth', block:'center' }); }
+      return false;
+    }
+  }
+  const errEl = document.getElementById('sec-err');
+  if (errEl) errEl.style.display = 'none';
+  return true;
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────────
+function goToSection(idx) {
+  renderSection(idx);
+  restoreSection(idx);
+  updateProgress(idx);
+  currentSection = idx;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function nextSection() {
+  if (!validateSection(currentSection)) return;
+  saveSection(currentSection);
+  goToSection(currentSection + 1);
+}
+
+function backSection() {
+  saveSection(currentSection);
+  goToSection(currentSection - 1);
+}
+
+// ── PDF Generation ─────────────────────────────────────────────────────────────
+function generatePDF(data) {
+  if (!window.jspdf) throw new Error('jsPDF no disponible — recargá la página.');
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+  const PW = 210, PH = 297, ML = 18, MR = 18, CW = PW - ML - MR;
+  let y = 30;
+
+  function chk(needed = 8) {
+    if (y + needed > PH - 20) {
+      doc.addPage();
+      y = 20;
+      // continuation header
+      doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(150);
+      const nom = (data.nombreConsultante || 'Paciente').slice(0,40);
+      doc.text(`Historia Clínica · ${nom}`, ML, 12);
+      doc.setDrawColor(14,165,233); doc.setLineWidth(0.3);
+      doc.line(ML, 14, PW - MR, 14);
+      y = 22;
+    }
+  }
+
+  // ── First page header ──
+  // NHC Kids title
+  doc.setFontSize(24); doc.setFont('helvetica','bold'); doc.setTextColor(14,165,233);
+  doc.text('NHC', ML, y);
+  const nhcW = doc.getTextWidth('NHC');
+  doc.setTextColor(30,41,59);
+  doc.text(' Kids', ML + nhcW, y);
+  y += 8;
+
+  doc.setFontSize(15); doc.setFont('helvetica','normal'); doc.setTextColor(30,41,59);
+  doc.text('Historia clínica infantil', ML, y);
+  y += 5;
+
+  doc.setFontSize(9); doc.setTextColor(120);
+  const hoy = new Date().toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'});
+  doc.text(`Documento generado el ${hoy} · Uso interno`, ML, y);
+  y += 4;
+
+  // Blue rule
+  doc.setDrawColor(14,165,233); doc.setLineWidth(0.7);
+  doc.line(ML, y, PW - MR, y);
+  y += 10;
+
+  // ── Content: each section ──
+  SECTIONS.forEach(sec => {
+    chk(18);
+
+    // Section header bg
+    doc.setFillColor(240,249,255);
+    doc.roundedRect(ML, y - 5, CW, 11, 1.5, 1.5, 'F');
+
+    doc.setFontSize(10); doc.setFont('helvetica','bold');
+    doc.setTextColor(14,165,233);
+    const secTag = `SECCIÓN ${sec.id}`;
+    doc.text(secTag, ML + 3, y + 3);
+    const tagW = doc.getTextWidth(secTag);
+    doc.setTextColor(30,41,59);
+    doc.text(` — ${sec.title.toUpperCase()}`, ML + 3 + tagW, y + 3);
+    y += 14;
+
+    sec.fields.forEach(f => {
+      // Skip conditional fields when condition not met
+      if (f.type === 'conditional-textarea') {
+        if ((data[f.condition] || '') !== f.conditionValue) return;
+      }
+
+      let val;
+      if (f.type === 'checkboxes') {
+        const arr = Array.isArray(data[f.key]) ? data[f.key] : [];
+        val = arr.length > 0 ? arr.join(' · ') : null;
+        if (!val) { val = 'Ninguna restricción marcada'; }
+      } else {
+        val = (data[f.key] || '').toString().trim();
+        if (!val) return; // skip empty fields
+      }
+
+      // Format date
+      if (f.type === 'date' && val && val.includes('-')) {
+        const [yy,mm,dd] = val.split('-');
+        val = `${dd}/${mm}/${yy}`;
+      }
+
+      // Label
+      const labelLines = doc.splitTextToSize(f.label.toUpperCase(), CW);
+      chk(labelLines.length * 4 + 8);
+      doc.setFontSize(7.5); doc.setFont('helvetica','bold'); doc.setTextColor(100);
+      labelLines.forEach(line => { doc.text(line, ML, y); y += 4; });
+
+      // Value
+      const valueLines = doc.splitTextToSize(val, CW);
+      doc.setFontSize(10.5); doc.setFont('helvetica','normal'); doc.setTextColor(30,41,59);
+      valueLines.forEach(line => { chk(6); doc.text(line, ML, y); y += 5.5; });
+
+      y += 3;
+    });
+
+    y += 5;
+    // Thin separator
+    chk(4);
+    doc.setDrawColor(220); doc.setLineWidth(0.2);
+    doc.line(ML, y, PW - MR, y);
+    y += 8;
+  });
+
+  // ── Footer on all pages ──
+  const total = doc.getNumberOfPages();
+  for (let i = 1; i <= total; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(150);
+    doc.setDrawColor(220); doc.setLineWidth(0.25);
+    doc.line(ML, PH - 15, PW - MR, PH - 15);
+    doc.text(`NHC Kids · Página ${i} de ${total}`, PW / 2, PH - 10, { align:'center' });
+  }
+
+  return doc;
+}
+
+// ── Creator submission ─────────────────────────────────────────────────────────
+async function submitToCreator(data) {
+  try {
+    const tokenRes = await fetch(`${SERVER_URL}/zoho-creator-token`);
+    if (!tokenRes.ok) throw new Error(`Token error ${tokenRes.status}`);
+    // token obtained — submit via server endpoint
+    const submitRes = await fetch(`${SERVER_URL}/historia-clinica`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await submitRes.json();
+    if (result.ok) {
+      console.log('[Creator] Historia clínica guardada. ID:', result.id);
+    } else {
+      console.warn('[Creator] Error al guardar:', result.error, '| Stage:', result.stage);
+    }
+  } catch (err) {
+    console.warn('[Creator] No se pudo enviar a Zoho Creator:', err.message);
+  }
+}
+
+// ── Main action: generate PDF + submit ────────────────────────────────────────
+async function generateAndSubmit() {
+  if (!validateSection(currentSection)) return;
+  saveSection(currentSection);
+
+  const btn = document.getElementById('btnNext');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Generando PDF...';
+
+  // Collect all data
+  const data = { ...formData };
+
+  // Generate PDF (always happens, regardless of Creator)
+  try {
+    const doc = generatePDF(data);
+    savedPdfDoc = doc;
+    const nombre = (data.nombreConsultante || 'paciente').replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'_');
+    const fecha  = new Date().toISOString().split('T')[0];
+    doc.save(`Historia_Clinica_${nombre}_${fecha}.pdf`);
+  } catch (pdfErr) {
+    console.error('[PDF]', pdfErr.message);
+    btn.disabled = false;
+    btn.innerHTML = 'Generar PDF →';
+    const errEl = document.getElementById('sec-err');
+    errEl.textContent = 'Error al generar el PDF: ' + pdfErr.message;
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // Submit to Creator (non-blocking — PDF already downloaded)
+  btn.innerHTML = '<span class="spinner"></span>Enviando a Creator...';
+  await submitToCreator(data);
+
+  // Show success
+  showSuccess();
+}
+
+// ── Success ───────────────────────────────────────────────────────────────────
+function showSuccess() {
+  document.getElementById('mainCard').style.display     = 'none';
+  document.getElementById('progressWrap').style.display = 'none';
+  document.getElementById('successCard').style.display  = 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function redownloadPDF() {
+  if (!savedPdfDoc) { alert('El PDF no está disponible. Por favor generalo de nuevo.'); return; }
+  const nombre = (formData.nombreConsultante || 'paciente').replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'_');
+  const fecha  = new Date().toISOString().split('T')[0];
+  savedPdfDoc.save(`Historia_Clinica_${nombre}_${fecha}.pdf`);
+}
+
+function reiniciar() {
+  Object.keys(formData).forEach(k => { formData[k] = Array.isArray(formData[k]) ? [] : ''; });
+  savedPdfDoc = null;
+  currentSection = 0;
+  document.getElementById('successCard').style.display  = 'none';
+  document.getElementById('mainCard').style.display     = 'block';
+  document.getElementById('progressWrap').style.display = 'block';
+  goToSection(0);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+goToSection(0);
+</script>
+</body>
+</html>

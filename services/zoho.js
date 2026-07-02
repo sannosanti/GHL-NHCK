@@ -172,9 +172,87 @@ function calcularSlotsLibres(citas, fechaISO) {
   return slots;
 }
 
+// ─── HISTORIA CLÍNICA: lookup / create contacto ───────────────────────────────
+async function buscarContactoPorNombre(nombre) {
+  try {
+    const token = await getZohoAccessToken();
+    const criteria = encodeURIComponent(`Nombre_Completo="${nombre}"`);
+    const res = await fetch(
+      `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=${criteria}&max_records=1`,
+      { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
+    );
+    const data = await res.json();
+    if (data?.data?.length > 0) {
+      console.log('[historia] Contacto encontrado por nombre:', data.data[0].ID);
+      return data.data[0].ID;
+    }
+    return null;
+  } catch (err) {
+    console.error('[historia] Error buscando por nombre:', err.message);
+    return null;
+  }
+}
+
+async function buscarOCrearContactoHistoria({ nombre, movil, email, edad }) {
+  // 1. Search by phone / email (most reliable — uses existing buscarContactoAnamnesis)
+  if (movil || email) {
+    const id = await buscarContactoAnamnesis(movil || '', email || '');
+    if (id) return id;
+  }
+
+  // 2. Search by exact name
+  const idNombre = await buscarContactoPorNombre(nombre);
+  if (idNombre) return idNombre;
+
+  // 3. Create new contacto — requires phone to satisfy Creator's CRM lookup via GHL
+  if (!movil) {
+    console.log('[historia] Sin celular — no se crea contacto nuevo');
+    return null;
+  }
+
+  let ghlId = '';
+  if (env.ghlKey && env.ghlLocationId) {
+    try {
+      const parts = nombre.trim().split(/\s+/);
+      const ghlRes = await fetch('https://services.leadconnectorhq.com/contacts/', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: parts[0],
+          lastName: parts.slice(1).join(' ') || '',
+          phone: movil,
+          email: email || undefined,
+          locationId: env.ghlLocationId,
+          tags: ['historia-clinica'],
+        }),
+      });
+      const ghlData = await ghlRes.json();
+      ghlId = ghlData?.contact?.id || '';
+      console.log('[historia] GHL contact:', ghlId || 'not created');
+    } catch (e) { console.warn('[historia] GHL creation failed:', e.message); }
+  }
+
+  const token = await getZohoAccessToken();
+  const crRes = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Contactos', {
+    method: 'POST',
+    headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: {
+      Nombre_Completo: nombre,
+      Movil: movil,
+      Email: email || '',
+      CRM: ghlId,
+      Edad: String(edad || ''),
+    }}),
+  });
+  const crData = await crRes.json();
+  console.log('[historia] Contacto creado:', JSON.stringify(crData));
+  return crData?.data?.ID || null;
+}
+
 module.exports = {
   getZohoAccessToken,
   buscarContactoAnamnesis,
+  buscarOCrearContactoHistoria,
   crearEnAnamnesis,
   crearCitasCalendario,
   getDisponibilidad,

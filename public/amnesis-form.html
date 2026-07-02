@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NHC Kids · Formulario de Evaluación</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f9ff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .container { width: 100%; max-width: 480px; }
+
+    /* ── Header ── */
+    .header { text-align: center; margin-bottom: 28px; }
+    .logo { font-size: 24px; font-weight: 800; color: #0ea5e9; letter-spacing: -0.5px; }
+    .logo span { color: #1e293b; }
+    .tagline { font-size: 13px; color: #64748b; margin-top: 4px; }
+
+    /* ── Progress ── */
+    .progress-wrap { margin-bottom: 20px; }
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 7px;
+    }
+    .progress-bar { height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+      border-radius: 2px;
+      transition: width 0.35s ease;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #fff;
+      border-radius: 22px;
+      padding: 32px 28px;
+      box-shadow: 0 4px 32px rgba(14, 165, 233, 0.08);
+    }
+
+    .step { display: none; }
+    .step.active { display: block; animation: fadeUp 0.25s ease; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .step-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #0ea5e9;
+      margin-bottom: 10px;
+    }
+    .question {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1e293b;
+      line-height: 1.3;
+      margin-bottom: 6px;
+    }
+    .subtitle { font-size: 14px; color: #64748b; margin-bottom: 22px; }
+
+    /* ── Inputs ── */
+    input[type="text"],
+    input[type="number"],
+    input[type="tel"],
+    input[type="email"] {
+      width: 100%;
+      padding: 14px 16px;
+      font-size: 17px;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      color: #1e293b;
+      background: #f8fafc;
+      -webkit-appearance: none;
+    }
+    input:focus { border-color: #0ea5e9; background: #fff; box-shadow: 0 0 0 4px rgba(14,165,233,.12); }
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    /* ── Options (radio) ── */
+    .options { display: flex; flex-direction: column; gap: 10px; }
+
+    .option {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 14px 16px;
+      border: 2px solid #e2e8f0;
+      border-radius: 13px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      background: #f8fafc;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .option:hover { border-color: #bae6fd; background: #f0f9ff; }
+    .option.selected { border-color: #0ea5e9; background: #f0f9ff; }
+    .option input[type="radio"] { display: none; }
+
+    .option-dot {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      border: 2px solid #cbd5e1;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .option.selected .option-dot { border-color: #0ea5e9; background: #0ea5e9; }
+    .option.selected .option-dot::after {
+      content: '';
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #fff;
+    }
+    .option-text { font-size: 15px; color: #1e293b; font-weight: 500; }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      width: 100%;
+      padding: 16px;
+      background: #0ea5e9;
+      color: #fff;
+      border: none;
+      border-radius: 13px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 24px;
+      transition: background 0.2s, transform 0.1s;
+      letter-spacing: 0.1px;
+    }
+    .btn-primary:hover:not(:disabled) { background: #0284c7; }
+    .btn-primary:active:not(:disabled) { transform: scale(0.98); }
+    .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+
+    .btn-back {
+      width: 100%;
+      padding: 12px;
+      background: transparent;
+      color: #94a3b8;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 8px;
+      border-radius: 8px;
+      transition: color 0.15s;
+    }
+    .btn-back:hover { color: #64748b; }
+
+    /* ── Inline error ── */
+    .error-msg { color: #ef4444; font-size: 13px; margin-top: 8px; display: none; }
+
+    /* ── Success screen ── */
+    .success { text-align: center; padding: 12px 0; }
+    .success-icon {
+      width: 76px; height: 76px;
+      background: #dcfce7;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 34px;
+    }
+    .success h2 { font-size: 23px; font-weight: 800; color: #1e293b; margin-bottom: 12px; line-height: 1.3; }
+    .success p { font-size: 15px; color: #64748b; line-height: 1.65; }
+
+    /* ── Error screen ── */
+    .error-screen { text-align: center; padding: 12px 0; }
+    .error-icon {
+      width: 76px; height: 76px;
+      background: #fee2e2;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 34px;
+    }
+    .error-screen h2 { font-size: 22px; font-weight: 700; color: #1e293b; margin-bottom: 12px; }
+    #errorDetail { font-size: 14px; color: #64748b; line-height: 1.6; margin-bottom: 24px; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 3px solid rgba(255,255,255,.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="logo">NHC <span>Kids</span></div>
+    <div class="tagline">Formulario de evaluación inicial</div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-info">
+      <span id="stepLabel">Paso 1 de 7</span>
+      <span id="stepPct">14%</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill" style="width:14%"></div>
+    </div>
+  </div>
+
+  <div class="card">
+
+    <!-- Step 1 — Nombre del niño -->
+    <div class="step active" id="step-1">
+      <div class="step-label">Paciente</div>
+      <div class="question">¿Cuál es el nombre del niño o niña?</div>
+      <div class="subtitle">Nombre completo del paciente que recibirá la evaluación.</div>
+      <input type="text" id="nombreNino" placeholder="Ej: Valentina García" autocomplete="off" />
+      <div class="error-msg" id="err-1">Por favor ingresá el nombre completo.</div>
+      <button class="btn-primary" onclick="next(1)">Siguiente →</button>
+    </div>
+
+    <!-- Step 2 — Edad -->
+    <div class="step" id="step-2">
+      <div class="step-label">Datos del paciente</div>
+      <div class="question">¿Cuántos años tiene?</div>
+      <div class="subtitle">La evaluación está disponible a partir de los 7 años.</div>
+      <input type="number" id="edad" placeholder="Ej: 9" min="1" max="18" />
+      <div class="error-msg" id="err-2">Ingresá una edad válida (1–18 años).</div>
+      <button class="btn-primary" onclick="next(2)">Siguiente →</button>
+      <button class="btn-back" onclick="back(2)">← Atrás</button>
+    </div>
+
+    <!-- Step 3 — Género -->
+    <div class="step" id="step-3">
+      <div class="step-label">Datos del paciente</div>
+      <div class="question">¿Es niño o niña?</div>
+      <div class="subtitle"> </div>
+      <div class="options" id="opts-genero">
+        <label class="option" onclick="selectOption('genero','Masculino',this)">
+          <input type="radio" name="genero" value="Masculino" />
+          <div class="option-dot"></div>
+          <span class="option-text">Niño</span>
+        </label>
+        <label class="option" onclick="selectOption('genero','Femenino',this)">
+          <input type="radio" name="genero" value="Femenino" />
+          <div class="option-dot"></div>
+          <span class="option-text">Niña</span>
+        </label>
+        <label class="option" onclick="selectOption('genero','Otro',this)">
+          <input type="radio" name="genero" value="Otro" />
+          <div class="option-dot"></div>
+          <span class="option-text">Otro / Prefiero no decir</span>
+        </label>
+      </div>
+      <div class="error-msg" id="err-3">Por favor seleccioná una opción.</div>
+      <button class="btn-primary" onclick="next(3)">Siguiente →</button>
+      <button class="btn-back" onclick="back(3)">← Atrás</button>
+    </div>
+
+    <!-- Step 4 — Síntoma principal -->
+    <div class="step" id="step-4">
+      <div class="step-label">Motivo de consulta</div>
+      <div class="question">¿Cuál es la principal dificultad que presenta?</div>
+      <div class="subtitle">Seleccioná la que mejor describe la situación.</div>
+      <div class="options" id="opts-sintoma">
+        <label class="option" onclick="selectOption('sintoma','Atención/concentración',this)">
+          <input type="radio" name="sintoma" value="Atención/concentración" />
+          <div class="option-dot"></div>
+          <span class="option-text">Atención / concentración</span>
+        </label>
+        <label class="option" onclick="selectOption('sintoma','Bajo rendimiento',this)">
+          <input type="radio" name="sintoma" value="Bajo rendimiento" />
+          <div class="option-dot"></div>
+          <span class="option-text">Bajo rendimiento escolar</span>
+        </label>
+        <label class="option" onclick="selectOption('sintoma','Desregulación emocional',this)">
+          <input type="radio" name="sintoma" value="Desregulación emocional" />
+          <div class="option-dot"></div>
+          <span class="option-text">Desregulación emocional</span>
+        </label>
+        <label class="option" onclick="selectOption('sintoma','Conducta impulsiva',this)">
+          <input type="radio" name="sintoma" value="Conducta impulsiva" />
+          <div class="option-dot"></div>
+          <span class="option-text">Conducta impulsiva</span>
+        </label>
+        <label class="option" onclick="selectOption('sintoma','Ansiedad/inseguridad',this)">
+          <input type="radio" name="sintoma" value="Ansiedad/inseguridad" />
+          <div class="option-dot"></div>
+          <span class="option-text">Ansiedad / inseguridad</span>
+        </label>
+        <label class="option" onclick="selectOption('sintoma','Otro',this)">
+          <input type="radio" name="sintoma" value="Otro" />
+          <div class="option-dot"></div>
+          <span class="option-text">Otro</span>
+        </label>
+      </div>
+      <div class="error-msg" id="err-4">Por favor seleccioná una opción.</div>
+      <button class="btn-primary" onclick="next(4)">Siguiente →</button>
+      <button class="btn-back" onclick="back(4)">← Atrás</button>
+    </div>
+
+    <!-- Step 5 — ¿Asiste al colegio? -->
+    <div class="step" id="step-5">
+      <div class="step-label">Situación escolar</div>
+      <div class="question">¿Está asistiendo al colegio actualmente?</div>
+      <div class="subtitle"> </div>
+      <div class="options" id="opts-estudia">
+        <label class="option" onclick="selectOption('estudia','si',this)">
+          <input type="radio" name="estudia" value="si" />
+          <div class="option-dot"></div>
+          <span class="option-text">Sí, asiste al colegio</span>
+        </label>
+        <label class="option" onclick="selectOption('estudia','no',this)">
+          <input type="radio" name="estudia" value="no" />
+          <div class="option-dot"></div>
+          <span class="option-text">No</span>
+        </label>
+      </div>
+      <div class="error-msg" id="err-5">Por favor seleccioná una opción.</div>
+      <button class="btn-primary" onclick="next(5)">Siguiente →</button>
+      <button class="btn-back" onclick="back(5)">← Atrás</button>
+    </div>
+
+    <!-- Step 6 — Celular -->
+    <div class="step" id="step-6">
+      <div class="step-label">Tus datos de contacto</div>
+      <div class="question">¿Cuál es tu número de celular?</div>
+      <div class="subtitle">Lo usaremos para coordinar la cita contigo.</div>
+      <input type="tel" id="movil" placeholder="Ej: 3001234567" />
+      <div class="error-msg" id="err-6">Ingresá un número de celular válido.</div>
+      <button class="btn-primary" onclick="next(6)">Siguiente →</button>
+      <button class="btn-back" onclick="back(6)">← Atrás</button>
+    </div>
+
+    <!-- Step 7 — Email -->
+    <div class="step" id="step-7">
+      <div class="step-label">Tus datos de contacto</div>
+      <div class="question">¿Cuál es tu correo electrónico?</div>
+      <div class="subtitle">Te enviamos los detalles de la evaluación por este medio.</div>
+      <input type="email" id="email" placeholder="Ej: maria@gmail.com" />
+      <div class="error-msg" id="err-7">Ingresá un correo electrónico válido.</div>
+      <button class="btn-primary" id="btnSubmit" onclick="submitForm()">Enviar</button>
+      <button class="btn-back" onclick="back(7)">← Atrás</button>
+    </div>
+
+    <!-- Success -->
+    <div class="step" id="step-success">
+      <div class="success">
+        <div class="success-icon">✓</div>
+        <h2>¡Listo! Recibimos tu información</h2>
+        <p>Un asesor de NHC Kids se comunicará pronto para coordinar tu evaluación.<br><br>Si tenés preguntas, escribinos por WhatsApp.</p>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div class="step" id="step-error">
+      <div class="error-screen">
+        <div class="error-icon">✕</div>
+        <h2>Ocurrió un error</h2>
+        <p id="errorDetail"></p>
+        <button class="btn-primary" onclick="showStep(7)">Intentar de nuevo</button>
+      </div>
+    </div>
+
+  </div><!-- /card -->
+</div><!-- /container -->
+
+<script>
+  // ── Config ──────────────────────────────────────────────────────────────────
+  // Empty = same origin (when served by the NHC server at /public/amnesis-form.html).
+  // Override with full URL if hosted elsewhere: const SERVER_URL = 'https://your-server.com';
+  const SERVER_URL = '';
+
+  // ── State ───────────────────────────────────────────────────────────────────
+  const TOTAL = 7;
+  let currentStep = 1;
+
+  const formData = {
+    nombreNino: '',
+    edad: '',
+    genero: '',
+    sintoma: '',
+    estudia: '',
+    movil: '',
+    email: '',
+  };
+
+  // ── Navigation ───────────────────────────────────────────────────────────────
+  function showStep(n) {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+
+    const id = (n === 'success') ? 'step-success'
+             : (n === 'error')   ? 'step-error'
+             : `step-${n}`;
+    document.getElementById(id).classList.add('active');
+
+    const wrap = document.getElementById('progressWrap');
+    if (n === 'success' || n === 'error') {
+      wrap.style.display = 'none';
+      return;
+    }
+    wrap.style.display = 'block';
+    currentStep = n;
+    const pct = Math.round((n / TOTAL) * 100);
+    document.getElementById('stepLabel').textContent = `Paso ${n} de ${TOTAL}`;
+    document.getElementById('stepPct').textContent = `${pct}%`;
+    document.getElementById('progressFill').style.width = `${pct}%`;
+  }
+
+  function selectOption(field, value, el) {
+    formData[field] = value;
+    el.closest('.options').querySelectorAll('.option').forEach(o => o.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  // ── Validation ───────────────────────────────────────────────────────────────
+  function validate(step) {
+    let valid = true;
+
+    if (step === 1) {
+      formData.nombreNino = document.getElementById('nombreNino').value.trim();
+      valid = formData.nombreNino.length > 1;
+    } else if (step === 2) {
+      formData.edad = document.getElementById('edad').value.trim();
+      const n = parseInt(formData.edad, 10);
+      valid = !isNaN(n) && n >= 1 && n <= 18;
+    } else if (step === 3) {
+      valid = !!formData.genero;
+    } else if (step === 4) {
+      valid = !!formData.sintoma;
+    } else if (step === 5) {
+      valid = !!formData.estudia;
+    } else if (step === 6) {
+      formData.movil = document.getElementById('movil').value.trim();
+      valid = formData.movil.replace(/\D/g, '').length >= 7;
+    } else if (step === 7) {
+      formData.email = document.getElementById('email').value.trim();
+      valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email);
+    }
+
+    const errEl = document.getElementById(`err-${step}`);
+    if (errEl) errEl.style.display = valid ? 'none' : 'block';
+    return valid;
+  }
+
+  function next(step) {
+    if (!validate(step)) return;
+    showStep(step + 1);
+  }
+
+  function back(step) {
+    showStep(step - 1);
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────────
+  async function submitForm() {
+    if (!validate(7)) return;
+
+    const btn = document.getElementById('btnSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Enviando...';
+
+    try {
+      const res = await fetch(`${SERVER_URL}/evaluacion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+
+      const result = await res.json();
+
+      if (res.ok && result.ok) {
+        showStep('success');
+      } else {
+        document.getElementById('errorDetail').textContent =
+          result.error || `Error ${res.status}. Por favor intentá de nuevo.`;
+        showStep('error');
+      }
+    } catch (e) {
+      document.getElementById('errorDetail').textContent =
+        'No se pudo conectar con el servidor. Verificá tu conexión a internet e intentá de nuevo.';
+      showStep('error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Enviar';
+    }
+  }
+
+  // ── Enter key ────────────────────────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (currentStep === 6) next(6);
+    else if (currentStep === 7) submitForm();
+    else if (currentStep <= 2) next(currentStep);
+  });
+</script>
+</body>
+</html>
