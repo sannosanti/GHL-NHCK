@@ -10,6 +10,7 @@ const analyticsRouter = require('./analytics');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
 const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
+const { startPendingWebhookJob } = require('./jobs/pendingWebhookJob');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
 const { getZohoAccessToken, crearEnAnamnesis, buscarOCrearContactoHistoria } = require('./services/zoho');
@@ -467,5 +468,6 @@ db.initDB().then(() => {
   startRecoveryJob();
   startWeeklyReport();
   startDailyReport();
+  startPendingWebhookJob();
   app.listen(env.port, () => console.log(`Servidor corriendo en puerto ${env.port}`));
 }).catch(err => { console.error('Error DB:', err); process.exit(1); });

@@ -417,16 +417,19 @@ async function ghlWebhookHandler(req, res) {
       // to /conversations/search — but that search index lags the real conversation
       // state by an unpredictable amount, even for contacts with an existing, hours-old
       // conversation (observed up to ~20s in production, not just brand-new ad-click
-      // contacts). The webhook already responded 200 above, so there's no timeout
-      // pressure — retry generously rather than dropping the message.
-      for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 4000));
+      // contacts). Short in-process retry for the common case; if GHL is still behind
+      // after that, hand off to pending_webhooks so jobs/pendingWebhookJob.js keeps
+      // trying in the background instead of blocking this request indefinitely (and
+      // so the message survives a deploy/restart, unlike an in-memory retry).
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, 3000));
         conversationId = await ghl.getConversationId(contactId);
         if (conversationId) break;
       }
     }
     if (!conversationId) {
-      console.error(`WEBHOOK: conversationId not found for contactId=${contactId} after retries — message dropped`);
+      console.error(`WEBHOOK: conversationId not found for contactId=${contactId} after retries — queueing for background retry`);
+      await db.queuePendingWebhook(contactId, req.body);
       return;
     }
 
@@ -482,11 +485,15 @@ async function ghlWebhookHandler(req, res) {
             messageBody = lastMsg.body;
             skipAudioFlow = true;
           } else {
-            console.log('MEDIA19: attachment found but not audio, ignoring');
+            // GHL hasn't indexed the message content yet either — queue for retry
+            // instead of dropping (same eventual-consistency issue as conversationId).
+            console.log('MEDIA19: no content found yet — queueing for background retry');
+            await db.queuePendingWebhook(contactId, req.body);
             return;
           }
         } catch (e) {
           console.error('MEDIA19 lookup error:', e.message);
+          await db.queuePendingWebhook(contactId, req.body);
           return;
         }
       }

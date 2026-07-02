@@ -105,6 +105,13 @@ async function initDB() {
       source_update_id TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS pending_webhooks (
+      contact_id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      attempts INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      last_attempt_at TIMESTAMP
+    );
   `);
   console.log('Base de datos inicializada ✓');
 }
@@ -134,6 +141,40 @@ async function limpiarContactoDB(contactId) {
     await pool.query('DELETE FROM pending_payments WHERE contact_id = $1', [contactId]);
     console.log(`DB limpiada para contacto: ${contactId}`);
   } catch (err) { console.error('Error limpiando contacto DB:', err.message); }
+}
+
+// GHL's search index can lag the actual write by more than any reasonable
+// in-request wait. When a webhook can't resolve conversationId/message
+// content in time, it's queued here instead of being dropped, and
+// jobs/pendingWebhookJob.js retries it in the background — surviving
+// deploys/restarts, unlike an in-memory retry loop.
+async function queuePendingWebhook(contactId, payload) {
+  try {
+    await pool.query(`
+      INSERT INTO pending_webhooks (contact_id, payload, attempts, created_at)
+      VALUES ($1,$2,0,NOW())
+      ON CONFLICT (contact_id) DO UPDATE SET payload=$2, last_attempt_at=NULL
+    `, [contactId, JSON.stringify(payload)]);
+  } catch (err) { console.error('Error queueing pending webhook:', err.message); }
+}
+
+async function getPendingWebhooks() {
+  try {
+    const res = await pool.query('SELECT * FROM pending_webhooks ORDER BY created_at ASC LIMIT 50');
+    return res.rows;
+  } catch (err) { console.error('Error fetching pending webhooks:', err.message); return []; }
+}
+
+async function bumpPendingWebhookAttempt(contactId) {
+  try {
+    await pool.query('UPDATE pending_webhooks SET attempts = attempts + 1, last_attempt_at = NOW() WHERE contact_id=$1', [contactId]);
+  } catch (err) { console.error('Error bumping pending webhook:', err.message); }
+}
+
+async function deletePendingWebhook(contactId) {
+  try {
+    await pool.query('DELETE FROM pending_webhooks WHERE contact_id=$1', [contactId]);
+  } catch (err) { console.error('Error deleting pending webhook:', err.message); }
 }
 
 async function getCachedContact(contactId) {
@@ -417,4 +458,8 @@ module.exports = {
   getRecentInsightSuggestions,
   hasAsesorAnalysis,
   markAsesorAnalyzed,
+  queuePendingWebhook,
+  getPendingWebhooks,
+  bumpPendingWebhookAttempt,
+  deletePendingWebhook,
 };

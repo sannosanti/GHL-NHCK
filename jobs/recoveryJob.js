@@ -135,7 +135,7 @@ async function runRecoveryJob() {
 
       // 2. Send via GHL — detect channel so IG/FB conversations reply correctly
       const { getConversationChannel } = require('../services/ghl');
-      const channel = await getConversationChannel(conversation_id).catch(() => 'WhatsApp');
+      const channel = await getConversationChannel(contact_id).catch(() => 'WhatsApp');
       await sendMessage(conversation_id, recoveryMessage, contact_id, channel);
 
       // 3. Apply label and update recovery_status
