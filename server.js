@@ -1,5 +1,18 @@
 'use strict';
 
+// Outbound HTTPS calls across this process (GHL, Anthropic, Zoho — every
+// node-fetch call that doesn't pass its own `agent` option) have been failing
+// intermittently with "Premature close" for hours-old server instances while
+// a freshly started process never reproduces it. That pattern points at
+// Node's default keep-alive https.globalAgent accumulating stale pooled
+// sockets over the process's lifetime rather than any one destination being
+// unreliable. Disabling keep-alive globally trades a bit of per-request
+// latency (fresh TCP+TLS handshake each time) for removing this entire
+// failure class everywhere in the app, not just the GHL-specific fix applied
+// earlier in services/ghl.js. Must run before any other module is required,
+// in case something creates a fetch/agent at require-time.
+require('https').globalAgent = new (require('https').Agent)({ keepAlive: false });
+
 const express = require('express');
 const { env } = require('./config');
 const db = require('./db');
