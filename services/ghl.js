@@ -77,9 +77,15 @@ async function getContact(contactId) {
 }
 
 async function getConversationId(contactId) {
-  const { data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
+  const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
   });
+  // A missing `conversations` array on a non-200 (rate limit, auth, GHL-side error)
+  // looks identical to "not indexed yet" if left unlogged — surface it so retries
+  // aren't silently masking a real API failure.
+  if (!data || !Array.isArray(data.conversations)) {
+    console.error(`getConversationId: unexpected response for contactId=${contactId}, status=${res.status}, body=${JSON.stringify(data).substring(0, 300)}`);
+  }
   return data?.conversations?.[0]?.id || null;
 }
 
