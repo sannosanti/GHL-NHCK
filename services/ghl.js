@@ -1,8 +1,18 @@
 'use strict';
 
 const fetch = require('node-fetch');
+const https = require('https');
 const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino } = require('../config');
 const db = require('../db');
+
+// Today's incidents (socket left dirty by an unconsumed body, then repeated
+// "Premature close" on a specific contact's requests that only a fresh process
+// — never the long-running server — could get past) both point to the same
+// root cause: this process's pooled keep-alive connections to GHL degrade over
+// hours of operation and don't recover. A fresh TCP+TLS handshake per request
+// costs some latency but removes the whole "stale pooled socket" failure class
+// instead of chasing its symptoms one endpoint at a time.
+const ghlAgent = new https.Agent({ keepAlive: false });
 
 // Always drain the response body — an unread body leaves the keep-alive socket
 // in a bad state, which node-fetch later surfaces as "Premature close" on an
@@ -19,7 +29,7 @@ const db = require('../db');
 async function fetchGHL(url, options = {}, retries = 1) {
   for (let attempt = 0; ; attempt++) {
     try {
-      const res = await fetch(url, options);
+      const res = await fetch(url, { ...options, agent: ghlAgent });
       let data = null;
       try {
         data = await res.json();
