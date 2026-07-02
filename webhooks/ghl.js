@@ -413,11 +413,14 @@ async function ghlWebhookHandler(req, res) {
     setTimeout(() => { delete messageBuffers[dedupKey]; }, 6000);
 
     if (!conversationId) {
-      // Brand-new contacts from ad-click flows (Facebook/Instagram → WhatsApp) can take
-      // longer than a few seconds to become searchable in GHL. The webhook already
-      // responded 200 above, so there's no timeout pressure — retry generously.
-      for (let i = 0; i < 8; i++) {
-        await new Promise(r => setTimeout(r, 3000));
+      // GHL's webhook payload rarely includes conversationId directly, so we fall back
+      // to /conversations/search — but that search index lags the real conversation
+      // state by an unpredictable amount, even for contacts with an existing, hours-old
+      // conversation (observed up to ~20s in production, not just brand-new ad-click
+      // contacts). The webhook already responded 200 above, so there's no timeout
+      // pressure — retry generously rather than dropping the message.
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 4000));
         conversationId = await ghl.getConversationId(contactId);
         if (conversationId) break;
       }
