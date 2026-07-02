@@ -450,6 +450,7 @@ async function ghlWebhookHandler(req, res) {
     const estado = convData?.estado || 'nuevo';
 
     // AUDIOS — transcribe with Whisper, then continue normal flow
+    let skipAudioFlow = false;
     if (isAudio) {
       let audioUrl =
         imageUrl ||
@@ -466,6 +467,11 @@ async function ghlWebhookHandler(req, res) {
           const candidate = lastMsg.attachmentUrl || (lastMsg.body?.startsWith('http') ? lastMsg.body : null);
           if (candidate && /\.(ogg|opus|mp3|mp4|m4a|wav|webm|aac|amr)(\?|$)/i.test(candidate)) {
             audioUrl = candidate;
+          } else if (lastMsg.body) {
+            // type=19 with real text (e.g. Facebook/Instagram Click-to-WhatsApp ad lead) — not media, treat as text
+            console.log('MEDIA19: not audio, using fetched text instead');
+            messageBody = lastMsg.body;
+            skipAudioFlow = true;
           } else {
             console.log('MEDIA19: attachment found but not audio, ignoring');
             return;
@@ -476,22 +482,33 @@ async function ghlWebhookHandler(req, res) {
         }
       }
 
-      console.log('AUDIO RECIBIDO — URL:', audioUrl ? audioUrl.substring(0, 60) : 'NO encontrada');
+      if (!skipAudioFlow) {
+        console.log('AUDIO RECIBIDO — URL:', audioUrl ? audioUrl.substring(0, 60) : 'NO encontrada');
 
-      if (audioUrl) {
-        try {
-          const transcription = await whisper.transcribeAudio(audioUrl);
-          if (transcription) {
-            console.log('AUDIO TRANSCRITO:', transcription.substring(0, 80));
-            messageBody = transcription;
-            // fall through to normal processing
-          } else {
-            await humanDelay();
-            await ghl.sendMessage(conversationId, 'No pude entender el audio 🎙️ ¿Me lo podés escribir?', contactId, channel);
+        if (audioUrl) {
+          try {
+            const transcription = await whisper.transcribeAudio(audioUrl);
+            if (transcription) {
+              console.log('AUDIO TRANSCRITO:', transcription.substring(0, 80));
+              messageBody = transcription;
+              // fall through to normal processing
+            } else {
+              await humanDelay();
+              await ghl.sendMessage(conversationId, 'No pude entender el audio 🎙️ ¿Me lo podés escribir?', contactId, channel);
+              return;
+            }
+          } catch (err) {
+            console.error('Whisper error:', err.message);
+            if (!tags.includes('escalado nhck')) {
+              await ghl.addTag(contactId, 'escalado nhck');
+              await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
+              triggerAnalysis(conversationId, contactId, 'audio_escalado');
+              await humanDelay();
+              await ghl.sendMessage(conversationId, '¡Hola! Por el momento no puedo escuchar audios, pero con gusto te atiendo por escrito. ¿Puedes contarme qué necesitas? Si prefieres, te puedo conectar con un asesor de nuestro equipo 😊', contactId, channel);
+            }
             return;
           }
-        } catch (err) {
-          console.error('Whisper error:', err.message);
+        } else {
           if (!tags.includes('escalado nhck')) {
             await ghl.addTag(contactId, 'escalado nhck');
             await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
@@ -501,15 +518,6 @@ async function ghlWebhookHandler(req, res) {
           }
           return;
         }
-      } else {
-        if (!tags.includes('escalado nhck')) {
-          await ghl.addTag(contactId, 'escalado nhck');
-          await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
-          triggerAnalysis(conversationId, contactId, 'audio_escalado');
-          await humanDelay();
-          await ghl.sendMessage(conversationId, '¡Hola! Por el momento no puedo escuchar audios, pero con gusto te atiendo por escrito. ¿Puedes contarme qué necesitas? Si prefieres, te puedo conectar con un asesor de nuestro equipo 😊', contactId, channel);
-        }
-        return;
       }
     }
 
