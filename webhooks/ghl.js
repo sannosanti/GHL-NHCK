@@ -419,7 +419,10 @@ async function ghlWebhookHandler(req, res) {
         if (conversationId) break;
       }
     }
-    if (!conversationId) return;
+    if (!conversationId) {
+      console.error(`WEBHOOK: conversationId not found for contactId=${contactId} after retries — message dropped`);
+      return;
+    }
 
     const channel = await ghl.getConversationChannel(conversationId).catch(() => 'WhatsApp');
 
