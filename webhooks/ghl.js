@@ -413,8 +413,11 @@ async function ghlWebhookHandler(req, res) {
     setTimeout(() => { delete messageBuffers[dedupKey]; }, 6000);
 
     if (!conversationId) {
-      for (let i = 0; i < 3; i++) {
-        await new Promise(r => setTimeout(r, 2000));
+      // Brand-new contacts from ad-click flows (Facebook/Instagram → WhatsApp) can take
+      // longer than a few seconds to become searchable in GHL. The webhook already
+      // responded 200 above, so there's no timeout pressure — retry generously.
+      for (let i = 0; i < 8; i++) {
+        await new Promise(r => setTimeout(r, 3000));
         conversationId = await ghl.getConversationId(contactId);
         if (conversationId) break;
       }
