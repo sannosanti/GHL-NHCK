@@ -83,12 +83,26 @@ async function getConversationId(contactId) {
   return data?.conversations?.[0]?.id || null;
 }
 
-async function getConversationChannel(conversationId) {
+// Maps GHL's search-endpoint conversation "type" (a readable string, e.g.
+// "TYPE_FACEBOOK") to the value the send-message endpoint's `type` field
+// expects (e.g. "FB"). The single-conversation fetch endpoint returns this
+// as an undocumented numeric code instead, so we go through search by
+// contactId, which reliably returns the string form.
+const CHANNEL_TYPE_MAP = {
+  TYPE_WHATSAPP: 'WhatsApp',
+  TYPE_FACEBOOK: 'FB',
+  TYPE_INSTAGRAM: 'IG',
+  TYPE_SMS: 'SMS',
+  TYPE_EMAIL: 'Email',
+};
+
+async function getConversationChannel(contactId) {
   try {
-    const { data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/${conversationId}`, {
+    const { data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
     });
-    return data?.conversation?.type || 'WhatsApp';
+    const type = data?.conversations?.[0]?.lastMessageType;
+    return CHANNEL_TYPE_MAP[type] || 'WhatsApp';
   } catch { return 'WhatsApp'; }
 }
 

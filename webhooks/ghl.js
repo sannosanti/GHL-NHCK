@@ -52,7 +52,7 @@ async function flushTextQueue(conversationId) {
       return;
     }
 
-    const channel = await ghl.getConversationChannel(conversationId).catch(() => 'WhatsApp');
+    const channel = await ghl.getConversationChannel(contactId).catch(() => 'WhatsApp');
     const convData = await db.getConversationData(conversationId);
     const estado = convData?.estado || 'nuevo';
     const triaje = convData?.triaje || {};
@@ -427,7 +427,7 @@ async function ghlWebhookHandler(req, res) {
       return;
     }
 
-    const channel = await ghl.getConversationChannel(conversationId).catch(() => 'WhatsApp');
+    const channel = await ghl.getConversationChannel(contactId).catch(() => 'WhatsApp');
 
     let convData = await db.getConversationData(conversationId);
     if (convData?.recovery_status) {
