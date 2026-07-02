@@ -4,6 +4,24 @@ const fetch = require('node-fetch');
 const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino } = require('../config');
 const db = require('../db');
 
+// Always drain the response body — an unread body leaves the keep-alive socket
+// in a bad state, which node-fetch later surfaces as "Premature close" on an
+// unrelated request reusing that same pooled connection. Retry once on any
+// network-level failure (the drain itself can also hit a dead socket).
+async function fetchGHL(url, options = {}, retries = 1) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      let data = null;
+      try { data = await res.json(); } catch { /* empty or non-JSON body */ }
+      return { res, data };
+    } catch (err) {
+      if (attempt >= retries) throw err;
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+}
+
 // ─── GHL: GUARDAR CAMPOS NIÑO ─────────────────────────────────────────────────
 async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNino, estudia, sintoma }) {
   try {
@@ -14,7 +32,7 @@ async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNin
       { id: 'nhck__estudia', value: estudia ? 'Sí' : 'No' },
       { id: 'nhck__sntoma_principal', value: mapearSintoma(sintoma) },
     ];
-    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+    await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ customFields }),
@@ -26,7 +44,7 @@ async function guardarCamposNinoGHL(contactId, { nombreNino, edadNino, generoNin
 
 async function guardarSintomaGHL(contactId, sintoma) {
   try {
-    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+    await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ customFields: [{ id: 'nhck__sntoma_principal', value: mapearSintoma(sintoma) }] }),
@@ -37,7 +55,7 @@ async function guardarSintomaGHL(contactId, sintoma) {
 
 async function guardarCiudadGHL(contactId, ciudad) {
   try {
-    await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+    await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ city: ciudad }),
@@ -50,40 +68,36 @@ async function guardarCiudadGHL(contactId, ciudad) {
 async function getContact(contactId) {
   const cached = await db.getCachedContact(contactId);
   if (cached) return { contact: cached };
-  const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+  const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
   });
   if (res.status === 404) return { contact: null, deleted: true };
-  const data = await res.json();
-  if (data.contact) await db.setCachedContact(contactId, data.contact);
+  if (data?.contact) await db.setCachedContact(contactId, data.contact);
   return data;
 }
 
 async function getConversationId(contactId) {
-  const res = await fetch(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
+  const { data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/search?contactId=${contactId}&locationId=${env.ghlLocationId}`, {
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
   });
-  const data = await res.json();
-  return data.conversations?.[0]?.id || null;
+  return data?.conversations?.[0]?.id || null;
 }
 
 async function getConversationChannel(conversationId) {
   try {
-    const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}`, {
+    const { data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/${conversationId}`, {
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
     });
-    const data = await res.json();
-    return data.conversation?.type || 'WhatsApp';
+    return data?.conversation?.type || 'WhatsApp';
   } catch { return 'WhatsApp'; }
 }
 
 async function getLastMessage(conversationId) {
   try {
-    const res = await fetch(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
+    const { data } = await fetchGHL(`https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=5`, {
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
     });
-    const data = await res.json();
-    const messages = data.messages?.messages || data.messages || [];
+    const messages = data?.messages?.messages || data?.messages || [];
     if (!Array.isArray(messages) || messages.length === 0) return { body: '', id: null, attachmentUrl: null };
     const last = messages.find(m => m.direction === 'inbound') || messages[0];
     const rawAttachments = last?.attachments || [];
@@ -96,17 +110,16 @@ async function getLastMessage(conversationId) {
 
 async function getConversationMessages(conversationId, limit = 30) {
   try {
-    const res = await fetch(
+    const { data } = await fetchGHL(
       `https://services.leadconnectorhq.com/conversations/${conversationId}/messages?limit=${limit}`,
       { headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' } }
     );
-    const data = await res.json();
-    return data.messages?.messages || data.messages || [];
+    return data?.messages?.messages || data?.messages || [];
   } catch { return []; }
 }
 
 async function addTag(contactId, tag) {
-  await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+  await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ tags: [tag] }),
@@ -115,7 +128,7 @@ async function addTag(contactId, tag) {
 }
 
 async function removeTag(contactId, tag) {
-  await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
+  await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}/tags`, {
     method: 'DELETE',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ tags: [tag] }),
@@ -124,12 +137,11 @@ async function removeTag(contactId, tag) {
 }
 
 async function sendMessage(conversationId, message, contactId, channel = 'WhatsApp') {
-  const res = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+  const { data } = await fetchGHL('https://services.leadconnectorhq.com/conversations/messages', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: channel, conversationId, contactId, message }),
   });
-  const data = await res.json();
   console.log('SEND MSG:', JSON.stringify(data));
 }
 
@@ -142,7 +154,7 @@ async function sendMessages(conversationId, messages, contactId, channel = 'What
 
 async function crearOportunidad(contactId, nombre, stageId) {
   try {
-    const res = await fetch('https://services.leadconnectorhq.com/opportunities/', {
+    const { data } = await fetchGHL('https://services.leadconnectorhq.com/opportunities/', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -151,50 +163,45 @@ async function crearOportunidad(contactId, nombre, stageId) {
         monetaryValue: 395000,
       }),
     });
-    const data = await res.json();
     console.log('OPORTUNIDAD CREADA:', JSON.stringify(data));
-    return data.opportunity?.id || null;
+    return data?.opportunity?.id || null;
   } catch (err) { console.error('Error creando oportunidad:', err.message); return null; }
 }
 
 async function addNote(contactId, body) {
   try {
-    const res = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/notes`, {
+    const { data } = await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}/notes`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
     });
-    const data = await res.json();
     console.log('[addNote] Response:', JSON.stringify(data));
   } catch (err) { console.error('[addNote] Error:', err.message); }
 }
 
 async function sendInternalNote(conversationId, contactId, message) {
   try {
-    const res = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+    const { data } = await fetchGHL('https://services.leadconnectorhq.com/conversations/messages', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'Custom', conversationId, contactId, message }),
     });
-    const data = await res.json();
     console.log('[sendInternalNote] Response:', JSON.stringify(data));
   } catch (err) { console.error('[sendInternalNote] Error:', err.message); }
 }
 
 async function actualizarEtapaOportunidad(contactId, stageId) {
   try {
-    const res = await fetch(`https://services.leadconnectorhq.com/opportunities/search?location_id=${env.ghlLocationId}&pipeline_id=${constants.GHL_PIPELINE_ID}&contact_id=${contactId}`, {
+    const { data } = await fetchGHL(`https://services.leadconnectorhq.com/opportunities/search?location_id=${env.ghlLocationId}&pipeline_id=${constants.GHL_PIPELINE_ID}&contact_id=${contactId}`, {
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-07-28' },
     });
-    const data = await res.json();
-    const opp = data.opportunities?.[0];
+    const opp = data?.opportunities?.[0];
     if (!opp) return null;
-    const resUpdate = await fetch(`https://services.leadconnectorhq.com/opportunities/${opp.id}`, {
+    const { data: dataUpdate } = await fetchGHL(`https://services.leadconnectorhq.com/opportunities/${opp.id}`, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({ pipelineStageId: stageId }),
     });
-    const dataUpdate = await resUpdate.json();
     console.log('ETAPA ACTUALIZADA:', JSON.stringify(dataUpdate));
     return opp.id;
   } catch (err) { console.error('Error actualizando etapa:', err.message); return null; }
