@@ -19,6 +19,7 @@ const db = require('./db');
 const { removeTag, getContact, getConversationId } = require('./services/ghl');
 const { ghlWebhookHandler, ghlCrearEnCreatorHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
+const { zohoCitaWebhookHandler } = require('./webhooks/zoho');
 const analyticsRouter = require('./analytics');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
 const { startWeeklyReport } = require('./jobs/weeklyReport');
@@ -463,6 +464,7 @@ app.use('/dashboard', analyticsRouter);
 app.post('/webhook/ghl', ghlWebhookHandler);
 app.post('/webhook/ghl-crear-contacto', ghlCrearEnCreatorHandler);
 app.post('/webhook/wompi', wompiWebhookHandler);
+app.post('/webhook/zoho-cita', zohoCitaWebhookHandler);
 app.get('/pago-exitoso', pagoExitosoHandler);
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────

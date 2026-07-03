@@ -129,6 +129,18 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   return { cita1: data1, cita2: data2 };
 }
 
+async function getContactoPorId(contactoID) {
+  try {
+    const token = await getZohoAccessToken();
+    const res = await fetch(
+      `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=(ID%3D${contactoID})&max_records=1`,
+      { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
+    );
+    const data = await res.json();
+    return data?.data?.[0] || null;
+  } catch (err) { console.error('Error obteniendo contacto Zoho:', err.message); return null; }
+}
+
 // ─── DISPONIBILIDAD ───────────────────────────────────────────────────────────
 async function getDisponibilidad(fechaISO) {
   try {
@@ -255,6 +267,7 @@ module.exports = {
   buscarOCrearContactoHistoria,
   crearEnAnamnesis,
   crearCitasCalendario,
+  getContactoPorId,
   getDisponibilidad,
   calcularSlotsLibres,
 };

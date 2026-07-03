@@ -257,6 +257,29 @@ async function actualizarEtapaOportunidad(contactId, stageId) {
   } catch (err) { console.error('Error actualizando etapa:', err.message); return null; }
 }
 
+// Finds a GHL contact by phone, creating one if it doesn't exist yet.
+async function buscarOCrearContactoPorTelefono(phone, nombre) {
+  const { data } = await fetchGHL('https://services.leadconnectorhq.com/contacts/upsert', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ locationId: env.ghlLocationId, phone, name: nombre || '' }),
+  });
+  return data?.contact?.id || null;
+}
+
+async function crearCitaEnCalendario({ contactId, calendarId, startISO, endISO, title }) {
+  const { data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/appointments', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      calendarId, locationId: env.ghlLocationId, contactId,
+      startTime: startISO, endTime: endISO, title: title || 'Cita NHC Kids',
+      ignoreFreeSlotValidation: true, ignoreDateRange: true, toNotify: false,
+    }),
+  });
+  return data;
+}
+
 module.exports = {
   mapearSintoma,
   mapearGenero,
@@ -277,4 +300,6 @@ module.exports = {
   sendMessages,
   crearOportunidad,
   actualizarEtapaOportunidad,
+  buscarOCrearContactoPorTelefono,
+  crearCitaEnCalendario,
 };
