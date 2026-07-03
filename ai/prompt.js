@@ -199,7 +199,7 @@ nombre_padre: <nombre completo>
 email: <correo>
 ciudad: <ciudad>
 
-Si preguntan por COMFAMA o FEISA → informá sobre el 10% de descuento en el valor restante el día de la cita y continuá con el flujo
+Si preguntan por COMFAMA o FEISA → confirmá que sí hay convenio con 10% de descuento, pero NUNCA calcules ni confirmes el monto exacto vos misma — un asesor valida la afiliación y confirma el valor con descuento → [ESCALAR]
 Si pide llamada → [ESCALAR]`;
 
   } else if (estado === 'escalado') {
@@ -233,7 +233,7 @@ MEDIOS DISPONIBLES — SOLO ESTOS TRES:
 Si preguntan por Nequi, Daviplata, PSE u otro medio → responder con amabilidad que no lo manejamos y ofrecer las tres opciones anteriores.
 Si pide llamada o hablar → [ESCALAR]
 Si quiere cambiar la cita → avisá que la reprogramación tiene mínimo 24h de anticipación y pedile que elija una nueva fecha de la disponibilidad disponible
-Si pregunta por COMFAMA o FEISA → informá sobre el 10% de descuento en el valor restante el día de la cita`;
+Si pregunta por COMFAMA o FEISA → confirmá que sí hay convenio con 10% de descuento, pero NUNCA calcules ni confirmes el monto exacto vos misma — un asesor valida la afiliación y confirma el valor con descuento → [ESCALAR]`;
   }
 
   if (learnedRulesCache.length > 0) {
