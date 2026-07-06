@@ -61,6 +61,8 @@ async function initDB() {
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phone TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS recovery_status VARCHAR(50) DEFAULT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS asesor_analyzed BOOLEAN DEFAULT FALSE`).catch(() => {});
+  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS conversation_insights (
@@ -126,11 +128,11 @@ async function getConversationData(conversationId) {
 async function saveConversationData(conversationId, contactId, messages, triaje, estado, lastMessageId, phone) {
   try {
     await pool.query(`
-      INSERT INTO conversations (conversation_id, contact_id, phone, messages, triaje, estado, last_message_id, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+      INSERT INTO conversations (conversation_id, contact_id, phone, messages, triaje, estado, last_message_id, agent, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
       ON CONFLICT (conversation_id) DO UPDATE
       SET messages=$4, triaje=$5, estado=$6, last_message_id=$7, phone=COALESCE($3, conversations.phone), updated_at=NOW()
-    `, [conversationId, contactId, phone || null, JSON.stringify(messages), JSON.stringify(triaje), estado, lastMessageId]);
+    `, [conversationId, contactId, phone || null, JSON.stringify(messages), JSON.stringify(triaje), estado, lastMessageId, env.agentName]);
   } catch (err) { console.error('Error guardando conversación:', err.message); }
 }
 
@@ -199,12 +201,12 @@ async function setCachedContact(contactId, contactData) {
 async function savePendingPayment(referencia, datos) {
   try {
     await pool.query(`
-      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre_nino,nombre,payment_link_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      INSERT INTO pending_payments (referencia,contact_id,conversation_id,contact_data,fecha_cita,hora_cita,edad,genero,ocupacion,sintoma,nombre_nino,nombre,payment_link_id,agent)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       ON CONFLICT (referencia) DO UPDATE SET fecha_cita=$5, hora_cita=$6, payment_link_id=$13
     `, [referencia, datos.contactId, datos.conversationId, JSON.stringify(datos.contact),
         datos.fechaCita, datos.horaCita, datos.edad, datos.genero, datos.ocupacion,
-        datos.sintoma, datos.nombreNino, datos.nombre, datos.paymentLinkId || null]);
+        datos.sintoma, datos.nombreNino, datos.nombre, datos.paymentLinkId || null, env.agentName]);
   } catch (err) { console.error('Error guardando pago:', err.message); }
 }
 

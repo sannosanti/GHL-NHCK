@@ -15,6 +15,7 @@ const env = {
   wompiIntegrityKey: process.env.WOMPI_INTEGRITY_KEY,
   wompiPrivateKey: process.env.WOMPI_PRIVATE_KEY,
   databaseUrl: process.env.DATABASE_URL,
+  agentName: process.env.AGENT_NAME || 'carolina',
   port: process.env.PORT || 3000,
 };
 
