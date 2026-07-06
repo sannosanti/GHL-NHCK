@@ -2,6 +2,7 @@
 
 const cron = require('node-cron');
 const { pool } = require('../db');
+const { env } = require('../config');
 const { notify } = require('../services/notifier');
 
 const STATE_LABELS = {
@@ -37,9 +38,9 @@ async function runDailyReport() {
       cc.contact_data
     FROM conversations c
     LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
-    WHERE c.updated_at > NOW() - INTERVAL '24 hours'
+    WHERE c.updated_at > NOW() - INTERVAL '24 hours' AND c.agent = $1
     ORDER BY c.updated_at DESC
-  `);
+  `, [env.agentName]);
 
   const fecha = new Date().toLocaleDateString('es-CO', {
     weekday: 'long', day: 'numeric', month: 'long',
@@ -53,10 +54,10 @@ async function runDailyReport() {
   const { rows: eventRows } = await pool.query(`
     SELECT event_type, COUNT(*) as count
     FROM transaction_logs
-    WHERE created_at > NOW() - INTERVAL '24 hours'
+    WHERE created_at > NOW() - INTERVAL '24 hours' AND agent = $1
     GROUP BY event_type
     ORDER BY count DESC
-  `).catch(() => ({ rows: [] }));
+  `, [env.agentName]).catch(() => ({ rows: [] }));
 
   const events = {};
   for (const r of eventRows) events[r.event_type] = parseInt(r.count);

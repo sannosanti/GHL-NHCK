@@ -1,6 +1,7 @@
 'use strict';
 
 const { pool } = require('../db');
+const { env } = require('../config');
 const { callClaude } = require('../ai/claude');
 
 const SYSTEM_PROMPT = `Sos un asistente de gestión interno de NHC Kids. Respondés preguntas sobre cómo va el trabajo del agente WhatsApp Carolina.
@@ -40,20 +41,21 @@ async function getSnapshot() {
         COUNT(*) FILTER (WHERE estado='nuevo') AS nuevos,
         COUNT(*) AS total
       FROM conversations
-    `),
+      WHERE agent=$1
+    `, [env.agentName]),
     pool.query(`
       SELECT estado, COUNT(*) AS total
       FROM conversations
-      WHERE updated_at > NOW() - INTERVAL '24 hours'
+      WHERE agent=$1 AND updated_at > NOW() - INTERVAL '24 hours'
       GROUP BY estado ORDER BY total DESC
-    `),
+    `, [env.agentName]),
     pool.query(`
       SELECT estado, COUNT(*) AS total
       FROM conversations
-      WHERE updated_at > NOW() - INTERVAL '48 hours'
+      WHERE agent=$1 AND updated_at > NOW() - INTERVAL '48 hours'
       GROUP BY estado ORDER BY total DESC
-    `),
-    pool.query(`SELECT root_cause, outcome, COUNT(*) AS total FROM conversation_insights GROUP BY root_cause, outcome ORDER BY total DESC LIMIT 6`),
+    `, [env.agentName]),
+    pool.query(`SELECT root_cause, outcome, COUNT(*) AS total FROM conversation_insights WHERE agent=$1 GROUP BY root_cause, outcome ORDER BY total DESC LIMIT 6`, [env.agentName]),
     pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 5`),
     pool.query(`SELECT COUNT(*) AS total, MIN(created_at) AS mas_antigua FROM pending_payments`),
     pool.query(`
@@ -70,10 +72,10 @@ async function getSnapshot() {
         c.phone
       FROM conversations c
       LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
-      WHERE c.estado IN ('esperando_pago','triaje_completo','agendando','escalado','nuevo')
+      WHERE c.agent=$1 AND c.estado IN ('esperando_pago','triaje_completo','agendando','escalado','nuevo')
       ORDER BY c.updated_at DESC
       LIMIT 50
-    `),
+    `, [env.agentName]),
   ]);
 
   const contactos_activos = contactos.rows.map(r => {

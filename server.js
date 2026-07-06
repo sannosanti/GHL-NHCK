@@ -117,15 +117,15 @@ app.post('/webhook/contact-deleted', async (req, res) => {
 app.get('/informe', async (req, res) => {
   try {
     const [estados, eventos, causas, sintomas, recovery, funnel, gaps, pendientes, recientes] = await Promise.all([
-      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations GROUP BY estado ORDER BY total DESC`),
-      db.pool.query(`SELECT event_type, COUNT(*) as total FROM transaction_logs GROUP BY event_type ORDER BY total DESC`),
-      db.pool.query(`SELECT root_cause, outcome, COUNT(*) as total FROM conversation_insights GROUP BY root_cause, outcome ORDER BY total DESC`),
-      db.pool.query(`SELECT triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY sintoma ORDER BY total DESC`),
-      db.pool.query(`SELECT recovery_status, COUNT(*) as total FROM conversations WHERE recovery_status IS NOT NULL GROUP BY recovery_status`),
-      db.pool.query(`SELECT COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations`),
+      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations WHERE agent=$1 GROUP BY estado ORDER BY total DESC`, [env.agentName]),
+      db.pool.query(`SELECT event_type, COUNT(*) as total FROM transaction_logs WHERE agent=$1 GROUP BY event_type ORDER BY total DESC`, [env.agentName]),
+      db.pool.query(`SELECT root_cause, outcome, COUNT(*) as total FROM conversation_insights WHERE agent=$1 GROUP BY root_cause, outcome ORDER BY total DESC`, [env.agentName]),
+      db.pool.query(`SELECT triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE agent=$1 AND triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY sintoma ORDER BY total DESC`, [env.agentName]),
+      db.pool.query(`SELECT recovery_status, COUNT(*) as total FROM conversations WHERE agent=$1 AND recovery_status IS NOT NULL GROUP BY recovery_status`, [env.agentName]),
+      db.pool.query(`SELECT COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations WHERE agent=$1`, [env.agentName]),
       db.pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 10`),
       db.pool.query(`SELECT COUNT(*) as total, MIN(created_at) as mas_antigua FROM pending_payments`),
-      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations WHERE updated_at > NOW() - INTERVAL '72 hours' GROUP BY estado ORDER BY total DESC`),
+      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations WHERE agent=$1 AND updated_at > NOW() - INTERVAL '72 hours' GROUP BY estado ORDER BY total DESC`, [env.agentName]),
     ]);
     res.json({
       generado: new Date().toISOString(),
@@ -156,9 +156,9 @@ app.get('/informe/triaje-completo', async (req, res) => {
         cc.contact_data
       FROM conversations c
       LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
-      WHERE c.estado = 'triaje_completo'
+      WHERE c.estado = 'triaje_completo' AND c.agent = $1
       ORDER BY c.updated_at DESC
-    `);
+    `, [env.agentName]);
 
     const result = rows.map(r => {
       const msgs = Array.isArray(r.messages) ? r.messages : [];
@@ -382,7 +382,8 @@ app.get('/admin/updates', async (req, res) => {
   try {
     const { rows } = await db.pool.query(
       `SELECT id, approval_key, root_cause, recommendation, reason, status, created_at
-       FROM prompt_updates ORDER BY created_at DESC LIMIT 20`
+       FROM prompt_updates WHERE agent=$1 ORDER BY created_at DESC LIMIT 20`,
+      [env.agentName]
     );
     const cards = rows.map(r => {
       const approveBtn = r.status === 'pending'

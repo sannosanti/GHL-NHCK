@@ -92,7 +92,15 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_conv ON conversation_insights (conversation_id)`).catch(() => {});
+  await pool.query(`ALTER TABLE conversation_insights ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  await pool.query(`ALTER TABLE prompt_updates ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  await pool.query(`ALTER TABLE learned_rules ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  await pool.query(`ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  // Same reasoning as conversations' PK: conversation_id alone collides across
+  // agents sharing this Postgres, silently dropping whichever agent's insight
+  // loses the ON CONFLICT race.
+  await pool.query(`DROP INDEX IF EXISTS idx_insights_conv`).catch(() => {});
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_conv_agent ON conversation_insights (conversation_id, agent)`).catch(() => {});
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_gaps_pregunta ON knowledge_gaps (pregunta)`).catch(() => {});
 
   await pool.query(`
@@ -259,8 +267,8 @@ async function setCachedDisponibilidad(fechaISO, citas) {
 async function logEvent(contactId, conversationId, eventType, data) {
   try {
     await pool.query(
-      'INSERT INTO transaction_logs (contact_id,conversation_id,event_type,data) VALUES ($1,$2,$3,$4)',
-      [contactId, conversationId, eventType, JSON.stringify(data)]
+      'INSERT INTO transaction_logs (contact_id,conversation_id,event_type,data,agent) VALUES ($1,$2,$3,$4,$5)',
+      [contactId, conversationId, eventType, JSON.stringify(data), env.agentName]
     );
   } catch (err) { console.error('Error log:', err.message); }
 }
@@ -284,9 +292,9 @@ async function saveConversationInsight(conversationId, contactId, outcome, estad
   try {
     await pool.query(`
       INSERT INTO conversation_insights
-        (conversation_id, contact_id, outcome, estado_final, drop_off_point, root_cause, missed_questions, what_worked, improvement_suggestion)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      ON CONFLICT (conversation_id) DO NOTHING
+        (conversation_id, contact_id, outcome, estado_final, drop_off_point, root_cause, missed_questions, what_worked, improvement_suggestion, agent)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ON CONFLICT (conversation_id, agent) DO NOTHING
     `, [
       conversationId, contactId, outcome, estadoFinal,
       analysis.drop_off_point || null,
@@ -294,6 +302,7 @@ async function saveConversationInsight(conversationId, contactId, outcome, estad
       JSON.stringify(analysis.missed_questions || []),
       analysis.what_worked || null,
       analysis.improvement_suggestion || null,
+      env.agentName,
     ]);
   } catch (err) { console.error('Error guardando insight:', err.message); }
 }
@@ -302,9 +311,9 @@ async function getWeeklyInsights() {
   try {
     const res = await pool.query(`
       SELECT * FROM conversation_insights
-      WHERE created_at > NOW() - INTERVAL '7 days'
+      WHERE created_at > NOW() - INTERVAL '7 days' AND agent = $1
       ORDER BY created_at DESC
-    `);
+    `, [env.agentName]);
     return res.rows;
   } catch { return []; }
 }
@@ -331,8 +340,8 @@ async function getKnowledgeGaps() {
 async function marcarCerrado(conversationId) {
   try {
     await pool.query(
-      "UPDATE conversations SET estado='cerrado', updated_at=NOW() WHERE conversation_id=$1",
-      [conversationId]
+      "UPDATE conversations SET estado='cerrado', updated_at=NOW() WHERE conversation_id=$1 AND agent=$2",
+      [conversationId, env.agentName]
     );
   } catch (err) { console.error('Error marcando cerrado:', err.message); }
 }
@@ -340,8 +349,8 @@ async function marcarCerrado(conversationId) {
 async function marcarCompletado(conversationId) {
   try {
     await pool.query(
-      "UPDATE conversations SET estado='completado', updated_at=NOW() WHERE conversation_id=$1",
-      [conversationId]
+      "UPDATE conversations SET estado='completado', updated_at=NOW() WHERE conversation_id=$1 AND agent=$2",
+      [conversationId, env.agentName]
     );
   } catch (err) { console.error('Error marcando completado:', err.message); }
 }
@@ -350,8 +359,8 @@ async function countInsightsByRootCause(rootCause, days = 30) {
   try {
     const res = await pool.query(
       `SELECT COUNT(*) FROM conversation_insights
-       WHERE root_cause=$1 AND created_at > NOW() - INTERVAL '${days} days'`,
-      [rootCause]
+       WHERE root_cause=$1 AND agent=$2 AND created_at > NOW() - INTERVAL '${days} days'`,
+      [rootCause, env.agentName]
     );
     return parseInt(res.rows[0].count, 10);
   } catch { return 0; }
@@ -360,8 +369,8 @@ async function countInsightsByRootCause(rootCause, days = 30) {
 async function hasPendingUpdateForRootCause(rootCause) {
   try {
     const res = await pool.query(
-      `SELECT id FROM prompt_updates WHERE root_cause=$1 AND status='pending'`,
-      [rootCause]
+      `SELECT id FROM prompt_updates WHERE root_cause=$1 AND status='pending' AND agent=$2`,
+      [rootCause, env.agentName]
     );
     return res.rows.length > 0;
   } catch { return false; }
@@ -370,9 +379,9 @@ async function hasPendingUpdateForRootCause(rootCause) {
 async function savePendingUpdate(id, approvalKey, rootCause, recommendation, reason) {
   try {
     await pool.query(
-      `INSERT INTO prompt_updates (id, approval_key, root_cause, recommendation, reason)
-       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
-      [id, approvalKey, rootCause, recommendation, reason]
+      `INSERT INTO prompt_updates (id, approval_key, root_cause, recommendation, reason, agent)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
+      [id, approvalKey, rootCause, recommendation, reason, env.agentName]
     );
   } catch (err) { console.error('Error guardando update:', err.message); }
 }
@@ -387,8 +396,8 @@ async function approveUpdate(id, approvalKey) {
     const update = res.rows[0];
     if (!update) return null;
     await pool.query(
-      `INSERT INTO learned_rules (rule, source_update_id) VALUES ($1,$2)`,
-      [update.recommendation, id]
+      `INSERT INTO learned_rules (rule, source_update_id, agent) VALUES ($1,$2,$3)`,
+      [update.recommendation, id, update.agent]
     );
     return update;
   } catch (err) { console.error('Error aprobando update:', err.message); return null; }
@@ -397,7 +406,8 @@ async function approveUpdate(id, approvalKey) {
 async function getLearnedRules() {
   try {
     const res = await pool.query(
-      `SELECT rule FROM learned_rules ORDER BY created_at ASC`
+      `SELECT rule FROM learned_rules WHERE agent = $1 ORDER BY created_at ASC`,
+      [env.agentName]
     );
     return res.rows.map(r => r.rule);
   } catch { return []; }
@@ -406,8 +416,8 @@ async function getLearnedRules() {
 async function hasAsesorAnalysis(conversationId) {
   try {
     const res = await pool.query(
-      `SELECT asesor_analyzed FROM conversations WHERE conversation_id = $1`,
-      [conversationId]
+      `SELECT asesor_analyzed FROM conversations WHERE conversation_id = $1 AND agent = $2`,
+      [conversationId, env.agentName]
     );
     return res.rows[0]?.asesor_analyzed === true;
   } catch { return false; }
@@ -416,8 +426,8 @@ async function hasAsesorAnalysis(conversationId) {
 async function markAsesorAnalyzed(conversationId) {
   try {
     await pool.query(
-      `UPDATE conversations SET asesor_analyzed = TRUE WHERE conversation_id = $1`,
-      [conversationId]
+      `UPDATE conversations SET asesor_analyzed = TRUE WHERE conversation_id = $1 AND agent = $2`,
+      [conversationId, env.agentName]
     );
   } catch { /* non-critical */ }
 }
@@ -427,9 +437,9 @@ async function getRecentInsightSuggestions(rootCause, days = 30) {
     const res = await pool.query(
       `SELECT improvement_suggestion, drop_off_point, what_worked
        FROM conversation_insights
-       WHERE root_cause=$1 AND created_at > NOW() - INTERVAL '${days} days'
+       WHERE root_cause=$1 AND agent=$2 AND created_at > NOW() - INTERVAL '${days} days'
        ORDER BY created_at DESC LIMIT 10`,
-      [rootCause]
+      [rootCause, env.agentName]
     );
     return res.rows;
   } catch { return []; }
