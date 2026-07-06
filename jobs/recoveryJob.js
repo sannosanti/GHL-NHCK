@@ -4,7 +4,7 @@ const cron = require('node-cron');
 const { pool } = require('../db');
 const { sendMessage, addTag } = require('../services/ghl');
 const { callClaude } = require('../ai/claude');
-const { CONOCIMIENTO_NHC } = require('../config');
+const { CONOCIMIENTO_NHC, env } = require('../config');
 const { triggerAnalysis } = require('./insightJob');
 const { notifyError } = require('../services/notifier');
 
@@ -93,12 +93,13 @@ async function runRecoveryJob() {
       SELECT conversation_id, contact_id, phone, messages, triaje, estado, recovery_status, updated_at
       FROM conversations
       WHERE estado NOT IN (${EXCLUDED_STATES.map((_, i) => `$${i + 1}`).join(',')})
+        AND agent = $${EXCLUDED_STATES.length + 1}
         AND (
           recovery_status IS NULL
           OR recovery_status = 'intento-1'
           OR (recovery_status = 'pospuesto' AND updated_at <= NOW() - INTERVAL '24 hours')
         )
-    `, EXCLUDED_STATES);
+    `, [...EXCLUDED_STATES, env.agentName]);
     rows = result.rows;
   } catch (err) {
     console.error('[recoveryJob] DB query error:', err.message);
@@ -142,15 +143,15 @@ async function runRecoveryJob() {
       if (attempt === 1) {
         await addTag(contact_id, 'recuperacion-1');
         await pool.query(
-          'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2',
-          ['intento-1', conversation_id]
+          'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2 AND agent=$3',
+          ['intento-1', conversation_id, env.agentName]
         );
       } else {
         await addTag(contact_id, 'recuperacion-2');
         await addTag(contact_id, 'recuperacion-fallida');
         await pool.query(
-          'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2',
-          ['intento-2', conversation_id]
+          'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2 AND agent=$3',
+          ['intento-2', conversation_id, env.agentName]
         );
         triggerAnalysis(conversation_id, contact_id, 'recovery_fallido');
       }

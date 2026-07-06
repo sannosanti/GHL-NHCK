@@ -63,6 +63,11 @@ async function initDB() {
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS asesor_analyzed BOOLEAN DEFAULT FALSE`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  // GHL uses one conversation_id per contact regardless of which agent's
+  // WhatsApp number they wrote to — without agent in the key, Luisa and
+  // Carolina collide on the same row and inherit each other's history.
+  await pool.query(`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_pkey`).catch(() => {});
+  await pool.query(`ALTER TABLE conversations ADD PRIMARY KEY (conversation_id, agent)`).catch(() => {});
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS conversation_insights (
@@ -120,7 +125,7 @@ async function initDB() {
 
 async function getConversationData(conversationId) {
   try {
-    const res = await pool.query('SELECT * FROM conversations WHERE conversation_id = $1', [conversationId]);
+    const res = await pool.query('SELECT * FROM conversations WHERE conversation_id = $1 AND agent = $2', [conversationId, env.agentName]);
     return res.rows[0] || null;
   } catch { return null; }
 }
@@ -130,7 +135,7 @@ async function saveConversationData(conversationId, contactId, messages, triaje,
     await pool.query(`
       INSERT INTO conversations (conversation_id, contact_id, phone, messages, triaje, estado, last_message_id, agent, updated_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
-      ON CONFLICT (conversation_id) DO UPDATE
+      ON CONFLICT (conversation_id, agent) DO UPDATE
       SET messages=$4, triaje=$5, estado=$6, last_message_id=$7, phone=COALESCE($3, conversations.phone), updated_at=NOW()
     `, [conversationId, contactId, phone || null, JSON.stringify(messages), JSON.stringify(triaje), estado, lastMessageId, env.agentName]);
   } catch (err) { console.error('Error guardando conversación:', err.message); }

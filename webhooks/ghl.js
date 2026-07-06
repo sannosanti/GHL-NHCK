@@ -326,8 +326,8 @@ async function flushTextQueue(conversationId) {
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, null, phone);
       await db.pool.query(
-        'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2',
-        ['pospuesto', conversationId]
+        'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2 AND agent=$3',
+        ['pospuesto', conversationId, env.agentName]
       );
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId, channel);
@@ -437,7 +437,7 @@ async function ghlWebhookHandler(req, res) {
 
     let convData = await db.getConversationData(conversationId);
     if (convData?.recovery_status) {
-      db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1', [conversationId]).catch(() => {});
+      db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1 AND agent=$2', [conversationId, env.agentName]).catch(() => {});
     }
     timers.limpiarTimers(conversationId);
 
@@ -448,8 +448,8 @@ async function ghlWebhookHandler(req, res) {
         ? 'triaje_completo'
         : (t.triaje1 && t.triaje2 ? 'triaje_p3' : (t.triaje1 ? 'triaje_p2' : 'nuevo'));
       await db.pool.query(
-        'UPDATE conversations SET estado=$1, messages=\'[]\'::jsonb, recovery_status=NULL, updated_at=NOW() WHERE conversation_id=$2',
-        [estadoRetoma, conversationId]
+        'UPDATE conversations SET estado=$1, messages=\'[]\'::jsonb, recovery_status=NULL, updated_at=NOW() WHERE conversation_id=$2 AND agent=$3',
+        [estadoRetoma, conversationId, env.agentName]
       );
       convData = { ...convData, estado: estadoRetoma, messages: [] };
     }
@@ -622,13 +622,13 @@ async function ghlWebhookHandler(req, res) {
     if (!convData && phone) {
       try {
         const resViejos = await db.pool.query(
-          'SELECT conversation_id, contact_id FROM conversations WHERE phone=$1 AND contact_id!=$2',
-          [phone, contactId]
+          'SELECT conversation_id, contact_id FROM conversations WHERE phone=$1 AND contact_id!=$2 AND agent=$3',
+          [phone, contactId, env.agentName]
         );
         for (const row of resViejos.rows) {
-          await db.pool.query('DELETE FROM conversations WHERE conversation_id=$1', [row.conversation_id]);
+          await db.pool.query('DELETE FROM conversations WHERE conversation_id=$1 AND agent=$2', [row.conversation_id, env.agentName]);
           await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [row.contact_id]);
-          await db.pool.query('DELETE FROM pending_payments WHERE contact_id=$1', [row.contact_id]);
+          await db.pool.query('DELETE FROM pending_payments WHERE contact_id=$1 AND agent=$2', [row.contact_id, env.agentName]);
         }
       } catch (err) { console.error('Error limpiando registros viejos:', err.message); }
     }
