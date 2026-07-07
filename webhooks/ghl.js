@@ -637,6 +637,7 @@ async function ghlWebhookHandler(req, res) {
 
     if (!convData) {
       ghl.crearOportunidad(contactId, `${contact.firstName || ''} ${contact.lastName || ''}`.trim(), constants.STAGE_INICIO).catch(() => {});
+      ghl.addTag(contactId, 'cliente-nhck').catch(() => {});
     }
 
     // Reset command — handled immediately, before queue
