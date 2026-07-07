@@ -98,7 +98,11 @@ async function initDB() {
   await pool.query(`ALTER TABLE transaction_logs ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
   // Same reasoning as conversations' PK: conversation_id alone collides across
   // agents sharing this Postgres, silently dropping whichever agent's insight
-  // loses the ON CONFLICT race.
+  // loses the ON CONFLICT race. Two separate constraints enforced this on the
+  // original single-agent schema — the inline "UNIQUE" on the column itself
+  // (conversation_insights_conversation_id_key) and the explicit index below —
+  // both must go or ON CONFLICT (conversation_id, agent) doesn't fully replace them.
+  await pool.query(`ALTER TABLE conversation_insights DROP CONSTRAINT IF EXISTS conversation_insights_conversation_id_key`).catch(() => {});
   await pool.query(`DROP INDEX IF EXISTS idx_insights_conv`).catch(() => {});
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_conv_agent ON conversation_insights (conversation_id, agent)`).catch(() => {});
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_gaps_pregunta ON knowledge_gaps (pregunta)`).catch(() => {});
