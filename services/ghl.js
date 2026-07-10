@@ -204,12 +204,13 @@ async function sendMessages(conversationId, messages, contactId, channel = 'What
 
 async function crearOportunidad(contactId, nombre, stageId) {
   try {
+    const marca = env.agentName === 'luisa' ? 'Neuromapeo NHC' : 'Neuromapeo NHCK';
     const { data } = await fetchGHL('https://services.leadconnectorhq.com/opportunities/', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         pipelineId: constants.GHL_PIPELINE_ID, locationId: env.ghlLocationId,
-        name: `NHC Kids - ${nombre}`, pipelineStageId: stageId, status: 'open', contactId,
+        name: `${marca} - ${nombre}`, pipelineStageId: stageId, status: 'open', contactId,
         monetaryValue: 395000,
       }),
     });
