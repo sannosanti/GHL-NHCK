@@ -87,7 +87,8 @@ async function flushTextQueue(conversationId) {
       } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
     }
 
-    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto });
+    const derivadoA = convData?.derivado_a || null;
+    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA });
     const rawReply = await callClaude(systemPrompt, history);
 
     let nuevoEstado = estado;
@@ -122,7 +123,13 @@ async function flushTextQueue(conversationId) {
     if (matchP1) {
       nuevoTriaje.triaje1 = matchP1[1].trim();
       nuevoEstado = 'triaje_p2';
-      ghl.guardarSintomaGHL(contactId, matchP1[1].trim()).catch(() => {});
+      // Derivado a Luisa: la opción viene de sus categorías de adulto, no de
+      // las de niño — tiene que ir por su mapper al campo de adulto.
+      if (derivadoA === 'luisa') {
+        ghl.guardarSintomaAdultoGHL(contactId, matchP1[1].trim()).catch(() => {});
+      } else {
+        ghl.guardarSintomaGHL(contactId, matchP1[1].trim()).catch(() => {});
+      }
     }
     if (matchP2) { nuevoTriaje.triaje2 = matchP2[1].trim(); nuevoEstado = 'triaje_p3'; }
     if (matchP3) { nuevoTriaje.triaje3 = matchP3[1].trim(); }
@@ -135,19 +142,27 @@ async function flushTextQueue(conversationId) {
     // Appointment confirmed
     if (rawReply.includes('[CITA_CONFIRMADA]')) {
       const extract = f => { const m = rawReply.match(new RegExp(`${f}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
+      const esAdultoCita = derivadoA === 'luisa';
       const fechaCita = extract('fecha'), horaCita = extract('hora');
-      const nombreNino = extract('nombre_nino'), edad = extract('edad');
+      const edad = extract('edad');
       const genero = extract('genero');
-      const estudia = ['si', 'sí'].includes(extract('estudia').toLowerCase());
       const emailCita = extract('email') || contact.email || '';
-      const nombrePadreCita = extract('nombre_padre') || `${contact.firstName || ''} ${contact.lastName || ''}`.trim();
       const ciudadCita = extract('ciudad') || contact.city || '';
+
+      // Field names in [CITA_CONFIRMADA] differ by persona — see prompt.js
+      // PASO 5 (kid format vs Luisa's adult format).
+      const nombreNino = esAdultoCita ? '' : extract('nombre_nino');
+      const estudia = esAdultoCita ? false : ['si', 'sí'].includes(extract('estudia').toLowerCase());
+      const documentoIdentidad = esAdultoCita ? extract('documento_identidad') : '';
+      const nombreContactoCita = esAdultoCita
+        ? (extract('nombre_paciente') || `${contact.firstName || ''} ${contact.lastName || ''}`.trim())
+        : (extract('nombre_padre') || `${contact.firstName || ''} ${contact.lastName || ''}`.trim());
 
       const ghlUpdate = {};
       if (emailCita && emailCita !== contact.email) ghlUpdate.email = emailCita;
       if (ciudadCita) ghlUpdate.city = ciudadCita;
-      if (nombrePadreCita) {
-        const partes = nombrePadreCita.trim().split(' ');
+      if (nombreContactoCita) {
+        const partes = nombreContactoCita.trim().split(' ');
         ghlUpdate.firstName = partes[0] || contact.firstName || '';
         ghlUpdate.lastName = partes.slice(1).join(' ') || contact.lastName || '';
       }
@@ -159,30 +174,35 @@ async function flushTextQueue(conversationId) {
         await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
       }
 
-      await ghl.guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
+      if (esAdultoCita) {
+        await ghl.guardarCamposPacienteGHL(contactId, { edad, documentoIdentidad, sintoma: nuevoTriaje.triaje1 });
+      } else {
+        await ghl.guardarCamposNinoGHL(contactId, { nombreNino, edadNino: edad, generoNino: genero, estudia, sintoma: nuevoTriaje.triaje1 });
+      }
       ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
 
-      const referencia = `NHCK-${contactId}-${Date.now()}`;
+      const referencia = `${esAdultoCita ? 'NHC' : 'NHCK'}-${contactId}-${Date.now()}`;
       await db.logEvent(contactId, conversationId, 'cita_confirmada', { fechaCita, horaCita, referencia });
 
+      const ocupacion = esAdultoCita ? null : ghl.mapearOcupacionNino(estudia);
       try {
         const pagoResult = await pagos.generarLinkPago({
           referencia, monto: 100000,
-          nombre: nombrePadreCita || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+          nombre: nombreContactoCita || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           email: emailCita || contact.email || '', telefono: contact.phone || '',
         });
         const contactConDatos = { ...contact, email: emailCita || contact.email || '', city: ciudadCita || contact.city || '' };
         await db.savePendingPayment(referencia, {
           contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
-          edad, genero, ocupacion: ghl.mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
-          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: pagoResult.linkId,
+          edad, genero, ocupacion, sintoma: nuevoTriaje.triaje1,
+          nombreNino: esAdultoCita ? nombreContactoCita : nombreNino, nombre: nombreContactoCita || nombre, paymentLinkId: pagoResult.linkId,
         });
       } catch (err) {
         const contactConDatos = { ...contact, email: emailCita || contact.email || '' };
         await db.savePendingPayment(referencia, {
           contactId, conversationId, contact: contactConDatos, fechaCita, horaCita,
-          edad, genero, ocupacion: ghl.mapearOcupacionNino(estudia), sintoma: nuevoTriaje.triaje1,
-          nombreNino, nombre: nombrePadreCita || nombre, paymentLinkId: null,
+          edad, genero, ocupacion, sintoma: nuevoTriaje.triaje1,
+          nombreNino: esAdultoCita ? nombreContactoCita : nombreNino, nombre: nombreContactoCita || nombre, paymentLinkId: null,
         });
       }
 
@@ -287,16 +307,18 @@ async function flushTextQueue(conversationId) {
       return;
     }
 
-    // Escalado: busca servicio para adultos → línea NHC
+    // Adulto detectado → Luisa sigue la conversación en este mismo hilo
+    // (mismo número, no requiere plantilla de WhatsApp de Meta). NO se marca
+    // como 'escalado': el bot sigue respondiendo activamente, ahora como Luisa.
     if (rawReply.includes('[NHC_ADULTOS]')) {
       const replyLimpio = rawReply.replace(/\[NHC_ADULTOS\]/g, '').trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
-      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', null, phone);
+      await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'triaje_p1', null, phone);
+      await db.setDerivadoA(conversationId, 'luisa');
       await ghl.addTag(contactId, 'nhc-adultos');
-      await ghl.addTag(contactId, 'escalado nhck');
-      await db.logEvent(contactId, conversationId, 'escalado_nhc_adultos', {});
-      triggerAnalysis(conversationId, contactId, 'nhc_adultos');
+      await ghl.addTag(contactId, 'escalado nhck-a-nhc');
+      await db.logEvent(contactId, conversationId, 'derivado_nhck_a_nhc', {});
       await humanDelay();
       await ghl.sendMessages(conversationId, partes, contactId, channel);
       return;
@@ -596,7 +618,7 @@ async function ghlWebhookHandler(req, res) {
         triggerAnalysis(conversationId, contactId, 'pago_manual');
         await ghl.sendMessages(conversationId, [
           `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
-          `Tu cita para el ${fechaL} a las ${horaL} está reservada. Un asesor validará el pago y te confirmará en breve 🙌`,
+          `Ahora mismo no te puedo confirmar el pago porque el área contable no se encuentra disponible. En cuanto lo validen, te confirmamos tu cita para el ${fechaL} a las ${horaL} 🙌`,
           `¡Que tengas un excelente día! 😊`,
         ], contactId, channel);
       } else {
@@ -605,7 +627,7 @@ async function ghlWebhookHandler(req, res) {
         await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', lastMsgId, contact.phone || '');
         await ghl.sendMessages(conversationId, [
           `¡Gracias! Recibimos tu comprobante 📋`,
-          `Un asesor lo revisará y te confirmará tu cita en breve 🙌`,
+          `Ahora mismo no te lo puedo confirmar porque el área contable no se encuentra disponible. En cuanto lo validen, te confirmamos tu cita 🙌`,
         ], contactId, channel);
       }
       return;

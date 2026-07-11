@@ -2,7 +2,7 @@
 
 const fetch = require('node-fetch');
 const https = require('https');
-const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino } = require('../config');
+const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino, mapearSintomaAdulto } = require('../config');
 const db = require('../db');
 
 // Today's incidents (socket left dirty by an unconsumed body, then repeated
@@ -73,6 +73,48 @@ async function guardarSintomaGHL(contactId, sintoma) {
     });
     await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
   } catch (err) { console.error('Error guardando síntoma GHL:', err.message); }
+}
+
+// Used when a conversation was handed off to Luisa's persona mid-thread —
+// the TRIAJE_P1 value comes from her adult categories, so it must go through
+// her mapper into her field, not the kid one (same field ID as
+// GHL-NHC-temp/services/ghl.js's guardarSintomaGHL).
+async function guardarSintomaAdultoGHL(contactId, sintoma) {
+  try {
+    await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customFields: [{ id: '2N0nl7XE77YeV6LUxM9Z', value: mapearSintomaAdulto(sintoma) }] }),
+    });
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+  } catch (err) { console.error('Error guardando síntoma adulto GHL:', err.message); }
+}
+
+// Generic contact fields shared with Luisa (not the *_del_nio ones — those are
+// Carolina's specifically). Same field IDs as GHL-NHC-temp/services/ghl.js —
+// both agents share this GHL location, these fields already exist there.
+const CAMPO_EDAD_ADULTO = 'Q3obnE2lFSPLy1DTUBuG';
+const CAMPO_DOCUMENTO_IDENTIDAD = 'QlrYraCjioHiYTdYckMU';
+const CAMPO_SINTOMA_O_NECESIDAD = '2N0nl7XE77YeV6LUxM9Z';
+
+// Used when a conversation was handed off to Luisa's persona mid-thread
+// (derivado_a='luisa') — writes to the adult fields instead of the *_del_nio
+// ones, mirroring GHL-NHC-temp's guardarCamposPacienteGHL.
+async function guardarCamposPacienteGHL(contactId, { edad, documentoIdentidad, sintoma }) {
+  try {
+    const customFields = [
+      { id: CAMPO_EDAD_ADULTO, value: edad || '' },
+      { id: CAMPO_DOCUMENTO_IDENTIDAD, value: documentoIdentidad || '' },
+      { id: CAMPO_SINTOMA_O_NECESIDAD, value: mapearSintomaAdulto(sintoma) },
+    ];
+    await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customFields }),
+    });
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+    console.log('Campos de paciente (derivado a Luisa) guardados en GHL');
+  } catch (err) { console.error('Error guardando campos de paciente GHL:', err.message); }
 }
 
 async function guardarCiudadGHL(contactId, ciudad) {
@@ -286,7 +328,9 @@ module.exports = {
   mapearGenero,
   mapearOcupacionNino,
   guardarCamposNinoGHL,
+  guardarCamposPacienteGHL,
   guardarSintomaGHL,
+  guardarSintomaAdultoGHL,
   guardarCiudadGHL,
   getContact,
   getConversationId,

@@ -62,6 +62,10 @@ async function initDB() {
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS recovery_status VARCHAR(50) DEFAULT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS asesor_analyzed BOOLEAN DEFAULT FALSE`).catch(() => {});
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
+  // Tracks a same-thread persona handoff (e.g. Carolina's number keeps
+  // answering, but as Luisa, once the patient turns out to be an adult).
+  // NULL means "answer as this deployment's own agent", as before.
+  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS derivado_a VARCHAR(20) DEFAULT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
   // GHL uses one conversation_id per contact regardless of which agent's
   // WhatsApp number they wrote to — without agent in the key, Luisa and
@@ -407,14 +411,25 @@ async function approveUpdate(id, approvalKey) {
   } catch (err) { console.error('Error aprobando update:', err.message); return null; }
 }
 
-async function getLearnedRules() {
+async function getLearnedRules(overrideAgent) {
   try {
     const res = await pool.query(
       `SELECT rule FROM learned_rules WHERE agent = $1 ORDER BY created_at ASC`,
-      [env.agentName]
+      [overrideAgent || env.agentName]
     );
     return res.rows.map(r => r.rule);
   } catch { return []; }
+}
+
+// Marks a conversation as being served under the other agent's persona/rules
+// while staying on this deployment's own WhatsApp number/thread.
+async function setDerivadoA(conversationId, brand) {
+  try {
+    await pool.query(
+      'UPDATE conversations SET derivado_a=$1 WHERE conversation_id=$2 AND agent=$3',
+      [brand, conversationId, env.agentName]
+    );
+  } catch (err) { console.error('Error guardando derivado_a:', err.message); }
 }
 
 async function hasAsesorAnalysis(conversationId) {
@@ -479,6 +494,7 @@ module.exports = {
   getRecentInsightSuggestions,
   hasAsesorAnalysis,
   markAsesorAnalyzed,
+  setDerivadoA,
   queuePendingWebhook,
   getPendingWebhooks,
   bumpPendingWebhookAttempt,

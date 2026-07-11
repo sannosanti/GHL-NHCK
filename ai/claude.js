@@ -30,7 +30,10 @@ async function callClaude(systemPrompt, history, maxTokens = 600) {
   if (data.type === 'error' || !data.content) {
     throw new Error(`Claude API error: ${data.error?.message || 'unknown'}`);
   }
-  return data.content[0].text;
+  // The system prompt forbids asterisks/bold, but the model doesn't always
+  // comply — WhatsApp doesn't render ** as bold anyway, it shows the literal
+  // characters, so this must be enforced in code, not just instructed.
+  return data.content[0].text.replace(/\*/g, '');
 }
 
 module.exports = { callClaude };
