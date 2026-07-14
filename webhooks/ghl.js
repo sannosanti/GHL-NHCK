@@ -753,4 +753,52 @@ async function ghlCrearEnCreatorHandler(req, res) {
   }
 }
 
-module.exports = { ghlWebhookHandler, ghlCrearEnCreatorHandler, mountDebugRoutes };
+// ─── TAG: CREAR EN CREATOR NHC ───────────────────────────────────────────────
+
+async function ghlCrearEnCreatorNHCHandler(req, res) {
+  res.json({ success: true });
+
+  try {
+    const b = req.body;
+    const contactId = b.contact_id || b.contactId || b.customData?.contactId;
+    if (!contactId) return;
+
+    // GHL sends all data flat in the body — read directly, no API call needed
+    const tagsStr = (b.tags || '').toLowerCase();
+    if (!tagsStr.includes('crear en creator nhc')) return;
+
+    const nombre  = b['NHC - Nombre']            || '';
+    const edad    = b['NHC - Edad']              || '';
+    const genero  = b['NHC - Género']            || '';
+    const sintoma = b['NHC - Síntoma principal'] || '';
+    const movil   = b.phone || '';
+    const email   = b.email || '';
+
+    const faltantes = [
+      !nombre  && 'Nombre',
+      !edad    && 'Edad',
+      !genero  && 'Género',
+      !sintoma && 'Síntoma principal',
+    ].filter(Boolean);
+
+    if (faltantes.length) {
+      console.log('[CrearEnCreatorNHC] Campos faltantes:', faltantes);
+      await ghl.addNote(contactId,
+        `⚠️ Etiqueta "Crear en Creator NHC" aplicada pero la información NO se envió a Zoho Creator.\n\nCampos faltantes: ${faltantes.join(', ')}.\n\nCompletá esos campos y volvé a poner la etiqueta.`
+      );
+      return;
+    }
+
+    console.log('[CrearEnCreatorNHC] Iniciando para contacto:', contactId, { nombre, edad, genero, sintoma });
+    await zoho.crearEnAnamnesis({ nombreNino: nombre, email, movil, contactIdGHL: contactId, edad, sintoma, genero });
+    await ghl.removeTag(contactId, 'crear en creator nhc');
+    await ghl.addTag(contactId, 'creado-en-creator');
+    await ghl.addNote(contactId, `✅ Contacto creado en Zoho Creator.\n\n${nombre} | Edad: ${edad} | Síntoma: ${sintoma}`);
+    console.log('[CrearEnCreatorNHC] Contacto creado en Zoho Creator:', contactId);
+  } catch (err) {
+    console.error('[CrearEnCreatorNHC] Error:', err.message);
+    notifyError('ghl-crear-en-creator-nhc', err).catch(() => {});
+  }
+}
+
+module.exports = { ghlWebhookHandler, ghlCrearEnCreatorHandler, ghlCrearEnCreatorNHCHandler, mountDebugRoutes };
