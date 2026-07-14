@@ -767,6 +767,8 @@ async function ghlCrearEnCreatorNHCHandler(req, res) {
     const tagsStr = (b.tags || '').toLowerCase();
     if (!tagsStr.includes('crear en creator nhc')) return;
 
+    console.log('[CrearEnCreatorNHC] BODY:', JSON.stringify(b));
+
     const nombre  = b['NHC - Nombre']            || '';
     const edad    = b['NHC - Edad']              || '';
     const genero  = b['NHC - Género']            || '';
