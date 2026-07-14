@@ -779,6 +779,7 @@ async function ghlCrearEnCreatorNHCHandler(req, res) {
       !edad    && 'Edad',
       !genero  && 'Género',
       !sintoma && 'Síntoma principal',
+      !email   && 'Email',
     ].filter(Boolean);
 
     if (faltantes.length) {
