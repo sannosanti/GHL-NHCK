@@ -129,9 +129,11 @@ async function guardarCiudadGHL(contactId, ciudad) {
 }
 
 // ─── GHL API HELPERS ─────────────────────────────────────────────────────────
-async function getContact(contactId) {
-  const cached = await db.getCachedContact(contactId);
-  if (cached) return { contact: cached };
+async function getContact(contactId, skipCache = false) {
+  if (!skipCache) {
+    const cached = await db.getCachedContact(contactId);
+    if (cached) return { contact: cached };
+  }
   const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
   });

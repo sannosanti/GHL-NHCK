@@ -41,7 +41,9 @@ async function flushTextQueue(conversationId) {
   const combinedMsg = bodies.join('\n');
 
   try {
-    const contactData = await ghl.getContact(contactId);
+    // skipCache: tags may have been changed manually in GHL (advisor escalation)
+    // since this contact was last cached — this gate must see the live state.
+    const contactData = await ghl.getContact(contactId, true);
     if (contactData.deleted) { await db.limpiarContactoDB(contactId); return; }
 
     const contact = contactData.contact || {};
@@ -476,7 +478,10 @@ async function ghlWebhookHandler(req, res) {
       convData = { ...convData, estado: estadoRetoma, messages: [] };
     }
 
-    const contactData = await ghl.getContact(contactId);
+    // skipCache: this fetch gates whether the bot replies at all — tags may
+    // have been changed manually in GHL (advisor escalation) since this
+    // contact was last cached, so the check must see the live state.
+    const contactData = await ghl.getContact(contactId, true);
     if (contactData.deleted) { await db.limpiarContactoDB(contactId); return; }
 
     const contact = contactData.contact || {};
