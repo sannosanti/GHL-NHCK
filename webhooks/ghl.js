@@ -26,6 +26,17 @@ const textQueues = {};
 /** Random human-like delay between 3 and 6 seconds. */
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
+/**
+ * Wraps ghl.sendMessage for inactivity timers: these fire minutes after being
+ * scheduled, so the contact may have been escalated (manually in GHL, or by
+ * the bot itself) in the meantime — always re-check live tags before sending.
+ */
+async function sendIfNoEscalado(conversationId, message, contactId) {
+  const { contact } = await ghl.getContact(contactId, true);
+  if ((contact?.tags || []).includes('escalado nhck')) return;
+  return ghl.sendMessage(conversationId, message, contactId);
+}
+
 // ─── TEXT QUEUE PROCESSOR ────────────────────────────────────────────────────
 
 /**
@@ -215,7 +226,7 @@ async function flushTextQueue(conversationId) {
         `Para confirmar tu cupo necesitamos un abono de $100.000 💳\nEl saldo restante ($295.000) se cancela el día de la cita.\n¿Cuál medio de pago te queda más fácil?\n\n1️⃣ Link de pago virtual (Wompi)\n2️⃣ Transferencia / consignación Bancolombia\n3️⃣ QR de pago`,
         contactId);
       ghl.actualizarEtapaOportunidad(contactId, constants.STAGE_LINK_PAGO).catch(() => {});
-      timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, async (convId, ctId) => {
+      timers.iniciarTimersInactividad(conversationId, contactId, sendIfNoEscalado, async (convId, ctId) => {
         await db.marcarCerrado(convId);
         triggerAnalysis(convId, ctId || contactId, 'inactividad');
       });
@@ -381,7 +392,7 @@ async function flushTextQueue(conversationId) {
     await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, null, phone);
     await humanDelay();
     await ghl.sendMessages(conversationId, partes, contactId, channel);
-    timers.iniciarTimersInactividad(conversationId, contactId, ghl.sendMessage, async (convId, ctId) => {
+    timers.iniciarTimersInactividad(conversationId, contactId, sendIfNoEscalado, async (convId, ctId) => {
       await db.marcarCerrado(convId);
       triggerAnalysis(convId, ctId || contactId, 'inactividad');
     });
