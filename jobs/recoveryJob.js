@@ -2,7 +2,7 @@
 
 const cron = require('node-cron');
 const { pool } = require('../db');
-const { sendMessage, addTag } = require('../services/ghl');
+const { sendMessage, addTag, getContact } = require('../services/ghl');
 const { callClaude } = require('../ai/claude');
 const { CONOCIMIENTO_NHC, env } = require('../config');
 const { triggerAnalysis } = require('./insightJob');
@@ -127,6 +127,12 @@ async function runRecoveryJob() {
       }
 
       if (!attempt) continue;
+
+      // Live GHL tags can be ahead of our internal `estado` — e.g. an advisor
+      // escalates the contact by hand in GHL, which never touches this row.
+      // Never send a recovery message to an already-escalated contact.
+      const { contact } = await getContact(contact_id, true);
+      if ((contact?.tags || []).includes('escalado nhck')) continue;
 
       console.log(`[recoveryJob] Attempt ${attempt} for conversation ${conversation_id}`);
 
