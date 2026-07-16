@@ -110,6 +110,16 @@ async function flushTextQueue(conversationId) {
     const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA });
     const rawReply = await callClaude(systemPrompt, history);
 
+    // The Claude call above can take several seconds — an advisor may have
+    // escalated this contact manually in GHL while it was in flight. Re-check
+    // the live tag before acting on the reply, same reasoning as sendIfNoEscalado.
+    const liveRecheck = await ghl.getContact(contactId, true);
+    if ((liveRecheck.contact?.tags || []).includes('escalado nhck')) {
+      console.log(`[flushTextQueue] Escalado detectado durante llamada a Claude — abortando respuesta para ${contactId}`);
+      triggerAsesorAnalysis(conversationId, contactId);
+      return;
+    }
+
     let nuevoEstado = estado;
     let nuevoTriaje = { ...triaje };
 
