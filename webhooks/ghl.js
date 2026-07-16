@@ -66,7 +66,13 @@ async function flushTextQueue(conversationId) {
     }
 
     const channel = await ghl.getConversationChannel(contactId).catch(() => 'WhatsApp');
-    const convData = await db.getConversationData(conversationId);
+    let convData;
+    try {
+      convData = await db.getConversationData(conversationId);
+    } catch (err) {
+      console.error('[flushTextQueue] DB_ERROR getConversationData, aborting to avoid resetting to nuevo:', conversationId, err.message);
+      return;
+    }
     const estado = convData?.estado || 'nuevo';
     const triaje = convData?.triaje || {};
     let history = convData?.messages || [];
@@ -246,10 +252,12 @@ async function flushTextQueue(conversationId) {
         const linkPago = pagoResult?.url;
         await humanDelay();
         if (linkPago) {
-          await ghl.sendMessages(conversationId, [
+          const mensajes = [
             `Aquí tienes tu link de pago seguro 👇\n${linkPago}`,
             `Una vez completado te envío los detalles de tu cita 🙌`,
-          ], contactId, channel);
+          ];
+          await ghl.sendMessages(conversationId, mensajes, contactId, channel);
+          history.push({ role: 'assistant', content: [{ type: 'text', text: mensajes.join('\n') }] });
         }
         await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', null, phone);
         return;
@@ -257,22 +265,26 @@ async function flushTextQueue(conversationId) {
 
       if (rawReply.includes('[MEDIO_TRANSFERENCIA]')) {
         await humanDelay();
-        await ghl.sendMessages(conversationId, [
+        const mensajes = [
           `Puedes hacer la transferencia o consignación por $100.000 a esta cuenta 👇`,
           `Bancolombia — Cuenta de Ahorros\nNúmero: 90790901451\nLlave: 0090435866\nA nombre de: Visión Integral Transformación Personal y Organizacional SAS\nNIT: 901164425`,
           `Una vez realizado el pago envíame aquí la foto del comprobante y confirmo tu cita 📸`,
-        ], contactId, channel);
+        ];
+        await ghl.sendMessages(conversationId, mensajes, contactId, channel);
+        history.push({ role: 'assistant', content: [{ type: 'text', text: mensajes.join('\n') }] });
         await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', null, phone);
         return;
       }
 
       if (rawReply.includes('[MEDIO_QR]')) {
         await humanDelay();
-        await ghl.sendMessages(conversationId, [
+        const mensajes = [
           `Aquí está el QR para pagar $100.000 👇\nhttps://neurohackingcenter.co/wp-content/uploads/2026/05/WhatsApp-Image-2026-05-29-at-11.00.03-AM.jpeg`,
           `Ábrelo, toma captura y escanéalo con tu app bancaria 📱\nO usa la llave Bancolombia: 0090435866`,
           `Cuando pagues envíame el comprobante aquí y confirmo tu cita 📸`,
-        ], contactId, channel);
+        ];
+        await ghl.sendMessages(conversationId, mensajes, contactId, channel);
+        history.push({ role: 'assistant', content: [{ type: 'text', text: mensajes.join('\n') }] });
         await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'esperando_pago', null, phone);
         return;
       }
@@ -341,15 +353,17 @@ async function flushTextQueue(conversationId) {
     if (rawReply.includes('[ESCALAR]')) {
       await ghl.addTag(contactId, 'escalado nhck');
       await db.logEvent(contactId, conversationId, 'escalado', { motivo: combinedMsg });
+      const replyLimpio = rawReply.replace(/\[ESCALAR\]/g, '').trim();
+      const textoEnviado = replyLimpio || 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌';
+      history.push({ role: 'assistant', content: [{ type: 'text', text: textoEnviado }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', null, phone);
       triggerAnalysis(conversationId, contactId, 'escalado');
       await humanDelay();
-      const replyLimpio = rawReply.replace(/\[ESCALAR\]/g, '').trim();
       if (replyLimpio) {
         const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
         await ghl.sendMessages(conversationId, partes, contactId, channel);
       } else {
-        await ghl.sendMessage(conversationId, 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌', contactId, channel);
+        await ghl.sendMessage(conversationId, textoEnviado, contactId, channel);
       }
       return;
     }
@@ -437,7 +451,19 @@ async function ghlWebhookHandler(req, res) {
       console.log('IMAGEN: conversationId recuperado:', conversationId);
     }
 
-    // Deduplication
+    // Deduplication — messageId-based first (longer TTL: retries can arrive
+    // later than the 6s content-dedup window), falling back to the existing
+    // content-based dedup for events that don't carry a messageId.
+    if (messageId) {
+      const msgIdKey = `proc_msgid_${messageId}`;
+      if (messageBuffers[msgIdKey]) {
+        console.log(`DEDUP: ignorado por messageId (${msgIdKey})`);
+        return;
+      }
+      messageBuffers[msgIdKey] = true;
+      setTimeout(() => { delete messageBuffers[msgIdKey]; }, 60000);
+    }
+
     const msgSnippet = isImage ? 'img' : isAudio ? 'audio' : (messageBody || '').trim().substring(0, 15) || 'nomsg';
     const dedupKey = `proc_${contactId}_${msgSnippet}`;
     if (messageBuffers[dedupKey]) {
@@ -470,23 +496,37 @@ async function ghlWebhookHandler(req, res) {
 
     const channel = await ghl.getConversationChannel(contactId).catch(() => 'WhatsApp');
 
-    let convData = await db.getConversationData(conversationId);
+    let convData;
+    try {
+      convData = await db.getConversationData(conversationId);
+    } catch (err) {
+      console.error('[ghlWebhookHandler] DB_ERROR getConversationData, aborting message processing:', conversationId, err.message);
+      return;
+    }
     if (convData?.recovery_status) {
       db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1 AND agent=$2', [conversationId, env.agentName]).catch(() => {});
     }
     timers.limpiarTimers(conversationId);
 
-    // If conversation was closed by inactivity and user writes again → restart keeping triaje
+    // If conversation was closed by inactivity and user writes again → restart,
+    // resuming into estado_antes_cierre when it's a state worth preserving
+    // (agendando/esperando_pago/escalado), falling back to triaje-derived
+    // state otherwise (legacy rows / closed before reaching those states).
+    // messages is intentionally kept (not wiped) so Claude retains context.
     if (convData?.estado === 'cerrado') {
       const t = convData.triaje || {};
-      const estadoRetoma = (t.triaje1 && t.triaje2 && t.triaje3)
-        ? 'triaje_completo'
-        : (t.triaje1 && t.triaje2 ? 'triaje_p3' : (t.triaje1 ? 'triaje_p2' : 'nuevo'));
+      const estadoAntesCierre = convData.estado_antes_cierre;
+      const estadosPreservables = ['agendando', 'esperando_pago', 'escalado'];
+      const estadoRetoma = estadosPreservables.includes(estadoAntesCierre)
+        ? estadoAntesCierre
+        : ((t.triaje1 && t.triaje2 && t.triaje3)
+          ? 'triaje_completo'
+          : (t.triaje1 && t.triaje2 ? 'triaje_p3' : (t.triaje1 ? 'triaje_p2' : 'nuevo')));
       await db.pool.query(
-        'UPDATE conversations SET estado=$1, messages=\'[]\'::jsonb, recovery_status=NULL, updated_at=NOW() WHERE conversation_id=$2 AND agent=$3',
+        'UPDATE conversations SET estado=$1, recovery_status=NULL, updated_at=NOW() WHERE conversation_id=$2 AND agent=$3',
         [estadoRetoma, conversationId, env.agentName]
       );
-      convData = { ...convData, estado: estadoRetoma, messages: [] };
+      convData = { ...convData, estado: estadoRetoma };
     }
 
     // skipCache: this fetch gates whether the bot replies at all — tags may

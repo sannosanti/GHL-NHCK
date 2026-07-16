@@ -66,6 +66,11 @@ async function initDB() {
   // answering, but as Luisa, once the patient turns out to be an adult).
   // NULL means "answer as this deployment's own agent", as before.
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS derivado_a VARCHAR(20) DEFAULT NULL`).catch(() => {});
+  // Preserves the estado a conversation was in right before it got marked
+  // 'cerrado' (inactivity timeout), so reactivation can resume into
+  // agendando/esperando_pago/escalado instead of being capped at whatever
+  // triaje1/2/3 booleans can re-derive.
+  await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS estado_antes_cierre TEXT DEFAULT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
   // GHL uses one conversation_id per contact regardless of which agent's
   // WhatsApp number they wrote to — without agent in the key, Luisa and
@@ -143,7 +148,13 @@ async function getConversationData(conversationId) {
   try {
     const res = await pool.query('SELECT * FROM conversations WHERE conversation_id = $1 AND agent = $2', [conversationId, env.agentName]);
     return res.rows[0] || null;
-  } catch { return null; }
+  } catch (err) {
+    // Re-throw instead of swallowing: a real DB error must not look like
+    // "no row found" to callers, or a transient failure silently resets a
+    // real contact back to a brand-new greeting (estado || 'nuevo').
+    console.error('DB_ERROR getConversationData', conversationId, err);
+    throw err;
+  }
 }
 
 async function saveConversationData(conversationId, contactId, messages, triaje, estado, lastMessageId, phone) {
@@ -347,8 +358,14 @@ async function getKnowledgeGaps() {
 
 async function marcarCerrado(conversationId) {
   try {
+    // Copies the current estado into estado_antes_cierre in the same UPDATE
+    // (single query, no caller changes needed). Guarded so a repeat call
+    // (already 'cerrado') doesn't clobber the previously saved estado.
     await pool.query(
-      "UPDATE conversations SET estado='cerrado', updated_at=NOW() WHERE conversation_id=$1 AND agent=$2",
+      `UPDATE conversations
+       SET estado_antes_cierre = CASE WHEN estado <> 'cerrado' THEN estado ELSE estado_antes_cierre END,
+           estado='cerrado', updated_at=NOW()
+       WHERE conversation_id=$1 AND agent=$2`,
       [conversationId, env.agentName]
     );
   } catch (err) { console.error('Error marcando cerrado:', err.message); }
