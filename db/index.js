@@ -71,6 +71,23 @@ async function initDB() {
   // agendando/esperando_pago/escalado instead of being capped at whatever
   // triaje1/2/3 booleans can re-derive.
   await pool.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS estado_antes_cierre TEXT DEFAULT NULL`).catch(() => {});
+  // Per-call Claude token usage, tagged by agent (carolina/luisa share this
+  // table via the same shared Postgres instance) — feeds the /dashboard/tokens
+  // cost dashboard. Written by ai/claude.js after every successful API call.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id SERIAL PRIMARY KEY,
+      agent VARCHAR(20) NOT NULL,
+      model VARCHAR(60) NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_token_usage_agent_created ON token_usage (agent, created_at)`).catch(() => {});
   await pool.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS agent VARCHAR(20) DEFAULT 'carolina'`).catch(() => {});
   // GHL uses one conversation_id per contact regardless of which agent's
   // WhatsApp number they wrote to — without agent in the key, Luisa and
@@ -481,9 +498,49 @@ async function getRecentInsightSuggestions(rootCause, days = 30) {
   } catch { return []; }
 }
 
+async function logTokenUsage(agent, model, usage, costUsd) {
+  try {
+    await pool.query(
+      `INSERT INTO token_usage
+        (agent, model, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, cost_usd)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        agent, model,
+        usage?.input_tokens || 0,
+        usage?.output_tokens || 0,
+        usage?.cache_creation_input_tokens || 0,
+        usage?.cache_read_input_tokens || 0,
+        costUsd || 0,
+      ]
+    );
+  } catch (err) { console.error('Error logging token usage:', err.message); }
+}
+
+async function getTokenUsageDaily(days = 30) {
+  const res = await pool.query(
+    `SELECT
+       agent,
+       to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+       SUM(input_tokens)::bigint AS input_tokens,
+       SUM(output_tokens)::bigint AS output_tokens,
+       SUM(cache_creation_input_tokens)::bigint AS cache_creation_input_tokens,
+       SUM(cache_read_input_tokens)::bigint AS cache_read_input_tokens,
+       SUM(cost_usd)::float AS cost_usd,
+       COUNT(*)::int AS calls
+     FROM token_usage
+     WHERE created_at > NOW() - ($1 || ' days')::interval
+     GROUP BY agent, day
+     ORDER BY day ASC`,
+    [days]
+  );
+  return res.rows;
+}
+
 module.exports = {
   pool,
   initDB,
+  logTokenUsage,
+  getTokenUsageDaily,
   getConversationData,
   saveConversationData,
   limpiarContactoDB,

@@ -21,6 +21,7 @@ const { ghlWebhookHandler, ghlCrearEnCreatorHandler, ghlCrearEnCreatorNHCHandler
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
 const { zohoCitaWebhookHandler } = require('./webhooks/zoho');
 const analyticsRouter = require('./analytics');
+const tokenDashboardRouter = require('./analytics/tokens');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
 const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
@@ -161,6 +162,27 @@ app.get('/informe/triaje-completo', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Token/cost usage — both agents, since Carolina and Luisa share this Postgres
+// instance (see db/index.js token_usage table). Not filtered by env.agentName
+// on purpose: this dashboard is meant to compare the two bots side by side.
+app.get('/informe/tokens', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
+    const diario = await db.getTokenUsageDaily(days);
+    const totales = await db.pool.query(`
+      SELECT
+        agent,
+        SUM(cost_usd) FILTER (WHERE created_at > date_trunc('day', NOW()))::float AS costo_hoy,
+        SUM(cost_usd) FILTER (WHERE created_at > date_trunc('month', NOW()))::float AS costo_mes,
+        SUM(input_tokens + output_tokens) FILTER (WHERE created_at > date_trunc('day', NOW()))::bigint AS tokens_hoy,
+        SUM(input_tokens + output_tokens) FILTER (WHERE created_at > date_trunc('month', NOW()))::bigint AS tokens_mes,
+        COUNT(*) FILTER (WHERE created_at > date_trunc('day', NOW()))::int AS llamadas_hoy
+      FROM token_usage
+      GROUP BY agent
+    `);
+    res.json({ generado: new Date().toISOString(), dias: days, diario, totales: totales.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ─── EVALUACION NHCK ──────────────────────────────────────────────────────────
 
@@ -435,6 +457,7 @@ app.get('/admin/update/:id', async (req, res) => {
 // ─── ANALYTICS ────────────────────────────────────────────────────────────────
 
 app.use('/dashboard', analyticsRouter);
+app.use('/dashboard/tokens', tokenDashboardRouter);
 
 // ─── WEBHOOK ROUTES ───────────────────────────────────────────────────────────
 
