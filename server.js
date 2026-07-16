@@ -228,7 +228,7 @@ app.post('/historia-clinica', async (req, res) => {
   // ── 4. Build Creator payload ──────────────────────────────────────────────
   const creatorPayload = {
     Fecha_elaboracion:             d.fechaElaboracion,
-    Nombre_consultante:            contactoID || d.nombreConsultante,
+    Nombre_del_consultante:        contactoID || d.nombreConsultante,
     Edad_consultante:              d.edadConsultante,
     Edad_padres_cuidadores:        d.edadPadresCuidadores        || '',
     Lateralidad:                   d.lateralidad                 || '',
@@ -286,7 +286,7 @@ app.post('/historia-clinica', async (req, res) => {
 
   // ── 5. Submit to Creator ──────────────────────────────────────────────────
   try {
-    const cr = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Historia_Clinica', {
+    const cr = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/HISTORIAS_CLINICAS', {
       method: 'POST',
       headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ data: creatorPayload }),
