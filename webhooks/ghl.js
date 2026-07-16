@@ -549,6 +549,22 @@ async function ghlWebhookHandler(req, res) {
     const tags = contact.tags || [];
     const estado = convData?.estado || 'nuevo';
 
+    // 'activo nhck' is applied externally (Zoho enrollment / ops team) to mark
+    // an established patient already in treatment — it never comes from our
+    // own code. If our own state machine ever lost track of their progress
+    // (e.g. reactivated to 'nuevo' after a long-inactivity close because this
+    // contact's relationship was handled manually and never reached a
+    // preservable estado), never show the onboarding script to them again —
+    // route straight to a human instead.
+    if (estado === 'nuevo' && tags.includes('activo nhck') && !tags.includes('escalado nhck')) {
+      await ghl.addTag(contactId, 'escalado nhck');
+      await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
+      triggerAnalysis(conversationId, contactId, 'activo_reinicio_evitado');
+      await humanDelay();
+      await ghl.sendMessage(conversationId, 'Hola de nuevo 😊 Ya te conectamos con nuestro equipo para darte seguimiento personalizado.', contactId, channel);
+      return;
+    }
+
     // AUDIOS — transcribe with Whisper, then continue normal flow
     let skipAudioFlow = false;
     if (isAudio) {
