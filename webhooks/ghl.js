@@ -82,29 +82,31 @@ async function flushTextQueue(conversationId) {
     history.push({ role: 'user', content: [{ type: 'text', text: combinedMsg }] });
     if (history.length > 20) history = history.slice(-20);
 
-    // Availability
+    // Availability — computed regardless of estado: a lead can ask "para
+    // cuándo tienen cita" before finishing the triage, and Luisa must be able
+    // to answer with real dates herself instead of escalating for lack of
+    // data (see ai/prompt.js reglasBase). Cached per fecha ISO across all
+    // conversations, so this doesn't add a Zoho call per message.
     let disponibilidadTexto = '';
-    if (estado === 'agendando' || estado === 'triaje_completo') {
-      try {
-        const hoy = new Date();
-        const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-        const diasN = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-        for (let offset = 1; offset <= 14; offset++) {
-          const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
-          const ds = f.getDay();
-          if (constants.HORARIOS_NHCK[ds]) {
-            const fISO = f.toISOString().split('T')[0];
-            let citas = await db.getCachedDisponibilidad(fISO);
-            if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
-            const slots = zoho.calcularSlotsLibres(citas, fISO);
-            if (slots.length > 0) {
-              disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
-            }
+    try {
+      const hoy = new Date();
+      const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      const diasN = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+      for (let offset = 1; offset <= 14; offset++) {
+        const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
+        const ds = f.getDay();
+        if (constants.HORARIOS_NHCK[ds]) {
+          const fISO = f.toISOString().split('T')[0];
+          let citas = await db.getCachedDisponibilidad(fISO);
+          if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
+          const slots = zoho.calcularSlotsLibres(citas, fISO);
+          if (slots.length > 0) {
+            disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
           }
         }
-        if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos 14 días.';
-      } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
-    }
+      }
+      if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos 14 días.';
+    } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
 
     const derivadoA = convData?.derivado_a || null;
     const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA });
