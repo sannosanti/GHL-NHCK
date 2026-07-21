@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NHC Kids · Formulario de Evaluación</title>
+  <title>NHC Kids · Triaje Infantil</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -211,7 +211,7 @@
 
   <div class="header">
     <div class="logo">NHC <span>Kids</span></div>
-    <div class="tagline">Formulario de evaluación inicial</div>
+    <div class="tagline">Triaje infantil inicial</div>
   </div>
 
   <div class="progress-wrap" id="progressWrap">
@@ -230,7 +230,7 @@
     <div class="step active" id="step-1">
       <div class="step-label">Paciente</div>
       <div class="question">¿Cuál es el nombre del niño o niña?</div>
-      <div class="subtitle">Nombre completo del paciente que recibirá la evaluación.</div>
+      <div class="subtitle">Nombre completo del paciente que recibirá el triaje.</div>
       <input type="text" id="nombreNino" placeholder="Ej: Valentina García" autocomplete="off" />
       <div class="error-msg" id="err-1">Por favor ingresá el nombre completo.</div>
       <button class="btn-primary" onclick="next(1)">Siguiente →</button>
@@ -240,7 +240,7 @@
     <div class="step" id="step-2">
       <div class="step-label">Datos del paciente</div>
       <div class="question">¿Cuántos años tiene?</div>
-      <div class="subtitle">La evaluación está disponible a partir de los 7 años.</div>
+      <div class="subtitle">El triaje está disponible a partir de los 7 años.</div>
       <input type="number" id="edad" placeholder="Ej: 9" min="1" max="18" />
       <div class="error-msg" id="err-2">Ingresá una edad válida (1–18 años).</div>
       <button class="btn-primary" onclick="next(2)">Siguiente →</button>
@@ -353,7 +353,7 @@
     <div class="step" id="step-7">
       <div class="step-label">Tus datos de contacto</div>
       <div class="question">¿Cuál es tu correo electrónico?</div>
-      <div class="subtitle">Te enviamos los detalles de la evaluación por este medio.</div>
+      <div class="subtitle">Te enviamos los detalles del triaje por este medio.</div>
       <input type="email" id="email" placeholder="Ej: maria@gmail.com" />
       <div class="error-msg" id="err-7">Ingresá un correo electrónico válido.</div>
       <button class="btn-primary" id="btnSubmit" onclick="submitForm()">Enviar</button>
@@ -365,7 +365,7 @@
       <div class="success">
         <div class="success-icon">✓</div>
         <h2>¡Listo! Recibimos tu información</h2>
-        <p>Un asesor de NHC Kids se comunicará pronto para coordinar tu evaluación.<br><br>Si tenés preguntas, escribinos por WhatsApp.</p>
+        <p>Un asesor de NHC Kids se comunicará pronto para coordinar tu triaje.<br><br>Si tenés preguntas, escribinos por WhatsApp.</p>
       </div>
     </div>
 
@@ -478,7 +478,7 @@
     btn.innerHTML = '<span class="spinner"></span>Enviando...';
 
     try {
-      const res = await fetch(`${SERVER_URL}/evaluacion`, {
+      const res = await fetch(`${SERVER_URL}/triaje-infantil`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),

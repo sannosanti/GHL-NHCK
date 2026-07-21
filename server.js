@@ -28,7 +28,7 @@ const { startDailyReport } = require('./jobs/dailyReport');
 const { startPendingWebhookJob } = require('./jobs/pendingWebhookJob');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
-const { getZohoAccessToken, crearEnAnamnesis, buscarOCrearContactoHistoria } = require('./services/zoho');
+const { getZohoAccessToken, crearTriajeInfantil, buscarOCrearContactoAnamnesisClinica } = require('./services/zoho');
 const fetch = require('node-fetch');
 
 const app = express();
@@ -184,9 +184,9 @@ app.get('/informe/tokens', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ─── EVALUACION NHCK ──────────────────────────────────────────────────────────
+// ─── ANAMNESIS CLÍNICA Y TRIAJE NHCK ─────────────────────────────────────────
 
-// Alias used by historia-clinica.html
+// Alias used by anamnesis-clinica-infantil.html
 app.get('/zoho-creator-token', async (req, res) => {
   try {
     const token = await getZohoAccessToken();
@@ -196,7 +196,7 @@ app.get('/zoho-creator-token', async (req, res) => {
   }
 });
 
-app.post('/historia-clinica', async (req, res) => {
+app.post('/anamnesis-clinica-infantil', async (req, res) => {
   const d = req.body;
 
   // ── 1. Validate required fields ──────────────────────────────────────────
@@ -214,15 +214,15 @@ app.post('/historia-clinica', async (req, res) => {
   // ── 3. Find or create Contacto in Creator ────────────────────────────────
   let contactoID = null;
   try {
-    contactoID = await buscarOCrearContactoHistoria({
+    contactoID = await buscarOCrearContactoAnamnesisClinica({
       nombre: d.nombreConsultante,
       movil:  d.movilConsultante  || '',
       email:  d.emailConsultante  || '',
       edad:   d.edadConsultante   || '',
     });
-    if (contactoID) console.log('[/historia-clinica] Contacto ID:', contactoID);
+    if (contactoID) console.log('[/anamnesis-clinica-infantil] Contacto ID:', contactoID);
   } catch (err) {
-    console.warn('[/historia-clinica] Contacto lookup/create failed:', err.message);
+    console.warn('[/anamnesis-clinica-infantil] Contacto lookup/create failed:', err.message);
   }
 
   // ── 4. Build Creator payload ──────────────────────────────────────────────
@@ -292,7 +292,7 @@ app.post('/historia-clinica', async (req, res) => {
       body: JSON.stringify({ data: creatorPayload }),
     });
     const crData = await cr.json();
-    console.log('[/historia-clinica] Creator response:', JSON.stringify(crData));
+    console.log('[/anamnesis-clinica-infantil] Creator response:', JSON.stringify(crData));
 
     if (crData.code === 3000 || crData.data?.ID) {
       return res.json({ ok: true, id: crData.data?.ID, contactoID });
@@ -315,7 +315,7 @@ app.get('/zoho-token', async (req, res) => {
   }
 });
 
-app.post('/evaluacion', async (req, res) => {
+app.post('/triaje-infantil', async (req, res) => {
   try {
     const { nombreNino, email, movil, edad, sintoma, genero, estudia } = req.body;
     if (!nombreNino || !movil) {
@@ -338,23 +338,23 @@ app.post('/evaluacion', async (req, res) => {
             phone: movil,
             email: email || undefined,
             locationId: env.ghlLocationId,
-            tags: ['formulario-evaluacion'],
+            tags: ['triaje-infantil'],
           }),
         });
         const ghlData = await ghlRes.json();
         contactIdGHL = ghlData?.contact?.id || '';
-        console.log('[/evaluacion] GHL contact:', contactIdGHL || 'not created');
+        console.log('[/triaje-infantil] GHL contact:', contactIdGHL || 'not created');
       } catch (ghlErr) {
-        console.warn('[/evaluacion] GHL contact creation failed:', ghlErr.message);
+        console.warn('[/triaje-infantil] GHL contact creation failed:', ghlErr.message);
       }
     }
 
-    const result = await crearEnAnamnesis({
+    const result = await crearTriajeInfantil({
       nombreNino, email, movil, edad, sintoma, genero, estudia, contactIdGHL,
     });
     res.json({ ok: true, contactoID: result.contactoID, ghlId: contactIdGHL });
   } catch (err) {
-    console.error('[/evaluacion]', err.message);
+    console.error('[/triaje-infantil]', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

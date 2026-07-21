@@ -425,7 +425,25 @@ function mapearSintomaAdulto(s) {
   return 'Sin información';
 }
 
+/**
+ * Whether the commercial team is currently working. They're off from
+ * Saturday 1pm through Monday 8am (America/Bogota) — Luisa must not promise
+ * an imminent human follow-up ("pronto", "en un momento") during that window.
+ */
+function equipoComercialDisponible() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota', weekday: 'short', hour: 'numeric', hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const weekday = parts.find(p => p.type === 'weekday').value;
+  const hour = parseInt(parts.find(p => p.type === 'hour').value, 10);
+  if (weekday === 'Sun') return false;
+  if (weekday === 'Sat' && hour >= 13) return false;
+  if (weekday === 'Mon' && hour < 8) return false;
+  return true;
+}
+
 module.exports = {
   env, constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS,
   mapearSintoma, mapearGenero, mapearOcupacionNino, mapearSintomaAdulto,
+  equipoComercialDisponible,
 };

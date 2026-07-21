@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { env, constants } = require('../config');
+const { env, constants, equipoComercialDisponible } = require('../config');
 const db = require('../db');
 const ghl = require('../services/ghl');
 const zoho = require('../services/zoho');
@@ -366,7 +366,9 @@ async function flushTextQueue(conversationId) {
       await ghl.addTag(contactId, 'escalado nhck');
       await db.logEvent(contactId, conversationId, 'escalado', { motivo: combinedMsg });
       const replyLimpio = rawReply.replace(/\[ESCALAR\]/g, '').trim();
-      const textoEnviado = replyLimpio || 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌';
+      const textoEnviado = replyLimpio || (equipoComercialDisponible()
+        ? 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌'
+        : 'Nuestro equipo retoma el lunes a primera hora y te atiende por aquí apenas esté disponible 🙌');
       history.push({ role: 'assistant', content: [{ type: 'text', text: textoEnviado }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', null, phone);
       triggerAnalysis(conversationId, contactId, 'escalado');
@@ -676,7 +678,7 @@ async function ghlWebhookHandler(req, res) {
 
         let resultado = null;
         try {
-          resultado = await zoho.crearEnAnamnesis({
+          resultado = await zoho.crearTriajeInfantil({
             nombreNino: pago.nombre_nino || contact.firstName || '',
             email: contact.email || '', movil: contact.phone || '', contactIdGHL: contactId,
             edad: pago.edad, sintoma: pago.sintoma, genero: pago.genero,
@@ -826,7 +828,7 @@ async function ghlCrearEnCreatorHandler(req, res) {
     }
 
     console.log('[CrearEnCreator] Iniciando para contacto:', contactId, { nombreNino, edad, genero, estudia, sintoma });
-    await zoho.crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL: contactId, edad, sintoma, genero, estudia });
+    await zoho.crearTriajeInfantil({ nombreNino, email, movil, contactIdGHL: contactId, edad, sintoma, genero, estudia });
     await ghl.removeTag(contactId, 'crear en creator');
     await ghl.addTag(contactId, 'creado-en-creator');
     await ghl.addNote(contactId, `✅ Contacto creado en Zoho Creator.\n\nNiño: ${nombreNino} | Edad: ${edad} | Síntoma: ${sintoma}`);
@@ -875,7 +877,7 @@ async function ghlCrearEnCreatorNHCHandler(req, res) {
     }
 
     console.log('[CrearEnCreatorNHC] Iniciando para contacto:', contactId, { nombre, edad, genero, sintoma });
-    await zoho.crearEnAnamnesis({ nombreNino: nombre, email, movil, contactIdGHL: contactId, edad, sintoma, genero });
+    await zoho.crearTriajeInfantil({ nombreNino: nombre, email, movil, contactIdGHL: contactId, edad, sintoma, genero });
     await ghl.removeTag(contactId, 'crear en creator nhc');
     await ghl.addTag(contactId, 'creado-en-creator');
     await ghl.addNote(contactId, `✅ Contacto creado en Zoho Creator.\n\n${nombre} | Edad: ${edad} | Síntoma: ${sintoma}`);

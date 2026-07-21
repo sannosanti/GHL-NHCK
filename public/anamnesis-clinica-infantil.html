@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NHC Kids · Historia Clínica Infantil</title>
+  <title>NHC Kids · Anamnesis Clínica Infantil</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -177,7 +177,7 @@
 
   <div class="header">
     <div class="logo">NHC <span>Kids</span></div>
-    <div class="tagline">Historia clínica infantil</div>
+    <div class="tagline">Anamnesis clínica infantil</div>
   </div>
 
   <div class="progress-wrap" id="progressWrap">
@@ -194,7 +194,7 @@
 
   <div class="success-card" id="successCard">
     <div class="success-icon">✓</div>
-    <h2>Historia clínica completada</h2>
+    <h2>Anamnesis clínica completada</h2>
     <p>El PDF se descargó automáticamente.<br>Si no aparece, podés volver a descargarlo abajo.</p>
     <button class="btn-primary" onclick="redownloadPDF()">Descargar PDF de nuevo ↓</button>
     <button class="btn-secondary" onclick="reiniciar()">Iniciar nueva historia</button>
@@ -547,7 +547,7 @@ function generatePDF(data) {
       // continuation header
       doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(150);
       const nom = (data.nombreConsultante || 'Paciente').slice(0,40);
-      doc.text(`Historia Clínica · ${nom}`, ML, 12);
+      doc.text(`Anamnesis Clínica · ${nom}`, ML, 12);
       doc.setDrawColor(14,165,233); doc.setLineWidth(0.3);
       doc.line(ML, 14, PW - MR, 14);
       y = 22;
@@ -564,7 +564,7 @@ function generatePDF(data) {
   y += 8;
 
   doc.setFontSize(15); doc.setFont('helvetica','normal'); doc.setTextColor(30,41,59);
-  doc.text('Historia clínica infantil', ML, y);
+  doc.text('Anamnesis clínica infantil', ML, y);
   y += 5;
 
   doc.setFontSize(9); doc.setTextColor(120);
@@ -657,14 +657,14 @@ async function submitToCreator(data) {
     const tokenRes = await fetch(`${SERVER_URL}/zoho-creator-token`);
     if (!tokenRes.ok) throw new Error(`Token error ${tokenRes.status}`);
     // token obtained — submit via server endpoint
-    const submitRes = await fetch(`${SERVER_URL}/historia-clinica`, {
+    const submitRes = await fetch(`${SERVER_URL}/anamnesis-clinica-infantil`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     const result = await submitRes.json();
     if (result.ok) {
-      console.log('[Creator] Historia clínica guardada. ID:', result.id);
+      console.log('[Creator] Anamnesis clínica guardada. ID:', result.id);
     } else {
       console.warn('[Creator] Error al guardar:', result.error, '| Stage:', result.stage);
     }

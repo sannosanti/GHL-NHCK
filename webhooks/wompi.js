@@ -44,12 +44,12 @@ async function wompiWebhookHandler(req, res) {
 
     let resultado = null;
     try {
-      resultado = await zoho.crearEnAnamnesis({
+      resultado = await zoho.crearTriajeInfantil({
         nombreNino: nombreNino || contact.firstName || '',
         email: contact.email || '', movil: contact.phone || '', contactIdGHL: contactId,
         edad, sintoma, genero, estudia: ocupacion === 'Estudiante de colegio',
       });
-    } catch (err) { console.error('Error Anamnesis:', err.message); }
+    } catch (err) { console.error('Error Triaje:', err.message); }
 
     try {
       await zoho.crearCitasCalendario({

@@ -1,6 +1,6 @@
 'use strict';
 
-const { constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS } = require('../config');
+const { constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS, equipoComercialDisponible } = require('../config');
 const db = require('../db');
 
 // Cached separately per brand: a conversation handed off to Luisa needs HER
@@ -42,6 +42,7 @@ async function buildSystemPrompt(estado, ctx) {
   const triajeP1 = esAdulto ? constants.TRIAJE_P1_ADULTOS : constants.TRIAJE_P1;
   const triajeP2 = esAdulto ? constants.TRIAJE_P2_ADULTOS : constants.TRIAJE_P2;
   const triajeP3 = esAdulto ? constants.TRIAJE_P3_ADULTOS : constants.TRIAJE_P3;
+  const fueraHorarioComercial = !equipoComercialDisponible();
 
   const reglasBase = `
 REGLAS CRÍTICAS:
@@ -71,6 +72,7 @@ ${esAdulto ? '' : '- Usa el nombre del NIÑO correctamente — no lo confundas c
 - Si preguntan por fechas, horarios o disponibilidad de cita — EN CUALQUIER MOMENTO de la conversación, incluso si el triaje todavía no está completo — mostrales vos misma 2 o 3 opciones reales tomadas de la sección DISPONIBILIDAD más abajo. Consultar la agenda es tu función normal: NUNCA escales solo porque te pregunten cuándo hay cita
 - Si elige una fecha y todavía faltan datos tuyos por resolver (nombre, ciudad, edad, motivo de consulta) → seguí pidiendo lo que falte a partir de ahí, uno a la vez, sin repetir lo que ya tenés. Seguís sin poder mencionar precio ni activar cobro hasta tener nombre, ciudad dentro de cobertura y motivo de consulta (ver regla de precio más arriba)
 - Escalá por temas de agenda ([ESCALAR]) solo si DISPONIBILIDAD viene vacía o dice "No consultada" (falla real de sistema), o si el cliente pide explícitamente una llamada telefónica o hablar con una persona real — nunca por el simple hecho de preguntar fechas
+${fueraHorarioComercial ? '- El equipo comercial está FUERA de horario ahora mismo (fin de semana: sábado después de la 1pm, domingo, o antes de las 8am del lunes) — si vas a escalar ([ESCALAR]), NUNCA digas "pronto", "en un momento", "ahora mismo" ni nada que suene inmediato. Decí con calidez que el equipo retoma el lunes a primera hora y te van a contactar apenas estén disponibles\n' : ''}
 
 CIERRES DEFINITIVOS (sin asesor):
 - Ciudad fuera de cobertura → [CIUDAD_NO_DISPONIBLE]
@@ -271,7 +273,7 @@ CONTEXTO de ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}${ctxLines 
 Esta conversación ya fue escalada — hay un asesor humano asignado o el cliente completó el proceso.
 NUNCA preguntes información que ya tenemos (triaje, edad, síntoma) — ya está registrada.
 Respondé consultas puntuales usando el CONOCIMIENTO BASE.
-Si preguntan algo que requiere atención personalizada → informá que un asesor les contactará pronto.
+Si preguntan algo que requiere atención personalizada → informá que un asesor les va a contactar${fueraHorarioComercial ? ' el lunes a primera hora, apenas el equipo esté disponible' : ' pronto'}.
 
 Si pide llamada o algo que no podés resolver → [ESCALAR]`;
 

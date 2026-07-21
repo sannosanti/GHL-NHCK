@@ -56,7 +56,7 @@ async function buscarContactoAnamnesis(movil, email) {
   } catch (err) { console.error('Error buscando contacto:', err.message); return null; }
 }
 
-async function crearEnAnamnesis({ nombreNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
+async function crearTriajeInfantil({ nombreNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
   const token = await getZohoAccessToken();
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
   const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
@@ -205,7 +205,7 @@ async function buscarContactoPorNombre(nombre) {
   }
 }
 
-async function buscarOCrearContactoHistoria({ nombre, movil, email, edad }) {
+async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad }) {
   // 1. Search by phone / email (most reliable — uses existing buscarContactoAnamnesis)
   if (movil || email) {
     const id = await buscarContactoAnamnesis(movil || '', email || '');
@@ -235,7 +235,7 @@ async function buscarOCrearContactoHistoria({ nombre, movil, email, edad }) {
           phone: movil,
           email: email || undefined,
           locationId: env.ghlLocationId,
-          tags: ['historia-clinica'],
+          tags: ['anamnesis-clinica-infantil'],
         }),
       });
       const ghlData = await ghlRes.json();
@@ -264,8 +264,8 @@ async function buscarOCrearContactoHistoria({ nombre, movil, email, edad }) {
 module.exports = {
   getZohoAccessToken,
   buscarContactoAnamnesis,
-  buscarOCrearContactoHistoria,
-  crearEnAnamnesis,
+  buscarOCrearContactoAnamnesisClinica,
+  crearTriajeInfantil,
   crearCitasCalendario,
   getContactoPorId,
   getDisponibilidad,
