@@ -14,7 +14,7 @@
 require('https').globalAgent = new (require('https').Agent)({ keepAlive: false });
 
 const express = require('express');
-const { env } = require('./config');
+const { env, mapearComoSupoAnamnesis } = require('./config');
 const db = require('./db');
 const { removeTag } = require('./services/ghl');
 const { ghlWebhookHandler, ghlCrearEnCreatorHandler, ghlCrearEnCreatorNHCHandler } = require('./webhooks/ghl');
@@ -364,7 +364,7 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
           violenciaVivida: d.abusosViolencia,
           conformacionFamilia: combine(['Conformación familia', d.conformacionFamilia], ['Dinámica familiar', d.dinamicaFamiliar]),
           consumeSustancias: d.consumeSustancias,
-          comoSupo: d.comoSupo,
+          comoSupo: mapearComoSupoAnamnesis(d.comoSupo),
         });
         anamnesisCreada = anamnesisResult?.code === 3000 || !!anamnesisResult?.data?.ID;
         if (!anamnesisCreada) anamnesisError = anamnesisResult;

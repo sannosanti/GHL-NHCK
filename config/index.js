@@ -413,6 +413,20 @@ function mapearOcupacionNino(estudia) {
   return (estudia === true || estudia === 'si' || estudia === 'sí') ? 'Estudiante de colegio' : 'N.A';
 }
 
+// Maps the kids Historia Clínica form's verbose "¿Cómo supo de nosotros?"
+// options to Zoho's Anamnesis.C_mo_supo_de_nosotros picklist, which only
+// accepts the same short set the adults form already uses natively
+// (Google/Instagram/Facebook/Referido/Otro — confirmed live 2026-07-22,
+// the kids form's own long-form options fail with "Invalid column value").
+function mapearComoSupoAnamnesis(s) {
+  s = (s || '').toLowerCase();
+  if (s.includes('google')) return 'Google';
+  if (s.includes('instagram')) return 'Instagram';
+  if (s.includes('facebook')) return 'Facebook';
+  if (s.includes('familiar') || s.includes('amigo') || s.includes('médic') || s.includes('medic') || s.includes('profesional')) return 'Referido';
+  return 'Otro';
+}
+
 // Maps Luisa's TRIAJE_P1 answer to the GHL "Síntoma o necesidad" picklist
 // (contact.sntoma_o_necesidad, RADIO, no custom options allowed — must match exactly).
 function mapearSintomaAdulto(s) {
@@ -445,5 +459,6 @@ function equipoComercialDisponible() {
 module.exports = {
   env, constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS,
   mapearSintoma, mapearGenero, mapearOcupacionNino, mapearSintomaAdulto,
+  mapearComoSupoAnamnesis,
   equipoComercialDisponible,
 };
