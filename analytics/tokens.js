@@ -40,11 +40,11 @@ router.get('/', (_req, res) => {
     .legend span.dot { width: 10px; height: 10px; }
 
     .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; position: relative; }
-    #chart { width: 100%; height: 260px; display: block; overflow: visible; }
+    #chart, #chart-funnel, #chart-eventos { width: 100%; height: 260px; display: block; overflow: visible; }
     .bar { cursor: pointer; }
     .bar:hover { opacity: 0.8; }
     .axis-label { fill: var(--muted); font-size: 9px; font-family: var(--mono); }
-    #tooltip {
+    #tooltip, .cat-tooltip {
       position: absolute; display: none; pointer-events: none;
       background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
       padding: 0.5rem 0.65rem; font-size: 0.72rem; line-height: 1.5; white-space: nowrap;
@@ -98,6 +98,35 @@ router.get('/', (_req, res) => {
     <thead><tr><th>Día</th><th>Agente</th><th>Llamadas</th><th>Tokens entrada</th><th>Tokens salida</th><th>Cache write</th><th>Cache read</th><th>Costo (USD)</th></tr></thead>
     <tbody id="t-diario"></tbody>
   </table></div>
+</section>
+
+<section>
+  <h2>Conversaciones (últimos <span id="dias-label-neg">30</span> días)</h2>
+  <div class="kpi-grid" id="kpis-negocio"></div>
+</section>
+
+<section>
+  <h2>Estado de conversaciones</h2>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--carolina)"></span>Carolina</span>
+    <span><span class="dot" style="background:var(--luisa)"></span>Luisa</span>
+  </div>
+  <div class="chart-card">
+    <svg id="chart-funnel"></svg>
+    <div id="tooltip-funnel" class="cat-tooltip"></div>
+  </div>
+</section>
+
+<section>
+  <h2>Motivos de cierre y escalado</h2>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--carolina)"></span>Carolina</span>
+    <span><span class="dot" style="background:var(--luisa)"></span>Luisa</span>
+  </div>
+  <div class="chart-card">
+    <svg id="chart-eventos"></svg>
+    <div id="tooltip-eventos" class="cat-tooltip"></div>
+  </div>
 </section>
 
 <script>
@@ -183,6 +212,122 @@ function renderChart(diario) {
   });
 }
 
+const ESTADO_LABEL = {
+  nuevo: 'Nuevo', triaje_p1: 'Triaje 1', triaje_p2: 'Triaje 2', triaje_p3: 'Triaje 3',
+  triaje_completo: 'Triaje completo', activo: 'Activo', agendando: 'Agendando',
+  esperando_pago: 'Esperando pago', escalado: 'Escalado', completado: 'Completado', cerrado: 'Cerrado',
+};
+const ESTADO_ORDER = ['nuevo', 'triaje_p1', 'triaje_p2', 'triaje_p3', 'triaje_completo', 'activo', 'agendando', 'esperando_pago', 'escalado', 'completado', 'cerrado'];
+
+const EVENT_LABEL = {
+  escalado: 'Escalado', escalado_nhc_adultos: 'Escalado a NHC adultos',
+  cierre_fuera_ciudad: 'Fuera de ciudad', cierre_sin_presupuesto: 'Sin presupuesto',
+  cierre_fuera_segmento: 'Fuera de segmento', derivado_nhck_a_nhc: 'Derivado a NHC',
+  derivado_nhc_a_nhck: 'Derivado a NHCK', comprobante_recibido: 'Comprobante recibido',
+  cita_confirmada: 'Cita confirmada',
+};
+const EVENT_ORDER = ['escalado', 'escalado_nhc_adultos', 'cierre_fuera_ciudad', 'cierre_sin_presupuesto', 'cierre_fuera_segmento', 'derivado_nhck_a_nhc', 'derivado_nhc_a_nhck', 'cita_confirmada', 'comprobante_recibido'];
+
+function renderKpisNegocio(costoPromedio, funnel) {
+  const el = document.getElementById('kpis-negocio');
+  if (!costoPromedio.length) { el.innerHTML = '<div class="kpi"><div class="kpi-sub">Sin datos todavía</div></div>'; return; }
+  const escaladosPorAgente = {};
+  const totalPorAgente = {};
+  funnel.forEach(f => {
+    totalPorAgente[f.agent] = (totalPorAgente[f.agent] || 0) + f.count;
+    if (f.estado === 'escalado') escaladosPorAgente[f.agent] = (escaladosPorAgente[f.agent] || 0) + f.count;
+  });
+  el.innerHTML = costoPromedio.map(c => {
+    const total = totalPorAgente[c.agent] || 0;
+    const escalados = escaladosPorAgente[c.agent] || 0;
+    const tasaEscalado = total > 0 ? (escalados / total * 100).toFixed(1) : '0.0';
+    return \`
+    <div class="kpi">
+      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[c.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[c.agent] || c.agent} — conversaciones</div>
+      <div class="kpi-value">\${num(c.conversaciones)}</div>
+      <div class="kpi-sub">tocadas en el período</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[c.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[c.agent] || c.agent} — tasa de escalado</div>
+      <div class="kpi-value">\${tasaEscalado}%</div>
+      <div class="kpi-sub">\${num(escalados)} de \${num(total)} conversaciones</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[c.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[c.agent] || c.agent} — costo promedio</div>
+      <div class="kpi-value">\${usd(c.costoPorConversacion)}</div>
+      <div class="kpi-sub">por conversación · \${usd(c.costoTotal)} total</div>
+    </div>
+  \`;
+  }).join('');
+}
+
+// Generic grouped-bar-by-category chart (estado or event_type on the x-axis,
+// agent as the grouped color) — same mark/axis/tooltip approach as
+// renderChart above, parameterized so it isn't duplicated per section.
+function renderCategoryChart(svgId, tooltipId, rows, order, labelMap) {
+  const svg = document.getElementById(svgId);
+  const tooltip = document.getElementById(tooltipId);
+  const W = svg.clientWidth || 800, H = 260;
+  const padL = 34, padB = 56, padT = 10;
+
+  const present = order.filter(cat => rows.some(r => r.estado === cat || r.event_type === cat));
+  const byCat = {};
+  present.forEach(c => { byCat[c] = { carolina: 0, luisa: 0 }; });
+  rows.forEach(r => {
+    const cat = r.estado || r.event_type;
+    if (byCat[cat]) byCat[cat][r.agent] = (byCat[cat][r.agent] || 0) + Number(r.count || 0);
+  });
+
+  if (!present.length) { svg.innerHTML = ''; return; }
+
+  const maxVal = Math.max(1, ...present.map(c => Math.max(byCat[c].carolina, byCat[c].luisa)));
+  const groupW = (W - padL) / present.length;
+  const barW = Math.max(2, groupW / 2.6);
+
+  svg.setAttribute('viewBox', \`0 0 \${W} \${H}\`);
+  const bars = [];
+  present.forEach((cat, i) => {
+    const gx = padL + i * groupW;
+    ['carolina', 'luisa'].forEach((agent, j) => {
+      const val = byCat[cat][agent];
+      const h = (val / maxVal) * (H - padT - padB);
+      const x = gx + j * barW;
+      const y = H - padB - h;
+      bars.push(\`<rect class="bar" x="\${x}" y="\${y}" width="\${barW - 2}" height="\${Math.max(h, val > 0 ? 1 : 0)}" rx="2" fill="\${agent === 'carolina' ? '#3987e5' : '#d95926'}" data-cat="\${cat}" data-agent="\${agent}" data-val="\${val}"></rect>\`);
+    });
+  });
+
+  const nTicks = 4;
+  const ticks = [];
+  for (let t = 0; t <= nTicks; t++) {
+    const v = Math.round((maxVal / nTicks) * t);
+    const y = H - padB - (v / maxVal) * (H - padT - padB);
+    ticks.push(\`<line x1="\${padL}" y1="\${y}" x2="\${W}" y2="\${y}" stroke="#334155" stroke-width="1"></line>\`);
+    ticks.push(\`<text class="axis-label" x="0" y="\${y + 3}">\${num(v)}</text>\`);
+  }
+
+  const catLabels = present.map((c, i) => {
+    const label = (labelMap[c] || c).slice(0, 14);
+    const x = padL + i * groupW + groupW / 2;
+    return \`<text class="axis-label" x="\${x}" y="\${H - padB + 14}" text-anchor="middle" transform="rotate(20 \${x} \${H - padB + 14})">\${label}</text>\`;
+  }).join('');
+
+  svg.innerHTML = ticks.join('') + bars.join('') + catLabels;
+
+  svg.querySelectorAll('.bar').forEach(bar => {
+    bar.addEventListener('mousemove', (e) => {
+      const agent = bar.getAttribute('data-agent');
+      const cat = bar.getAttribute('data-cat');
+      const val = bar.getAttribute('data-val');
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.offsetX + 12) + 'px';
+      tooltip.style.top = (e.offsetY - 10) + 'px';
+      tooltip.innerHTML = \`<strong>\${AGENT_LABEL[agent]}</strong> — \${labelMap[cat] || cat}<br>\${num(val)}\`;
+    });
+    bar.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+  });
+}
+
 function renderTable(diario) {
   const tbody = document.getElementById('t-diario');
   if (!diario.length) {
@@ -204,14 +349,26 @@ function renderTable(diario) {
 
 async function load() {
   try {
-    const r = await fetch('/informe/tokens?days=30');
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
+    const [rTokens, rNegocio] = await Promise.all([
+      fetch('/informe/tokens?days=30'),
+      fetch('/informe/negocio?days=30'),
+    ]);
+    if (!rTokens.ok) throw new Error('HTTP ' + rTokens.status);
+    if (!rNegocio.ok) throw new Error('HTTP ' + rNegocio.status);
+    const data = await rTokens.json();
+    const negocio = await rNegocio.json();
+
     document.getElementById('err').style.display = 'none';
     document.getElementById('dias-label').textContent = data.dias;
     renderKpis(data.totales);
     renderChart(data.diario);
     renderTable(data.diario);
+
+    document.getElementById('dias-label-neg').textContent = negocio.dias;
+    renderKpisNegocio(negocio.costoPromedio, negocio.funnel);
+    renderCategoryChart('chart-funnel', 'tooltip-funnel', negocio.funnel, ESTADO_ORDER, ESTADO_LABEL);
+    renderCategoryChart('chart-eventos', 'tooltip-eventos', negocio.eventos, EVENT_ORDER, EVENT_LABEL);
+
     lastUpdate = Date.now();
   } catch (e) {
     const el = document.getElementById('err');

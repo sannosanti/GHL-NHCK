@@ -17,8 +17,13 @@ router.get('/', (_req, res) => {
       --bg: #0F172A; --surface: #1E293B; --border: #334155;
       --text: #F1F5F9; --muted: #94A3B8;
       --green: #22C55E; --yellow: #EAB308; --red: #EF4444; --blue: #3B82F6;
+      --carolina: #3987e5; --luisa: #d95926;
       --mono: 'Courier New', Courier, monospace;
     }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; }
+    .agent-tag { font-size: 0.62rem; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .agent-tag.carolina { background: rgba(57,135,229,.15); color: var(--carolina); }
+    .agent-tag.luisa { background: rgba(217,89,38,.15); color: var(--luisa); }
     body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 1.5rem; min-height: 100vh; }
 
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
@@ -99,7 +104,7 @@ router.get('/', (_req, res) => {
 <body>
 
 <header>
-  <h1>Carolina Dashboard <small>NHC Kids</small></h1>
+  <h1>Dashboard <small>Carolina (NHC Kids) + Luisa (NHC)</small></h1>
   <div style="display:flex;align-items:center;gap:0.5rem">
     <button id="refresh-btn" onclick="load()" style="font-size:0.75rem;padding:0.25rem 0.75rem;background:var(--blue);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;">↻ Actualizar ahora</button>
     <div id="badge">—</div>
@@ -111,25 +116,13 @@ router.get('/', (_req, res) => {
 <!-- Row 1: KPIs -->
 <section>
   <h2>KPIs</h2>
-  <div class="kpi-grid" id="kpis">
-    <div class="kpi"><div class="kpi-label">Total conversaciones</div><div class="kpi-value c-blue" id="k-total">—</div><div class="kpi-sub" id="k-total-sub">&nbsp;</div></div>
-    <div class="kpi"><div class="kpi-label">Triaje completado</div><div class="kpi-value" id="k-triaje">—</div><div class="kpi-sub" id="k-triaje-sub">&nbsp;</div></div>
-    <div class="kpi"><div class="kpi-label">Citas confirmadas</div><div class="kpi-value" id="k-citas">—</div><div class="kpi-sub" id="k-citas-sub">&nbsp;</div></div>
-    <div class="kpi"><div class="kpi-label">Tasa de conversión</div><div class="kpi-value" id="k-conv">—</div><div class="kpi-sub" id="k-conv-sub">&nbsp;</div></div>
-    <div class="kpi"><div class="kpi-label">Leads sin convertir</div><div class="kpi-value" id="k-leads">—</div><div class="kpi-sub" id="k-leads-sub">&nbsp;</div></div>
-    <div class="kpi"><div class="kpi-label">Escalados pendientes</div><div class="kpi-value" id="k-esc">—</div><div class="kpi-sub" id="k-esc-sub">&nbsp;</div></div>
-  </div>
+  <div class="kpi-grid" id="kpis"></div>
 </section>
 
 <!-- Row 2: Funnel -->
 <section>
   <h2>Embudo de conversión</h2>
-  <div class="funnel" id="funnel">
-    <div class="f-row"><span class="f-label">Total entrantes</span><div class="f-track"><div class="f-bar" id="fb0" style="background:#3B82F6;width:0%"><span class="f-count" id="fc0">—</span></div></div><span class="f-pct" id="fp0">—</span></div>
-    <div class="f-row"><span class="f-label">Triaje completo</span><div class="f-track"><div class="f-bar" id="fb1" style="background:#8B5CF6;width:0%"><span class="f-count" id="fc1">—</span></div></div><span class="f-pct" id="fp1">—</span></div>
-    <div class="f-row"><span class="f-label">Cita confirmada</span><div class="f-track"><div class="f-bar" id="fb2" style="background:#EAB308;width:0%"><span class="f-count" id="fc2">—</span></div></div><span class="f-pct" id="fp2">—</span></div>
-    <div class="f-row"><span class="f-label">Pagaron</span><div class="f-track"><div class="f-bar" id="fb3" style="background:#22C55E;width:0%"><span class="f-count" id="fc3">—</span></div></div><span class="f-pct" id="fp3">—</span></div>
-  </div>
+  <div class="col2" id="funnels"></div>
 </section>
 
 <!-- Row 3: Estados + Síntomas -->
@@ -138,14 +131,14 @@ router.get('/', (_req, res) => {
     <div>
       <h2>Estados actuales</h2>
       <div class="tcard"><table>
-        <thead><tr><th>Estado</th><th>Cant.</th><th>%</th></tr></thead>
+        <thead><tr><th>Agente</th><th>Estado</th><th>Cant.</th><th>%</th></tr></thead>
         <tbody id="t-estados"></tbody>
       </table></div>
     </div>
     <div>
       <h2>Síntomas más frecuentes</h2>
       <div class="tcard"><table>
-        <thead><tr><th>Motivo de consulta</th><th>Cant.</th></tr></thead>
+        <thead><tr><th>Agente</th><th>Motivo de consulta</th><th>Cant.</th></tr></thead>
         <tbody id="t-sintomas"></tbody>
       </table></div>
     </div>
@@ -161,18 +154,14 @@ router.get('/', (_req, res) => {
 <!-- Row 5: Recovery -->
 <section>
   <h2>Recovery — estado del job de reactivación</h2>
-  <div class="rec-grid">
-    <div class="rec-card"><div class="rec-val" id="r-i1">—</div><div class="rec-lbl">Intento 1 pendiente</div></div>
-    <div class="rec-card"><div class="rec-val" id="r-i2">—</div><div class="rec-lbl">Intento 2 agotado</div></div>
-    <div class="rec-card"><div class="rec-val c-muted" id="r-cerr">—</div><div class="rec-lbl">Cerrados (excluidos)</div></div>
-  </div>
+  <div class="col2" id="recovery"></div>
 </section>
 
 <!-- Row 6: Leads calificados -->
 <section>
   <h2>Leads calificados sin convertir</h2>
   <div class="tcard"><table>
-    <thead><tr><th>Contacto</th><th>Síntoma</th><th>Inactivo</th><th>Recovery</th><th>Mensajes</th></tr></thead>
+    <thead><tr><th>Agente</th><th>Contacto</th><th>Síntoma</th><th>Inactivo</th><th>Recovery</th><th>Mensajes</th></tr></thead>
     <tbody id="t-leads"></tbody>
   </table></div>
 </section>
@@ -183,6 +172,9 @@ const LABELS = {
   triaje_completo:'Triaje ✓',agendando:'Agendando',esperando_pago:'Esperando pago',
   escalado:'Escalado',cerrado:'Cerrado',completado:'Completado',activo:'Activo',
 };
+const AGENT_LABEL = { carolina: 'Carolina', luisa: 'Luisa' };
+const AGENT_COLOR = { carolina: 'var(--carolina)', luisa: 'var(--luisa)' };
+const AGENTS = ['carolina', 'luisa'];
 
 let lastUpdate = 0;
 
@@ -196,120 +188,141 @@ function pct(n, total) {
   return total ? Math.round(n / total * 100) + '%' : '0%';
 }
 
-function set(id, val) { document.getElementById(id).textContent = val; }
-function setClass(id, cls) { document.getElementById(id).className = 'kpi-value ' + cls; }
-
-function renderKPIs(inf, leads) {
-  const f = inf.funnel;
-  const total = +f.total || 0;
-  const triaje = +f.con_triaje || 0;
-  const ep = +f.esperando_pago || 0;
-  const comp = +f.completados || 0;
-  const esc = +f.escalados || 0;
-  const citas = ep + comp;
-
-  set('k-total', total); setClass('k-total', 'kpi-value c-blue');
-  set('k-total-sub', inf.recientes_72h?.reduce((s,r)=>s+(+r.total||0),0) + ' activos últimas 72h');
-
-  set('k-triaje', pct(triaje, total)); setClass('k-triaje', 'kpi-value ' + (triaje > 0 ? 'c-green' : 'c-muted'));
-  set('k-triaje-sub', triaje + ' conversaciones');
-
-  set('k-citas', citas); setClass('k-citas', 'kpi-value ' + (citas > 0 ? 'c-yellow' : 'c-muted'));
-  set('k-citas-sub', ep + ' pendientes de pago');
-
-  const tasa = total ? (comp / total * 100).toFixed(1) + '%' : '0%';
-  set('k-conv', tasa); setClass('k-conv', 'kpi-value ' + (comp > 0 ? 'c-green' : 'c-red'));
-  set('k-conv-sub', comp + ' completados');
-
-  const ls = leads.total || 0;
-  set('k-leads', ls); setClass('k-leads', 'kpi-value ' + (ls > 0 ? 'c-yellow' : 'c-green'));
-  set('k-leads-sub', 'contacto manual recomendado');
-
-  set('k-esc', esc); setClass('k-esc', 'kpi-value ' + (esc > 0 ? 'c-red' : 'c-green'));
-  set('k-esc-sub', esc > 0 ? 'requieren atención del asesor' : 'sin escalados pendientes');
+function agentDot(agent) {
+  return \`<span class="dot" style="background:\${AGENT_COLOR[agent] || '#94A3B8'}"></span>\`;
 }
 
-function renderFunnel(inf) {
-  const f = inf.funnel;
-  const steps = [
-    +f.total || 0,
-    +f.con_triaje || 0,
-    (+f.esperando_pago || 0) + (+f.completados || 0),
-    +f.completados || 0,
-  ];
-  const max = steps[0] || 1;
-  steps.forEach((v, i) => {
-    const w = Math.max(Math.round(v / max * 100), v > 0 ? 2 : 0);
-    document.getElementById('fb' + i).style.width = w + '%';
-    set('fc' + i, v);
-    set('fp' + i, i === 0 ? '100%' : pct(v, steps[0]));
-  });
+// funnel/estados/sintomas/recovery/pagos_pendientes all arrive as one row
+// per agent now (informe/*) instead of a single filtered object — this
+// finds each agent's row, defaulting to zeros if that agent has no data yet.
+function funnelFor(inf, agent) {
+  return inf.funnel.find(f => f.agent === agent) || { total: 0, con_triaje: 0, esperando_pago: 0, completados: 0, cerrados: 0, escalados: 0 };
+}
+
+function renderKPIs(inf, leads) {
+  const el = document.getElementById('kpis');
+  const leadsPorAgente = {};
+  (leads.conversaciones || []).forEach(l => { leadsPorAgente[l.agent] = (leadsPorAgente[l.agent] || 0) + 1; });
+
+  el.innerHTML = AGENTS.map(agent => {
+    const f = funnelFor(inf, agent);
+    const total = +f.total || 0;
+    const triaje = +f.con_triaje || 0;
+    const ep = +f.esperando_pago || 0;
+    const comp = +f.completados || 0;
+    const esc = +f.escalados || 0;
+    const citas = ep + comp;
+    const tasa = total ? (comp / total * 100).toFixed(1) + '%' : '0%';
+    const activos72h = (inf.recientes_72h || []).filter(r => r.agent === agent).reduce((s, r) => s + (+r.total || 0), 0);
+    const ls = leadsPorAgente[agent] || 0;
+
+    return \`
+    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Total</div><div class="kpi-value c-blue">\${total}</div><div class="kpi-sub">\${activos72h} activos últimas 72h</div></div>
+    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Triaje completado</div><div class="kpi-value \${triaje > 0 ? 'c-green' : 'c-muted'}">\${pct(triaje, total)}</div><div class="kpi-sub">\${triaje} conversaciones</div></div>
+    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Citas confirmadas</div><div class="kpi-value \${citas > 0 ? 'c-yellow' : 'c-muted'}">\${citas}</div><div class="kpi-sub">\${ep} pendientes de pago</div></div>
+    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Tasa de conversión</div><div class="kpi-value \${comp > 0 ? 'c-green' : 'c-red'}">\${tasa}</div><div class="kpi-sub">\${comp} completados</div></div>
+    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Leads sin convertir</div><div class="kpi-value \${ls > 0 ? 'c-yellow' : 'c-green'}">\${ls}</div><div class="kpi-sub">contacto manual recomendado</div></div>
+    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Escalados pendientes</div><div class="kpi-value \${esc > 0 ? 'c-red' : 'c-green'}">\${esc}</div><div class="kpi-sub">\${esc > 0 ? 'requieren atención del asesor' : 'sin escalados pendientes'}</div></div>
+  \`;
+  }).join('');
+}
+
+function renderFunnels(inf) {
+  const el = document.getElementById('funnels');
+  el.innerHTML = AGENTS.map(agent => {
+    const f = funnelFor(inf, agent);
+    const steps = [
+      ['Total entrantes', +f.total || 0, '#3B82F6'],
+      ['Triaje completo', +f.con_triaje || 0, '#8B5CF6'],
+      ['Cita confirmada', (+f.esperando_pago || 0) + (+f.completados || 0), '#EAB308'],
+      ['Pagaron', +f.completados || 0, '#22C55E'],
+    ];
+    const max = steps[0][1] || 1;
+    const rows = steps.map(([label, v]) => {
+      const w = Math.max(Math.round(v / max * 100), v > 0 ? 2 : 0);
+      const p = v === steps[0][1] ? '100%' : pct(v, steps[0][1]);
+      return \`<div class="f-row"><span class="f-label">\${label}</span><div class="f-track"><div class="f-bar" style="background:\${steps[steps.findIndex(s=>s[0]===label)][2]};width:\${w}%"><span class="f-count">\${v}</span></div></div><span class="f-pct">\${p}</span></div>\`;
+    }).join('');
+    return \`<div><h2>\${agentDot(agent)}\${AGENT_LABEL[agent]}</h2><div class="funnel">\${rows}</div></div>\`;
+  }).join('');
 }
 
 function renderEstados(inf) {
-  const total = +inf.funnel.total || 1;
+  const totalPorAgente = {};
+  inf.funnel.forEach(f => { totalPorAgente[f.agent] = +f.total || 1; });
   document.getElementById('t-estados').innerHTML = inf.estados.map(r =>
-    \`<tr><td>\${LABELS[r.estado] || r.estado}</td><td class="mono">\${r.total}</td><td class="mono muted">\${pct(+r.total, total)}</td></tr>\`
+    \`<tr><td><span class="agent-tag \${r.agent}">\${AGENT_LABEL[r.agent] || r.agent}</span></td><td>\${LABELS[r.estado] || r.estado}</td><td class="mono">\${r.total}</td><td class="mono muted">\${pct(+r.total, totalPorAgente[r.agent] || 1)}</td></tr>\`
   ).join('');
 }
 
 function renderSintomas(inf) {
   const rows = inf.sintomas || [];
   document.getElementById('t-sintomas').innerHTML = rows.length
-    ? rows.map(r => \`<tr><td>\${r.sintoma}</td><td class="mono">\${r.total}</td></tr>\`).join('')
-    : '<tr><td colspan="2" class="muted">Sin datos</td></tr>';
+    ? rows.map(r => \`<tr><td><span class="agent-tag \${r.agent}">\${AGENT_LABEL[r.agent] || r.agent}</span></td><td>\${r.sintoma}</td><td class="mono">\${r.total}</td></tr>\`).join('')
+    : '<tr><td colspan="3" class="muted">Sin datos</td></tr>';
 }
 
 function renderAlerts(inf, leads) {
   const alerts = [];
-  const ep = +inf.funnel.esperando_pago || 0;
-  const esc = +inf.funnel.escalados || 0;
 
-  if (ep > 0 && inf.pagos_pendientes?.mas_antigua) {
-    const mins = Math.round((Date.now() - new Date(inf.pagos_pendientes.mas_antigua).getTime()) / 60000);
-    if (mins > 120) {
-      alerts.push({ t: 'r', icon: '🔴', tag: 'URGENTE',
-        msg: \`\${ep} lead(s) en <strong>esperando_pago</strong> — abono sin confirmar hace \${fmt(mins)}. Contactar manualmente.\` });
+  AGENTS.forEach(agent => {
+    const f = funnelFor(inf, agent);
+    const ep = +f.esperando_pago || 0;
+    const esc = +f.escalados || 0;
+    const pagoPendiente = (inf.pagos_pendientes || []).find(p => p.agent === agent);
+
+    if (ep > 0 && pagoPendiente?.mas_antigua) {
+      const mins = Math.round((Date.now() - new Date(pagoPendiente.mas_antigua).getTime()) / 60000);
+      if (mins > 120) {
+        alerts.push({ t: 'r', icon: '🔴', tag: 'URGENTE', agent,
+          msg: \`\${ep} lead(s) en <strong>esperando_pago</strong> — abono sin confirmar hace \${fmt(mins)}. Contactar manualmente.\` });
+      }
     }
-  }
 
-  const inact24 = (leads.conversaciones || []).filter(l => l.inactivo_minutos > 1440);
-  if (inact24.length > 0) {
-    alerts.push({ t: 'y', icon: '🟡', tag: 'ATENCIÓN',
-      msg: \`\${inact24.length} lead(s) calificado(s) con más de 24h de inactividad. Recovery agotado — requieren contacto del asesor.\` });
-  }
+    const inact24 = (leads.conversaciones || []).filter(l => l.agent === agent && l.inactivo_minutos > 1440);
+    if (inact24.length > 0) {
+      alerts.push({ t: 'y', icon: '🟡', tag: 'ATENCIÓN', agent,
+        msg: \`\${inact24.length} lead(s) calificado(s) con más de 24h de inactividad. Recovery agotado — requieren contacto del asesor.\` });
+    }
 
-  if (esc > 0) {
-    alerts.push({ t: 'y', icon: '🟡', tag: 'ATENCIÓN',
-      msg: \`\${esc} conversación(es) escalada(s) esperando respuesta del asesor.\` });
-  }
+    if (esc > 0) {
+      alerts.push({ t: 'y', icon: '🟡', tag: 'ATENCIÓN', agent,
+        msg: \`\${esc} conversación(es) escalada(s) esperando respuesta del asesor.\` });
+    }
+  });
 
   if (alerts.length === 0) {
-    alerts.push({ t: 'g', icon: '🟢', tag: 'OK', msg: 'Todo dentro de rangos normales.' });
+    alerts.push({ t: 'g', icon: '🟢', tag: 'OK', agent: null, msg: 'Todo dentro de rangos normales — ambos agentes.' });
   }
 
   document.getElementById('alerts').innerHTML = alerts.map(a =>
-    \`<div class="alert \${a.t}"><span>\${a.icon}</span><span class="a-msg">\${a.msg}</span><span class="a-tag \${a.t}">\${a.tag}</span></div>\`
+    \`<div class="alert \${a.t}"><span>\${a.icon}</span>\${a.agent ? \`<span class="agent-tag \${a.agent}">\${AGENT_LABEL[a.agent]}</span>\` : ''}<span class="a-msg">\${a.msg}</span><span class="a-tag \${a.t}">\${a.tag}</span></div>\`
   ).join('');
 }
 
 function renderRecovery(inf) {
-  const r = inf.recovery || [];
-  const i1 = +((r.find(x => x.recovery_status === 'intento-1') || {}).total) || 0;
-  const i2 = +((r.find(x => x.recovery_status === 'intento-2') || {}).total) || 0;
-  const cerr = +((inf.estados.find(x => x.estado === 'cerrado') || {}).total) || 0;
-  const ri1 = document.getElementById('r-i1');
-  const ri2 = document.getElementById('r-i2');
-  ri1.textContent = i1; ri1.className = 'rec-val ' + (i1 > 0 ? 'c-yellow' : 'c-green');
-  ri2.textContent = i2; ri2.className = 'rec-val ' + (i2 > 0 ? 'c-red' : 'c-green');
-  set('r-cerr', cerr);
+  const el = document.getElementById('recovery');
+  el.innerHTML = AGENTS.map(agent => {
+    const r = (inf.recovery || []).filter(x => x.agent === agent);
+    const i1 = +((r.find(x => x.recovery_status === 'intento-1') || {}).total) || 0;
+    const i2 = +((r.find(x => x.recovery_status === 'intento-2') || {}).total) || 0;
+    const cerr = +((inf.estados.find(x => x.agent === agent && x.estado === 'cerrado') || {}).total) || 0;
+    return \`<div>
+      <h2>\${agentDot(agent)}\${AGENT_LABEL[agent]}</h2>
+      <div class="rec-grid">
+        <div class="rec-card"><div class="rec-val \${i1 > 0 ? 'c-yellow' : 'c-green'}">\${i1}</div><div class="rec-lbl">Intento 1 pendiente</div></div>
+        <div class="rec-card"><div class="rec-val \${i2 > 0 ? 'c-red' : 'c-green'}">\${i2}</div><div class="rec-lbl">Intento 2 agotado</div></div>
+        <div class="rec-card"><div class="rec-val c-muted">\${cerr}</div><div class="rec-lbl">Cerrados (excluidos)</div></div>
+      </div>
+    </div>\`;
+  }).join('');
 }
 
 function renderLeads(leads) {
   const rows = leads.conversaciones || [];
   const tbody = document.getElementById('t-leads');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="muted">Sin leads en triaje_completo</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Sin leads en triaje_completo</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((l, i) => {
@@ -320,10 +333,12 @@ function renderLeads(leads) {
       : l.recovery === 'intento-1'
       ? '<span class="rbadge rb-i1">Intento 1</span>'
       : '<span class="rbadge rb-no">Sin recovery</span>';
+    const botLabel = l.agent === 'luisa' ? 'LUISA' : 'CAROLINA';
     const msgs = (l.ultimos_mensajes || []).slice(-4).map(m =>
-      \`<div class="mline"><span class="rol \${m.rol === 'CAROLINA' ? 'bot' : ''}">\${m.rol}:</span> \${m.texto.slice(0, 130)}\${m.texto.length > 130 ? '…' : ''}</div>\`
+      \`<div class="mline"><span class="rol \${m.rol === botLabel ? 'bot' : ''}">\${m.rol}:</span> \${m.texto.slice(0, 130)}\${m.texto.length > 130 ? '…' : ''}</div>\`
     ).join('');
     return \`<tr>
+      <td><span class="agent-tag \${l.agent}">\${AGENT_LABEL[l.agent] || l.agent}</span></td>
       <td>\${name}</td>
       <td>\${sintoma}</td>
       <td class="mono">\${fmt(l.inactivo_minutos)}</td>
@@ -347,7 +362,7 @@ async function load() {
     const [inf, leads] = await Promise.all([r1.json(), r2.json()]);
     document.getElementById('err').style.display = 'none';
     renderKPIs(inf, leads);
-    renderFunnel(inf);
+    renderFunnels(inf);
     renderEstados(inf);
     renderSintomas(inf);
     renderAlerts(inf, leads);

@@ -28,7 +28,7 @@ const { startDailyReport } = require('./jobs/dailyReport');
 const { startPendingWebhookJob } = require('./jobs/pendingWebhookJob');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
-const { getZohoAccessToken, crearTriajeInfantil, buscarOCrearContactoAnamnesisClinica } = require('./services/zoho');
+const { getZohoAccessToken, crearTriajeInfantil, buscarOCrearContactoAnamnesisClinica, crearAnamnesisPsicologo } = require('./services/zoho');
 const fetch = require('node-fetch');
 
 const app = express();
@@ -91,29 +91,33 @@ app.post('/webhook/contact-deleted', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Both agents, since Carolina and Luisa share this Postgres instance — same
+// scope decision as /informe/tokens and /informe/negocio. Every query returns
+// an `agent` column instead of filtering to env.agentName so the dashboard
+// can compare Carolina vs Luisa side by side.
 app.get('/informe', async (req, res) => {
   try {
     const [estados, eventos, causas, sintomas, recovery, funnel, gaps, pendientes, recientes] = await Promise.all([
-      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations WHERE agent=$1 GROUP BY estado ORDER BY total DESC`, [env.agentName]),
-      db.pool.query(`SELECT event_type, COUNT(*) as total FROM transaction_logs WHERE agent=$1 GROUP BY event_type ORDER BY total DESC`, [env.agentName]),
-      db.pool.query(`SELECT root_cause, outcome, COUNT(*) as total FROM conversation_insights WHERE agent=$1 GROUP BY root_cause, outcome ORDER BY total DESC`, [env.agentName]),
-      db.pool.query(`SELECT triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE agent=$1 AND triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY sintoma ORDER BY total DESC`, [env.agentName]),
-      db.pool.query(`SELECT recovery_status, COUNT(*) as total FROM conversations WHERE agent=$1 AND recovery_status IS NOT NULL GROUP BY recovery_status`, [env.agentName]),
-      db.pool.query(`SELECT COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations WHERE agent=$1`, [env.agentName]),
+      db.pool.query(`SELECT agent, estado, COUNT(*) as total FROM conversations GROUP BY agent, estado ORDER BY agent, total DESC`),
+      db.pool.query(`SELECT agent, event_type, COUNT(*) as total FROM transaction_logs GROUP BY agent, event_type ORDER BY agent, total DESC`),
+      db.pool.query(`SELECT agent, root_cause, outcome, COUNT(*) as total FROM conversation_insights GROUP BY agent, root_cause, outcome ORDER BY agent, total DESC`),
+      db.pool.query(`SELECT agent, triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY agent, sintoma ORDER BY agent, total DESC`),
+      db.pool.query(`SELECT agent, recovery_status, COUNT(*) as total FROM conversations WHERE recovery_status IS NOT NULL GROUP BY agent, recovery_status`),
+      db.pool.query(`SELECT agent, COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations GROUP BY agent`),
       db.pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 10`),
-      db.pool.query(`SELECT COUNT(*) as total, MIN(created_at) as mas_antigua FROM pending_payments`),
-      db.pool.query(`SELECT estado, COUNT(*) as total FROM conversations WHERE agent=$1 AND updated_at > NOW() - INTERVAL '72 hours' GROUP BY estado ORDER BY total DESC`, [env.agentName]),
+      db.pool.query(`SELECT agent, COUNT(*) as total, MIN(created_at) as mas_antigua FROM pending_payments GROUP BY agent`),
+      db.pool.query(`SELECT agent, estado, COUNT(*) as total FROM conversations WHERE updated_at > NOW() - INTERVAL '72 hours' GROUP BY agent, estado ORDER BY agent, total DESC`),
     ]);
     res.json({
       generado: new Date().toISOString(),
-      funnel: funnel.rows[0],
+      funnel: funnel.rows,
       estados: estados.rows,
       recientes_72h: recientes.rows,
       eventos: eventos.rows,
       root_causes: causas.rows,
       sintomas: sintomas.rows,
       recovery: recovery.rows,
-      pagos_pendientes: pendientes.rows[0],
+      pagos_pendientes: pendientes.rows,
       knowledge_gaps: gaps.rows,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -125,6 +129,7 @@ app.get('/informe/triaje-completo', async (req, res) => {
       SELECT
         c.conversation_id,
         c.contact_id,
+        c.agent,
         c.estado,
         c.triaje,
         c.messages,
@@ -133,21 +138,23 @@ app.get('/informe/triaje-completo', async (req, res) => {
         cc.contact_data
       FROM conversations c
       LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
-      WHERE c.estado = 'triaje_completo' AND c.agent = $1
+      WHERE c.estado = 'triaje_completo'
       ORDER BY c.updated_at DESC
-    `, [env.agentName]);
+    `);
 
     const result = rows.map(r => {
       const msgs = Array.isArray(r.messages) ? r.messages : [];
       const cd = r.contact_data || {};
+      const botLabel = r.agent === 'luisa' ? 'LUISA' : 'CAROLINA';
       const lastMessages = msgs.slice(-6).map(m => ({
-        rol: m.role === 'user' ? 'CLIENTE' : 'CAROLINA',
+        rol: m.role === 'user' ? 'CLIENTE' : botLabel,
         texto: Array.isArray(m.content)
           ? m.content.map(c => c.text || '').join('')
           : (m.content || ''),
       }));
       const minutosInactivo = Math.round((Date.now() - new Date(r.updated_at).getTime()) / 60000);
       return {
+        agent: r.agent,
         contacto: cd.firstName ? `${cd.firstName} ${cd.lastName || ''}`.trim() : r.contact_id,
         telefono: cd.phone || null,
         triaje: r.triaje,
@@ -169,18 +176,53 @@ app.get('/informe/tokens', async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
     const diario = await db.getTokenUsageDaily(days);
+    // "hoy"/"este mes" boundaries in Bogotá local time — created_at is UTC,
+    // so comparing against date_trunc('day', NOW()) directly (UTC midnight)
+    // cuts off Bogotá business hours from 7pm to midnight into "today"
+    // instead of the day they actually happened (confirmed live 2026-07-21).
     const totales = await db.pool.query(`
       SELECT
         agent,
-        SUM(cost_usd) FILTER (WHERE created_at > date_trunc('day', NOW()))::float AS costo_hoy,
-        SUM(cost_usd) FILTER (WHERE created_at > date_trunc('month', NOW()))::float AS costo_mes,
-        SUM(input_tokens + output_tokens) FILTER (WHERE created_at > date_trunc('day', NOW()))::bigint AS tokens_hoy,
-        SUM(input_tokens + output_tokens) FILTER (WHERE created_at > date_trunc('month', NOW()))::bigint AS tokens_mes,
-        COUNT(*) FILTER (WHERE created_at > date_trunc('day', NOW()))::int AS llamadas_hoy
+        SUM(cost_usd) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('day', NOW() AT TIME ZONE 'America/Bogota'))::float AS costo_hoy,
+        SUM(cost_usd) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('month', NOW() AT TIME ZONE 'America/Bogota'))::float AS costo_mes,
+        SUM(input_tokens + output_tokens) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('day', NOW() AT TIME ZONE 'America/Bogota'))::bigint AS tokens_hoy,
+        SUM(input_tokens + output_tokens) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('month', NOW() AT TIME ZONE 'America/Bogota'))::bigint AS tokens_mes,
+        COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('day', NOW() AT TIME ZONE 'America/Bogota'))::int AS llamadas_hoy
       FROM token_usage
       GROUP BY agent
     `);
     res.json({ generado: new Date().toISOString(), dias: days, diario, totales: totales.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Business metrics — same shared-Postgres, both-agents scope as /informe/tokens.
+// costoPromedio is an average over the period (token_usage has no
+// conversation_id to join per-lead), not a true per-conversation cost.
+app.get('/informe/negocio', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
+    const [funnel, eventos, volumenDiario, costoDiario] = await Promise.all([
+      db.getConversationFunnel(days),
+      db.getEventBreakdown(days),
+      db.getConversationVolumeDaily(days),
+      db.getTokenUsageDaily(days),
+    ]);
+    const porAgente = {};
+    for (const row of volumenDiario) {
+      porAgente[row.agent] = porAgente[row.agent] || { conversaciones: 0, costo: 0 };
+      porAgente[row.agent].conversaciones += row.conversaciones;
+    }
+    for (const row of costoDiario) {
+      porAgente[row.agent] = porAgente[row.agent] || { conversaciones: 0, costo: 0 };
+      porAgente[row.agent].costo += row.cost_usd;
+    }
+    const costoPromedio = Object.entries(porAgente).map(([agent, v]) => ({
+      agent,
+      conversaciones: v.conversaciones,
+      costoTotal: v.costo,
+      costoPorConversacion: v.conversaciones > 0 ? v.costo / v.conversaciones : 0,
+    }));
+    res.json({ generado: new Date().toISOString(), dias: days, funnel, eventos, volumenDiario, costoPromedio });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -295,7 +337,43 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
     console.log('[/anamnesis-clinica-infantil] Creator response:', JSON.stringify(crData));
 
     if (crData.code === 3000 || crData.data?.ID) {
-      return res.json({ ok: true, id: crData.data?.ID, contactoID });
+      // ── 6. Also create the record in the real "Anamnesis" form ────────────
+      // Same gap the adults route had (confirmed live 2026-07-22): Historia
+      // Clínica alone never fed the psychologist's Anamnesis module. Reuses
+      // contactoID already resolved above. cambiarMejorar and autopercepcion
+      // have no equivalent question in the kids form, so left blank rather
+      // than forced from an unrelated answer.
+      let anamnesisCreada = false;
+      let anamnesisError = null;
+      try {
+        const combine = (...parts) => parts.filter(([, v]) => v).map(([label, v]) => `${label}: ${v}`).join(' | ');
+        const anamnesisResult = await crearAnamnesisPsicologo({
+          contactoID,
+          motivoConsulta: d.motivoConsulta,
+          infanciaAdolescencia: d.infanciaDesarrollo,
+          medicamentosSuplementos: d.medicamentos,
+          enfermedades: d.enfermedades,
+          factoresEstresores: d.factoresMotivacion,
+          agregarAlgo: combine(['Algo más', d.agregarAlgo], ['Comentarios', d.comentariosProfesional]),
+          habitosVida: d.actividadesExtracurriculares,
+          conQuienVive: d.conQuienVive,
+          dedicacion: d.gradoInstitucion,
+          relacionesPareja: d.relacionesPares,
+          procesoTerapeutico: d.trabajoPsicologico,
+          sueno: d.sueno,
+          violenciaVivida: d.abusosViolencia,
+          conformacionFamilia: combine(['Conformación familia', d.conformacionFamilia], ['Dinámica familiar', d.dinamicaFamiliar]),
+          consumeSustancias: d.consumeSustancias,
+          comoSupo: d.comoSupo,
+        });
+        anamnesisCreada = anamnesisResult?.code === 3000 || !!anamnesisResult?.data?.ID;
+        if (!anamnesisCreada) anamnesisError = anamnesisResult;
+      } catch (err) {
+        anamnesisError = err.message;
+      }
+      if (!anamnesisCreada) console.warn('[/anamnesis-clinica-infantil] Registro Anamnesis NO se creó:', JSON.stringify(anamnesisError));
+
+      return res.json({ ok: true, id: crData.data?.ID, contactoID, anamnesisCreada, anamnesisError });
     }
     if (crData.code === 3100) {
       return res.status(401).json({ ok: false, stage: 'auth', error: 'Token Zoho inválido o expirado — reintentá en unos segundos' });

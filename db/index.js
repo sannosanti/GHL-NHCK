@@ -516,11 +516,17 @@ async function logTokenUsage(agent, model, usage, costUsd) {
   } catch (err) { console.error('Error logging token usage:', err.message); }
 }
 
+// Buckets by Bogotá calendar day, not UTC day — created_at is UTC
+// (timestamptz), so grouping on date_trunc('day', created_at) directly
+// splits every Bogotá evening (7pm-midnight, still inside business hours)
+// into the "next day" bucket. Converting to America/Bogota before truncating
+// fixes that (confirmed live 2026-07-21: ~15-30 calls/day were landing in
+// the wrong bucket).
 async function getTokenUsageDaily(days = 30) {
   const res = await pool.query(
     `SELECT
        agent,
-       to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+       to_char(date_trunc('day', created_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM-DD') AS day,
        SUM(input_tokens)::bigint AS input_tokens,
        SUM(output_tokens)::bigint AS output_tokens,
        SUM(cache_creation_input_tokens)::bigint AS cache_creation_input_tokens,
@@ -536,11 +542,62 @@ async function getTokenUsageDaily(days = 30) {
   return res.rows;
 }
 
+// Current estado distribution per agent — the conversation funnel (nuevo ->
+// triaje_p1/p2/p3 -> triaje_completo -> escalado/cerrado). estado is
+// overwritten in place on every touch (no history table), so this is a
+// snapshot of where conversations stand today, not a true day-by-day funnel.
+async function getConversationFunnel(days = 30) {
+  const res = await pool.query(
+    `SELECT agent, estado, COUNT(*)::int AS count
+     FROM conversations
+     WHERE updated_at > NOW() - ($1 || ' days')::interval
+     GROUP BY agent, estado
+     ORDER BY agent, count DESC`,
+    [days]
+  );
+  return res.rows;
+}
+
+// Why conversations close or escalate, from the same transaction_logs the
+// weekly/daily reports already use — feeds the "motivos de cierre" chart.
+async function getEventBreakdown(days = 30) {
+  const res = await pool.query(
+    `SELECT agent, event_type, COUNT(*)::int AS count
+     FROM transaction_logs
+     WHERE created_at > NOW() - ($1 || ' days')::interval
+     GROUP BY agent, event_type
+     ORDER BY agent, count DESC`,
+    [days]
+  );
+  return res.rows;
+}
+
+// Daily distinct conversations touched per agent — token_usage has no
+// conversation_id, so cost-per-conversation can only be an average over the
+// period (total cost / total conversations), not a true per-lead figure.
+// Bucketed by Bogotá day for the same reason getTokenUsageDaily is.
+async function getConversationVolumeDaily(days = 30) {
+  const res = await pool.query(
+    `SELECT agent,
+       to_char(date_trunc('day', updated_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM-DD') AS day,
+       COUNT(DISTINCT conversation_id)::int AS conversaciones
+     FROM conversations
+     WHERE updated_at > NOW() - ($1 || ' days')::interval
+     GROUP BY agent, day
+     ORDER BY day ASC`,
+    [days]
+  );
+  return res.rows;
+}
+
 module.exports = {
   pool,
   initDB,
   logTokenUsage,
   getTokenUsageDaily,
+  getConversationFunnel,
+  getEventBreakdown,
+  getConversationVolumeDaily,
   getConversationData,
   saveConversationData,
   limpiarContactoDB,

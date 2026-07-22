@@ -89,6 +89,50 @@ async function crearTriajeInfantil({ nombreNino, email, movil, contactIdGHL, eda
   return { contactoID, dataProceso };
 }
 
+// Creates a record in the real "Anamnesis" form (link name confirmed live,
+// same form the adults project's crearAnamnesisPsicologo writes to — the
+// psychologist's session-notes module under Listado_de_Anamnesis. Kids'
+// Historia Clínica form has no equivalent for cambiarMejorar (self-reflection)
+// or Como_te_percibes_a_ti_mismo (self-perception) — both adult-only
+// questions — so those two Anamnesis fields are left blank for kids rather
+// than forced from an unrelated answer.
+async function crearAnamnesisPsicologo({ contactoID, motivoConsulta, infanciaAdolescencia, medicamentosSuplementos,
+  cambiarMejorar, enfermedades, eventosMarcantes, factoresEstresores, agregarAlgo, habitosVida, conQuienVive,
+  dedicacion, relacionesPareja, procesoTerapeutico, sueno, violenciaVivida, conformacionFamilia, autopercepcion,
+  consumeSustancias, comoSupo }) {
+  const token = await getZohoAccessToken();
+  const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
+  const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Anamnesis', {
+    method: 'POST', headers,
+    body: JSON.stringify({ data: {
+      Nombre_del_consultante: contactoID,
+      Psicologo_Integral: 'Website',
+      C_mo_supo_de_nosotros: comoSupo ? [comoSupo] : [],
+      Que_te_trae_por_ac: motivoConsulta || '',
+      Como_recuerdas_tu_infancia: infanciaAdolescencia || '',
+      Tomas_alg_n_tipo_de_medicina: medicamentosSuplementos || '',
+      Que_te_gustar_a_cambiar_de_ti: cambiarMejorar || '',
+      Que_enfermedades_has_sufrido: enfermedades || '',
+      Que_eventos_has_vivido_que_te_marcaron: eventosMarcantes || '',
+      Como_est_n_tus_niveles_de_estr_s: factoresEstresores || '',
+      Deseas_agregar_algo_mas: agregarAlgo || '',
+      Haces_deporte: habitosVida || '',
+      Con_quien_vives: conQuienVive || '',
+      A_que_te_dedicas: dedicacion || '',
+      Como_han_sido_tus_relaciones_afectivas: relacionesPareja || '',
+      Has_hecho_alg_n_tipo_de_trabajo_psicol_gico_anteriormente_Que_descubriste: procesoTerapeutico || '',
+      Como_estas_durmiendo: sueno || '',
+      Has_sufrido_abusos_o_violencia_intrafamiliar: violenciaVivida || '',
+      Como_esta_conformada_tu_familia: conformacionFamilia || '',
+      Como_te_percibes_a_ti_mismo: autopercepcion || '',
+      Consumes_alg_n_tipo_de_sustancia: consumeSustancias || '',
+    }}),
+  });
+  const data = await res.json();
+  console.log('ZOHO ANAMNESIS:', JSON.stringify(data));
+  return data;
+}
+
 // ─── ZOHO CALENDARIO ──────────────────────────────────────────────────────────
 async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contactoID, nombreNino }) {
   const token = await getZohoAccessToken();
@@ -266,6 +310,7 @@ module.exports = {
   buscarContactoAnamnesis,
   buscarOCrearContactoAnamnesisClinica,
   crearTriajeInfantil,
+  crearAnamnesisPsicologo,
   crearCitasCalendario,
   getContactoPorId,
   getDisponibilidad,
