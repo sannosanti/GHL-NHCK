@@ -210,6 +210,18 @@ function calcularSlotsLibres(citas, fechaISO) {
     if (isNaN(tIni)) return;
     const hIni = tIni.getHours() + tIni.getMinutes() / 60;
     const hFin = isNaN(tFin) ? hIni + 0.5 : tFin.getHours() + tFin.getMinutes() / 60;
+    // A 'Bloqueo' with no Consultor assigned is a clinic-wide block (e.g. the
+    // 24-Jul-2026 07:00-12:00 entry from Dec 2023) — matching only on the two
+    // hardcoded consultant IDs made it invisible to availability, so Carolina
+    // offered a slot the clinic had actually blocked (confirmed live
+    // 2026-07-23, Jacob Luna Torres had to be manually moved 8:30am -> 9:00am
+    // with a different professional). Block both resources for it instead of
+    // requiring it to name a consultant.
+    if (c.Tipo === 'Bloqueo' && !cID) {
+      ocupadosJE.push({ ini: hIni, fin: hFin });
+      ocupadosMapeos.push({ ini: hIni, fin: hFin });
+      return;
+    }
     if (cID === constants.ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push({ ini: hIni, fin: hFin });
     if (cID === constants.ID_CONSULTOR_MAPEOS) ocupadosMapeos.push({ ini: hIni, fin: hFin });
   });
