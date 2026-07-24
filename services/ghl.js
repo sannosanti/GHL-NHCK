@@ -325,6 +325,21 @@ async function crearCitaEnCalendario({ contactId, calendarId, startISO, endISO, 
   return data;
 }
 
+// For Zoho Citas entries with no Contacto (Bloqueo/Salida/Entrada/Descanso/
+// Almuerzo/Festivo) — GHL's block-slots endpoint needs no contactId, unlike
+// the appointments one above (verified live 2026-07-24).
+async function crearBloqueoEnCalendario({ calendarId, startISO, endISO, title }) {
+  const { data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/block-slots', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      calendarId, locationId: env.ghlLocationId,
+      startTime: startISO, endTime: endISO, title: title || 'Bloqueo NHC',
+    }),
+  });
+  return data;
+}
+
 module.exports = {
   mapearSintoma,
   mapearGenero,
@@ -349,4 +364,5 @@ module.exports = {
   actualizarEtapaOportunidad,
   buscarOCrearContactoPorTelefono,
   crearCitaEnCalendario,
+  crearBloqueoEnCalendario,
 };
