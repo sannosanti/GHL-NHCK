@@ -444,6 +444,9 @@ function mapearSintomaAdulto(s) {
  * Saturday 1pm through Monday 8am (America/Bogota) — Luisa must not promise
  * an imminent human follow-up ("pronto", "en un momento") during that window.
  */
+// Real schedule confirmed 2026-07-25 (previous version had no end-of-day cutoff
+// Mon-Fri and cut Saturday at 1pm instead of noon): Mon-Fri 8am-4pm, Sat
+// 8am-12pm, Sun never.
 function equipoComercialDisponible() {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Bogota', weekday: 'short', hour: 'numeric', hourCycle: 'h23',
@@ -451,9 +454,24 @@ function equipoComercialDisponible() {
   const weekday = parts.find(p => p.type === 'weekday').value;
   const hour = parseInt(parts.find(p => p.type === 'hour').value, 10);
   if (weekday === 'Sun') return false;
-  if (weekday === 'Sat' && hour >= 13) return false;
-  if (weekday === 'Mon' && hour < 8) return false;
-  return true;
+  if (weekday === 'Sat') return hour >= 8 && hour < 12;
+  return hour >= 8 && hour < 16;
+}
+
+// Human-readable "when does the team come back" for escalation messages, so
+// Carolina/Luisa can promise a real timeframe instead of a vague "pronto" or
+// an invented fixed number of hours (confirmed live 2026-07-25: promising a
+// fixed "2 horas" isn't true, response time depends entirely on business hours).
+function proximoHorarioComercial() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota', weekday: 'short', hour: 'numeric', hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const weekday = parts.find(p => p.type === 'weekday').value;
+  const hour = parseInt(parts.find(p => p.type === 'hour').value, 10);
+  if (equipoComercialDisponible()) return 'hoy mismo';
+  if (weekday === 'Sat' || weekday === 'Sun') return 'el lunes a partir de las 8am';
+  if (hour >= 16) return 'mañana a partir de las 8am';
+  return 'a partir de las 8am';
 }
 
 module.exports = {
@@ -461,4 +479,5 @@ module.exports = {
   mapearSintoma, mapearGenero, mapearOcupacionNino, mapearSintomaAdulto,
   mapearComoSupoAnamnesis,
   equipoComercialDisponible,
+  proximoHorarioComercial,
 };

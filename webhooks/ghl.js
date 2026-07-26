@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { env, constants, equipoComercialDisponible } = require('../config');
+const { env, constants, proximoHorarioComercial } = require('../config');
 const db = require('../db');
 const ghl = require('../services/ghl');
 const zoho = require('../services/zoho');
@@ -393,9 +393,7 @@ async function flushTextQueue(conversationId) {
       await ghl.addTag(contactId, 'escalado nhck');
       await db.logEvent(contactId, conversationId, 'escalado', { motivo: combinedMsg });
       const replyLimpio = limpiarTags(rawReply).trim();
-      const textoEnviado = replyLimpio || (equipoComercialDisponible()
-        ? 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌'
-        : 'Nuestro equipo retoma el lunes a primera hora y te atiende por aquí apenas esté disponible 🙌');
+      const textoEnviado = replyLimpio || `Un asesor de nuestro equipo te contacta ${proximoHorarioComercial()} 🙌`;
       history.push({ role: 'assistant', content: [{ type: 'text', text: textoEnviado }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', null, phone);
       triggerAnalysis(conversationId, contactId, 'escalado');

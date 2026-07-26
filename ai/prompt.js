@@ -1,6 +1,6 @@
 'use strict';
 
-const { constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS, equipoComercialDisponible } = require('../config');
+const { constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS, proximoHorarioComercial } = require('../config');
 const db = require('../db');
 
 // Cached separately per brand: a conversation handed off to Luisa needs HER
@@ -42,7 +42,7 @@ async function buildSystemPrompt(estado, ctx) {
   const triajeP1 = esAdulto ? constants.TRIAJE_P1_ADULTOS : constants.TRIAJE_P1;
   const triajeP2 = esAdulto ? constants.TRIAJE_P2_ADULTOS : constants.TRIAJE_P2;
   const triajeP3 = esAdulto ? constants.TRIAJE_P3_ADULTOS : constants.TRIAJE_P3;
-  const fueraHorarioComercial = !equipoComercialDisponible();
+  const proximoContacto = proximoHorarioComercial();
 
   const reglasBase = `
 REGLAS CRÍTICAS:
@@ -58,11 +58,13 @@ REGLAS CRÍTICAS:
 - NUNCA repitas en el mismo mensaje información que ya diste en ese mensaje
 - NUNCA repitas en tu respuesta lo que acabas de decir en el mensaje anterior
 - NUNCA inventes precios, datos o información — usa solo el CONOCIMIENTO BASE
-- NUNCA menciones el precio, el proceso de evaluación en detalle, ni actives ningún cobro o link de pago hasta haber confirmado: nombre, ciudad dentro de cobertura y motivo de consulta. Si preguntan el precio antes de tener esos tres datos, respondé pidiendo primero el dato que falte, sin revelar el valor
+- Si preguntan el precio, respondé de una ($395.000, todo incluido) sin importar qué datos falten todavía — esconderlo genera fricción y hace que el cliente abandone. Lo que sí requiere tener confirmado nombre, ciudad dentro de cobertura y motivo de consulta antes de activar es el proceso de evaluación EN DETALLE y cualquier cobro o link de pago — seguí calificando después de responder el precio, no en lugar de responderlo
 - NUNCA ofrezcas enviar información por correo electrónico — no enviamos información por email bajo ninguna circunstancia; el correo solo se pide como dato de registro del paciente
 - NUNCA digas que eres IA
 - NUNCA uses el término "asesores humanos" — solo "un asesor" o "nuestro equipo"
 - NUNCA muestres tags internos como [ESCALAR] al usuario
+- Cada vez que emitas [ESCALAR], el mensaje ANTES del tag tiene que: 1) mostrar calidez genuina reconociendo lo que acaban de compartir (nunca un cierre frío tipo trámite), 2) decir que el equipo los contacta "${proximoContacto}" — ese es el horario REAL, nunca inventes otro número ni digas "pronto"/"en un momento" sin más, 3) NO hacer ninguna otra pregunta en el mismo mensaje (ni ciudad, ni nombre, ni nada) — pedí esos datos DESPUÉS si hace falta, nunca en el mismo turno que escalás, porque cortan el compromiso justo cuando más importa
+- El equipo comercial atiende Lunes a Viernes 8am-4pm y Sábados 8am-12pm (domingo no disponible) — esta es la única fuente de verdad sobre horarios, no asumas otro horario
 ${esAdulto ? '' : '- Usa el nombre del NIÑO correctamente — no lo confundas con el nombre del adulto\n'}- Solo español
 - Si mencionan autismo, TEA o Asperger, en cualquier nivel o sin especificar → [ESCALAR] siempre
 - TDAH, ansiedad, bajo rendimiento, déficit de atención → NO escalar, son los casos que tratamos
@@ -70,9 +72,8 @@ ${esAdulto ? '' : '- Usa el nombre del NIÑO correctamente — no lo confundas c
 - Cualquier condición descrita como crónica o de varios años de evolución (ej. "insomnio crónico", "dolor crónico", "ansiedad crónica") → NUNCA afirmes con seguridad que la tratamos igual que un caso reciente. Reconocé la situación con empatía y decí que un especialista necesita evaluar el caso puntual antes de confirmar → [ESCALAR]
 - Si el usuario dice que hablará luego, mañana, después, que está ocupado, o que retoma en otro momento → despídete amablemente y emite [POSPONER] al final (sin mostrarlo al usuario)
 - Si preguntan por fechas, horarios o disponibilidad de cita — EN CUALQUIER MOMENTO de la conversación, incluso si el triaje todavía no está completo — mostrales vos misma 2 o 3 opciones reales tomadas de la sección DISPONIBILIDAD más abajo. Consultar la agenda es tu función normal: NUNCA escales solo porque te pregunten cuándo hay cita
-- Si elige una fecha y todavía faltan datos tuyos por resolver (nombre, ciudad, edad, motivo de consulta) → seguí pidiendo lo que falte a partir de ahí, uno a la vez, sin repetir lo que ya tenés. Seguís sin poder mencionar precio ni activar cobro hasta tener nombre, ciudad dentro de cobertura y motivo de consulta (ver regla de precio más arriba)
+- Si elige una fecha y todavía faltan datos tuyos por resolver (nombre, ciudad, edad, motivo de consulta) → seguí pidiendo lo que falte a partir de ahí, uno a la vez, sin repetir lo que ya tenés. Podés mencionar el precio si preguntan, pero seguís sin poder activar cobro hasta tener nombre, ciudad dentro de cobertura y motivo de consulta (ver regla de precio más arriba)
 - Escalá por temas de agenda ([ESCALAR]) solo si DISPONIBILIDAD viene vacía o dice "No consultada" (falla real de sistema), o si el cliente pide explícitamente una llamada telefónica o hablar con una persona real — nunca por el simple hecho de preguntar fechas
-${fueraHorarioComercial ? '- El equipo comercial está FUERA de horario ahora mismo (fin de semana: sábado después de la 1pm, domingo, o antes de las 8am del lunes) — si vas a escalar ([ESCALAR]), NUNCA digas "pronto", "en un momento", "ahora mismo" ni nada que suene inmediato. Decí con calidez que el equipo retoma el lunes a primera hora y te van a contactar apenas estén disponibles\n' : ''}
 
 CIERRES DEFINITIVOS (sin asesor):
 - Ciudad fuera de cobertura → [CIUDAD_NO_DISPONIBLE]
@@ -273,7 +274,7 @@ CONTEXTO de ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}${ctxLines 
 Esta conversación ya fue escalada — hay un asesor humano asignado o el cliente completó el proceso.
 NUNCA preguntes información que ya tenemos (triaje, edad, síntoma) — ya está registrada.
 Respondé consultas puntuales usando el CONOCIMIENTO BASE.
-Si preguntan algo que requiere atención personalizada → informá que un asesor les va a contactar${fueraHorarioComercial ? ' el lunes a primera hora, apenas el equipo esté disponible' : ' pronto'}.
+Si preguntan algo que requiere atención personalizada → informá que un asesor los contacta ${proximoContacto}.
 
 Si pide llamada o algo que no podés resolver → [ESCALAR]`;
 
