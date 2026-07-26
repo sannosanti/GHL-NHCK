@@ -26,6 +26,33 @@ const textQueues = {};
 /** Random human-like delay between 3 and 6 seconds. */
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
+// Strips every internal tag the model can emit, not just the one tag a given
+// branch cares about. Each early-return branch below used to strip only its
+// own tag (e.g. the [ESCALAR] branch only removed "[ESCALAR]"), so a reply
+// that combined tags — e.g. "[TRIAJE_P3: X] [TRIAJE_COMPLETO] ... [ESCALAR]",
+// which the prompt explicitly asks the model to do when triage completion
+// and escalation happen in the same turn — leaked the untouched tag straight
+// to the patient (confirmed live 2026-07-25: "[TRIAJE COMPLETO]" visible at
+// the end of escalated chats). One shared cleaner used everywhere closes the
+// whole class of bug instead of just this one instance.
+function limpiarTags(text) {
+  return (text || '')
+    .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
+    .replace(/\[TRIAJE_COMPLETO\]/g, '')
+    .replace(/\[NOMBRE_PADRE:[^\]]+\]/g, '')
+    .replace(/\[CIUDAD_VALIDA:[^\]]+\]/g, '')
+    .replace(/\[MEDIO_WOMPI\]/g, '')
+    .replace(/\[MEDIO_TRANSFERENCIA\]/g, '')
+    .replace(/\[MEDIO_QR\]/g, '')
+    .replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '')
+    .replace(/\[SIN_PRESUPUESTO\]/g, '')
+    .replace(/\[FUERA_SEGMENTO\]/g, '')
+    .replace(/\[NHC_ADULTOS\]/g, '')
+    .replace(/\[ESCALAR\]/g, '')
+    .replace(/\[POSPONER\]/g, '')
+    .split('\n').filter(l => l.trim() !== '').join('\n');
+}
+
 /**
  * Wraps ghl.sendMessage for inactivity timers: these fire minutes after being
  * scheduled, so the contact may have been escalated (manually in GHL, or by
@@ -304,7 +331,7 @@ async function flushTextQueue(conversationId) {
 
     // Cierre: ciudad fuera de cobertura
     if (rawReply.includes('[CIUDAD_NO_DISPONIBLE]')) {
-      const replyLimpio = rawReply.replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '').trim();
+      const replyLimpio = limpiarTags(rawReply).trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', null, phone);
@@ -318,7 +345,7 @@ async function flushTextQueue(conversationId) {
 
     // Cierre: sin presupuesto
     if (rawReply.includes('[SIN_PRESUPUESTO]')) {
-      const replyLimpio = rawReply.replace(/\[SIN_PRESUPUESTO\]/g, '').trim();
+      const replyLimpio = limpiarTags(rawReply).trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', null, phone);
@@ -332,7 +359,7 @@ async function flushTextQueue(conversationId) {
 
     // Cierre: fuera de segmento (edad mínima, no lee)
     if (rawReply.includes('[FUERA_SEGMENTO]')) {
-      const replyLimpio = rawReply.replace(/\[FUERA_SEGMENTO\]/g, '').trim();
+      const replyLimpio = limpiarTags(rawReply).trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'cerrado', null, phone);
@@ -348,7 +375,7 @@ async function flushTextQueue(conversationId) {
     // (mismo número, no requiere plantilla de WhatsApp de Meta). NO se marca
     // como 'escalado': el bot sigue respondiendo activamente, ahora como Luisa.
     if (rawReply.includes('[NHC_ADULTOS]')) {
-      const replyLimpio = rawReply.replace(/\[NHC_ADULTOS\]/g, '').trim();
+      const replyLimpio = limpiarTags(rawReply).trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'triaje_p1', null, phone);
@@ -365,7 +392,7 @@ async function flushTextQueue(conversationId) {
     if (rawReply.includes('[ESCALAR]')) {
       await ghl.addTag(contactId, 'escalado nhck');
       await db.logEvent(contactId, conversationId, 'escalado', { motivo: combinedMsg });
-      const replyLimpio = rawReply.replace(/\[ESCALAR\]/g, '').trim();
+      const replyLimpio = limpiarTags(rawReply).trim();
       const textoEnviado = replyLimpio || (equipoComercialDisponible()
         ? 'En un momento un asesor de nuestro equipo te atiende por aquí 🙌'
         : 'Nuestro equipo retoma el lunes a primera hora y te atiende por aquí apenas esté disponible 🙌');
@@ -384,7 +411,7 @@ async function flushTextQueue(conversationId) {
 
     // Deferred — user said they'll talk later: suppress timers and recovery for 24h
     if (rawReply.includes('[POSPONER]')) {
-      const replyLimpio = rawReply.replace(/\[POSPONER\]/g, '').trim();
+      const replyLimpio = limpiarTags(rawReply).trim();
       const partes = replyLimpio.split('---').map(p => p.trim()).filter(p => p.length > 0);
       history.push({ role: 'assistant', content: [{ type: 'text', text: replyLimpio }] });
       await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, nuevoEstado, null, phone);
@@ -399,21 +426,7 @@ async function flushTextQueue(conversationId) {
     }
 
     // Normal reply
-    const reply = rawReply
-      .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
-      .replace(/\[TRIAJE_COMPLETO\]/g, '')
-      .replace(/\[NOMBRE_PADRE:[^\]]+\]/g, '')
-      .replace(/\[CIUDAD_VALIDA:[^\]]+\]/g, '')
-      .replace(/\[MEDIO_WOMPI\]/g, '')
-      .replace(/\[MEDIO_TRANSFERENCIA\]/g, '')
-      .replace(/\[MEDIO_QR\]/g, '')
-      .replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '')
-      .replace(/\[SIN_PRESUPUESTO\]/g, '')
-      .replace(/\[FUERA_SEGMENTO\]/g, '')
-      .replace(/\[NHC_ADULTOS\]/g, '')
-      .replace(/\[ESCALAR\]/g, '')
-      .replace(/\[POSPONER\]/g, '')
-      .split('\n').filter(l => l.trim() !== '').join('\n');
+    const reply = limpiarTags(rawReply);
 
     const partes = reply.split('---').map(p => p.trim()).filter(p => p.length > 0);
     history.push({ role: 'assistant', content: [{ type: 'text', text: reply }] });
