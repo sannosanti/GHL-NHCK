@@ -210,9 +210,12 @@ async function crearAnamnesisNinos(d, contactoID) {
     // 2026-07-28 that academic performance is the intended content here.
     Han_existido_muertes_violentas_o_asesinatos_en_la_familia: d.rendimientoAcademico || '',
     Que_enfermedades_has_sufrido: d.enfermedades || '',
+    // Real Zoho multi-select — needs a JSON array of exact option strings,
+    // NOT a joined string (confirmed live 2026-07-28: a comma-joined string
+    // was rejected with "Invalid column value").
     Restricciones_para_uso_de_la_tecnolog_a: Array.isArray(d.restriccionesTecnologia)
-      ? d.restriccionesTecnologia.join(', ')
-      : (d.restriccionesTecnologia || ''),
+      ? d.restriccionesTecnologia
+      : (d.restriccionesTecnologia ? [d.restriccionesTecnologia] : []),
     El_consultante_o_su_familia_han_hecho_alg_n_tipo_de_trabajo_psicol_gico_anteriormente_Qu_han_descu: d.trabajoPsicologico || '',
     Tomas_alg_n_tipo_de_medicina: d.medicamentos || '',
     Que_enfermedades_hay_en_tu_familia: d.antecedentesSalud || '',
@@ -231,9 +234,11 @@ async function crearAnamnesisNinos(d, contactoID) {
     C_mo_supo_de_nosotros: comoSupoMapeado ? [comoSupoMapeado] : [],
     Comentario_Devoluci_n_Inicial: d.comentarioDevolucion || '',
     Recomendaciones_terap_uticas_iniciales: d.recomendacionesTerapeuticas || '',
+    // Same real multi-select pattern as Restricciones_para_uso_de_la_tecnolog_a
+    // above — array, not a joined string.
     Neurotecnolog_as_que_NO_puede_usar_el_paciente: Array.isArray(d.neurotecnologiasNoUsar)
-      ? d.neurotecnologiasNoUsar.join(', ')
-      : (d.neurotecnologiasNoUsar || ''),
+      ? d.neurotecnologiasNoUsar
+      : (d.neurotecnologiasNoUsar ? [d.neurotecnologiasNoUsar] : []),
     // TODO: Test_BASCH — client hasn't provided this field's Zoho link name yet, skip for now.
   };
 
