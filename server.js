@@ -242,7 +242,7 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
   const d = req.body;
 
   // ── 1. Validate required fields ──────────────────────────────────────────
-  const REQUIRED = ['fechaElaboracion', 'nombreConsultante', 'edadConsultante', 'motivoConsulta', 'expectativasProceso', 'comoSupo'];
+  const REQUIRED = ['fechaElaboracion', 'nombreConsultante', 'emailConsultante', 'edadConsultante', 'motivoConsulta', 'expectativasProceso', 'comoSupo'];
   const missing = REQUIRED.filter(k => !d[k] || String(d[k]).trim() === '');
   if (missing.length) {
     return res.status(400).json({ ok: false, stage: 'validation', missing, error: `Campos requeridos faltantes: ${missing.join(', ')}` });
