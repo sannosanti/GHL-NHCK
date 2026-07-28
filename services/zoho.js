@@ -152,12 +152,13 @@ async function crearAnamnesisNinos(d, contactoID) {
 
   const comoSupoMapeado = mapearComoSupoAnamnesis(d.comoSupo);
 
-  // The Zoho picklist's real option is "Dieztro" (typo, with a "z") — the
-  // patient form's dropdown correctly says "Diestro", so translate before
-  // sending or Zoho rejects the whole record with "Invalid column value
-  // for Lareralidad" (confirmed live 2026-07-28). "Ambidiestro" has no
-  // confirmed Zoho option yet — passed through as-is for now.
-  const lateralidadZoho = d.lateralidad === 'Diestro' ? 'Dieztro' : (d.lateralidad || '');
+  // Zoho's real dropdown options are "Diestro(a)"/"Zurdo(a)" (confirmed
+  // live 2026-07-28) — the patient form's dropdown says "Diestro"/"Zurdo"/
+  // "Ambidiestro". Translate the two that map; "Ambidiestro" has no
+  // matching Zoho option, so it's left blank rather than forcing a wrong
+  // value — Zoho rejects the whole record on an invalid picklist value.
+  const LATERALIDAD_ZOHO = { Diestro: 'Diestro(a)', Zurdo: 'Zurdo(a)' };
+  const lateralidadZoho = LATERALIDAD_ZOHO[d.lateralidad] || '';
 
   const data = {
     Fecha_de_elaboraci_n1: d.fechaElaboracion || '',
