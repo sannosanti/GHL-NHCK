@@ -24,7 +24,10 @@ async function refreshLearnedRules() {
  *
  * @param {string} estado - Conversation state (e.g. 'nuevo', 'triaje_p1', ...)
  * @param {{ nombre?: string, triaje?: object, disponibilidadTexto?: string }} ctx
- * @returns {string}
+ * @returns {{ cached: string, dynamic: string }} cached is the static,
+ *   brand-level block (reglas + conocimiento base) meant to be sent with
+ *   cache_control; dynamic is the per-call suffix (fecha, disponibilidad,
+ *   tarea del estado) that must never be cached.
  */
 async function buildSystemPrompt(estado, ctx) {
   await refreshLearnedRules();
@@ -63,7 +66,7 @@ REGLAS CRÍTICAS:
 - NUNCA digas que eres IA
 - NUNCA uses el término "asesores humanos" — solo "un asesor" o "nuestro equipo"
 - NUNCA muestres tags internos como [ESCALAR] al usuario
-- Cada vez que emitas [ESCALAR], el mensaje ANTES del tag tiene que: 1) mostrar calidez genuina reconociendo lo que acaban de compartir (nunca un cierre frío tipo trámite), 2) decir que el equipo los contacta "${proximoContacto}" — ese es el horario REAL, nunca inventes otro número ni digas "pronto"/"en un momento" sin más, 3) NO hacer ninguna otra pregunta en el mismo mensaje (ni ciudad, ni nombre, ni nada) — pedí esos datos DESPUÉS si hace falta, nunca en el mismo turno que escalás, porque cortan el compromiso justo cuando más importa
+- Cada vez que emitas [ESCALAR], el mensaje ANTES del tag tiene que: 1) mostrar calidez genuina reconociendo lo que acaban de compartir (nunca un cierre frío tipo trámite), 2) decir que el equipo los contacta usando EXACTAMENTE el horario indicado en "PRÓXIMO CONTACTO" más abajo — nunca inventes otro horario ni digas "pronto"/"en un momento" sin más, 3) NO hacer ninguna otra pregunta en el mismo mensaje (ni ciudad, ni nombre, ni nada) — pedí esos datos DESPUÉS si hace falta, nunca en el mismo turno que escalás, porque cortan el compromiso justo cuando más importa
 - El equipo comercial atiende Lunes a Viernes 8am-4pm y Sábados 8am-12pm (domingo no disponible) — esta es la única fuente de verdad sobre horarios, no asumas otro horario
 ${esAdulto ? '' : '- Usa el nombre del NIÑO correctamente — no lo confundas con el nombre del adulto\n'}- Solo español
 - Si mencionan autismo, TEA o Asperger, en cualquier nivel o sin especificar → [ESCALAR] siempre
@@ -82,18 +85,28 @@ ${esAdulto ? '' : '- Niño menor de 7 años o que no sabe leer → [FUERA_SEGMEN
 
   const today = new Date().toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Bogota' });
 
-  let systemPrompt = `Eres ${nombreAsesora}, asesora de ${marca}. Escribes por WhatsApp.
-Hoy es ${today}.
+  // Everything below is identical across every call for the same brand
+  // (esAdulto) — this is the block callClaude marks with cache_control so
+  // Anthropic caches it instead of re-billing it on every single message.
+  // Never interpolate per-call values (date, availability, proximoContacto)
+  // in here — that would bust the cache on every message.
+  const staticPrompt = `Eres ${nombreAsesora}, asesora de ${marca}. Escribes por WhatsApp.
 ${reglasBase}
-
-DISPONIBILIDAD (próximos 14 días — usa SOLO estos horarios, NUNCA inventes):
-${disponibilidadTexto}
 
 CONOCIMIENTO BASE:
 ${conocimientoActivo}`;
 
+  // Everything below changes per call/state, so it stays outside the cached
+  // block and gets appended after it as a second, uncached content block.
+  let dynamicPrompt = `Hoy es ${today}.
+
+PRÓXIMO CONTACTO (horario exacto a usar cuando escalás — ver regla de [ESCALAR] arriba): ${proximoContacto}
+
+DISPONIBILIDAD (próximos 14 días — usa SOLO estos horarios, NUNCA inventes):
+${disponibilidadTexto}`;
+
   if (estado === 'nuevo') {
-    systemPrompt += `
+    dynamicPrompt += `
 
 TU TAREA (primera interacción):
 1. Saluda cálidamente y preséntate como ${nombreAsesora} de ${marca}
@@ -107,7 +120,7 @@ Si pide llamada o hablar con alguien → [ESCALAR]`;
   } else if (estado === 'triaje_p1' && esAdulto) {
     // Ciudad y mayoría de edad ya se confirmaron antes del handoff — no se
     // repiten. Directo a la dificultad, con las categorías de Luisa.
-    systemPrompt += `
+    dynamicPrompt += `
 
 CONTEXTO: Hablas con ${nombre || 'el cliente'}. Ya se confirmó que es mayor de edad y la ciudad ya fue validada en este mismo chat — NO vuelvas a preguntar ninguna de las dos.
 
@@ -126,7 +139,7 @@ Al tener P2 también: [TRIAJE_P2: <opción exacta>]
 Si pide llamada → [ESCALAR]`;
 
   } else if (estado === 'triaje_p1') {
-    systemPrompt += `
+    dynamicPrompt += `
 
 CONTEXTO: Hablas con ${nombre || 'el padre/madre'}.
 
@@ -162,7 +175,7 @@ Al tener P2 también: [TRIAJE_P2: <opción exacta>]
 Si pide llamada → [ESCALAR]`;
 
   } else if (estado === 'triaje_p2') {
-    systemPrompt += `
+    dynamicPrompt += `
 
 TRIAJE para ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}:
 - Dificultad: ${triaje.triaje1}
@@ -174,7 +187,7 @@ Opciones: ${triajeP3.join(', ')}
 Si pide llamada → [ESCALAR]`;
 
   } else if (estado === 'triaje_p3') {
-    systemPrompt += `
+    dynamicPrompt += `
 
 TRIAJE para ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}:
 - Dificultad: ${triaje.triaje1} | Tiempo: ${triaje.triaje2}
@@ -189,7 +202,7 @@ Al final: [TRIAJE_P3: <opción exacta>] y [TRIAJE_COMPLETO]
 Si pide llamada → [ESCALAR]`;
 
   } else if (estado === 'triaje_completo' || estado === 'agendando') {
-    systemPrompt += `
+    dynamicPrompt += `
 
 CONTEXTO de ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}:
 - Dificultad: ${triaje.triaje1} | Tiempo: ${triaje.triaje2} | Han intentado: ${triaje.triaje3}
@@ -267,7 +280,7 @@ Si pide llamada → [ESCALAR]`;
       triaje.triaje3 && `Han intentado: ${triaje.triaje3}`,
     ].filter(Boolean).join(' | ');
 
-    systemPrompt += `
+    dynamicPrompt += `
 
 CONTEXTO de ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}${ctxLines ? `:\n- ${ctxLines}` : '.'}
 
@@ -279,7 +292,7 @@ Si preguntan algo que requiere atención personalizada → informá que un aseso
 Si pide llamada o algo que no podés resolver → [ESCALAR]`;
 
   } else if (estado === 'esperando_pago') {
-    systemPrompt += `
+    dynamicPrompt += `
 
 CONTEXTO: ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')} debe hacer la reserva de $100.000.
 
@@ -296,13 +309,13 @@ Si pregunta por COMFAMA o FEISA → confirmá que sí hay convenio con 10% de de
 
   const learnedRulesActivas = esAdulto ? learnedRulesCache.luisa : learnedRulesCache.carolina;
   if (learnedRulesActivas.length > 0) {
-    systemPrompt += `\n\nREGLAS APRENDIDAS DE CONVERSACIONES REALES (aprobadas por el equipo — aplicar siempre):\n`;
+    dynamicPrompt += `\n\nREGLAS APRENDIDAS DE CONVERSACIONES REALES (aprobadas por el equipo — aplicar siempre):\n`;
     learnedRulesActivas.forEach((rule, i) => {
-      systemPrompt += `${i + 1}. ${rule}\n`;
+      dynamicPrompt += `${i + 1}. ${rule}\n`;
     });
   }
 
-  return systemPrompt;
+  return { cached: staticPrompt, dynamic: dynamicPrompt };
 }
 
 module.exports = { buildSystemPrompt };

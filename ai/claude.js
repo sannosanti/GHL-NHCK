@@ -7,12 +7,18 @@ const db = require('../db');
 const MODEL_ID = 'claude-sonnet-4-5';
 
 // $/MTok, from platform.claude.com/docs/en/about-claude/pricing (checked 2026-07-16).
-// cacheWrite is the 5-minute-TTL rate — this codebase doesn't set cache_control,
-// so cache_creation/read tokens are 0 today, but the API always reports the
-// fields and rates differ per model, so keep them alongside input/output.
+// cacheWrite here is the 1-hour-TTL rate (2x base input), not the 5-minute
+// rate (1.25x) — buildSystemPrompt's conversational callers run at ~15
+// calls/hour per brand, frequent enough that the 1h TTL (set below via
+// cache_control.ttl) avoids paying constant cache-write churn on the 5m TTL.
 const PRICING = {
-  'claude-sonnet-4-5': { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
+  'claude-sonnet-4-5': { input: 3, output: 15, cacheWrite: 6, cacheRead: 0.30 },
 };
+
+// Anthropic beta header required to request the 1-hour cache TTL instead of
+// the 5-minute default (verify against current docs before relying on it —
+// checked 2026-07-16).
+const CACHE_BETA_HEADER = 'extended-cache-ttl-2025-04-11';
 
 function calcCostUsd(model, usage) {
   const p = PRICING[model];
@@ -28,22 +34,34 @@ function calcCostUsd(model, usage) {
 /**
  * Call the Claude API and return the raw text response.
  *
- * @param {string} systemPrompt
+ * @param {string|{cached: string, dynamic: string}} systemPrompt - Plain
+ *   string for one-off/low-volume callers. Pass { cached, dynamic } (as
+ *   buildSystemPrompt returns) to mark the static part with cache_control
+ *   so Anthropic caches it instead of re-billing it on every call.
  * @param {Array} history - Array of message objects (role/content)
  * @returns {Promise<string>} raw reply text
  */
 async function callClaude(systemPrompt, history, maxTokens = 600) {
+  const isCacheable = systemPrompt && typeof systemPrompt === 'object';
+  const system = isCacheable
+    ? [
+        { type: 'text', text: systemPrompt.cached, cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: systemPrompt.dynamic },
+      ]
+    : systemPrompt;
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'x-api-key': env.anthropicKey,
       'anthropic-version': '2023-06-01',
+      ...(isCacheable ? { 'anthropic-beta': CACHE_BETA_HEADER } : {}),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model: MODEL_ID,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system,
       messages: history,
     }),
   });
