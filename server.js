@@ -14,7 +14,7 @@
 require('https').globalAgent = new (require('https').Agent)({ keepAlive: false });
 
 const express = require('express');
-const { env, mapearComoSupoAnamnesis } = require('./config');
+const { env } = require('./config');
 const db = require('./db');
 const { removeTag } = require('./services/ghl');
 const { ghlWebhookHandler, ghlCrearEnCreatorHandler, ghlCrearEnCreatorNHCHandler } = require('./webhooks/ghl');
@@ -28,7 +28,7 @@ const { startDailyReport } = require('./jobs/dailyReport');
 const { startPendingWebhookJob } = require('./jobs/pendingWebhookJob');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
-const { getZohoAccessToken, crearTriajeInfantil, buscarOCrearContactoAnamnesisClinica, crearAnamnesisPsicologo } = require('./services/zoho');
+const { getZohoAccessToken, crearTriajeInfantil, buscarOCrearContactoAnamnesisClinica, crearAnamnesisNinos } = require('./services/zoho');
 const fetch = require('node-fetch');
 
 const app = express();
@@ -337,41 +337,24 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
     console.log('[/anamnesis-clinica-infantil] Creator response:', JSON.stringify(crData));
 
     if (crData.code === 3000 || crData.data?.ID) {
-      // ── 6. Also create the record in the real "Anamnesis" form ────────────
-      // Same gap the adults route had (confirmed live 2026-07-22): Historia
-      // Clínica alone never fed the psychologist's Anamnesis module. Reuses
-      // contactoID already resolved above. cambiarMejorar and autopercepcion
-      // have no equivalent question in the kids form, so left blank rather
-      // than forced from an unrelated answer.
+      // ── 6. Also create the record in the KIDS psychologist-review module ──
+      // "Anamnesis_nna2" — NOT "Anamnesis" (that module is for adults, see
+      // crearAnamnesisNinos in services/zoho.js for the full field map).
+      // Historia Clínica alone never fed the psychologist's review module.
+      // Reuses contactoID already resolved above. Passes `d` and contactoID
+      // directly — almost every field has its own real Zoho key now, so the
+      // old cherry-picked/combined subset used for crearAnamnesisPsicologo
+      // (adults' Anamnesis) is not needed here.
       let anamnesisCreada = false;
       let anamnesisError = null;
       try {
-        const combine = (...parts) => parts.filter(([, v]) => v).map(([label, v]) => `${label}: ${v}`).join(' | ');
-        const anamnesisResult = await crearAnamnesisPsicologo({
-          contactoID,
-          motivoConsulta: d.motivoConsulta,
-          infanciaAdolescencia: d.infanciaDesarrollo,
-          medicamentosSuplementos: d.medicamentos,
-          enfermedades: d.enfermedades,
-          factoresEstresores: d.factoresMotivacion,
-          agregarAlgo: combine(['Algo más', d.agregarAlgo], ['Comentarios', d.comentariosProfesional]),
-          habitosVida: d.actividadesExtracurriculares,
-          conQuienVive: d.conQuienVive,
-          dedicacion: d.gradoInstitucion,
-          relacionesPareja: d.relacionesPares,
-          procesoTerapeutico: d.trabajoPsicologico,
-          sueno: d.sueno,
-          violenciaVivida: d.abusosViolencia,
-          conformacionFamilia: combine(['Conformación familia', d.conformacionFamilia], ['Dinámica familiar', d.dinamicaFamiliar]),
-          consumeSustancias: d.consumeSustancias,
-          comoSupo: mapearComoSupoAnamnesis(d.comoSupo),
-        });
+        const anamnesisResult = await crearAnamnesisNinos(d, contactoID);
         anamnesisCreada = anamnesisResult?.code === 3000 || !!anamnesisResult?.data?.ID;
         if (!anamnesisCreada) anamnesisError = anamnesisResult;
       } catch (err) {
         anamnesisError = err.message;
       }
-      if (!anamnesisCreada) console.warn('[/anamnesis-clinica-infantil] Registro Anamnesis NO se creó:', JSON.stringify(anamnesisError));
+      if (!anamnesisCreada) console.warn('[/anamnesis-clinica-infantil] Registro Anamnesis_nna2 NO se creó:', JSON.stringify(anamnesisError));
 
       return res.json({ ok: true, id: crData.data?.ID, contactoID, anamnesisCreada, anamnesisError });
     }

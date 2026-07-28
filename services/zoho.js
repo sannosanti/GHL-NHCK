@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino } = require('../config');
+const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino, mapearComoSupoAnamnesis } = require('../config');
 const db = require('../db');
 
 // ─── ZOHO TOKEN (module-scoped, private) ─────────────────────────────────────
@@ -131,6 +131,118 @@ async function crearAnamnesisPsicologo({ contactoID, motivoConsulta, infanciaAdo
   const data = await res.json();
   console.log('ZOHO ANAMNESIS:', JSON.stringify(data));
   return data;
+}
+
+// Creates a record in the KIDS psychologist-review module "Anamnesis_nna2"
+// (link name confirmed live from the client's Zoho Creator form builder,
+// 2026-07-28). This is a SEPARATE Zoho module from "Anamnesis" above —
+// crearAnamnesisPsicologo must stay pointed at "Anamnesis" (that's the
+// adults module GHL-NHC-temp posts to). Root cause of the "kids submissions
+// show up classified as adults" bug was GHL-NHCK wrongly reusing
+// crearAnamnesisPsicologo/"Anamnesis" instead of this module. Takes the raw
+// request body `d` directly since almost every field here has its own real
+// Zoho link name, unlike crearAnamnesisPsicologo which has to cherry-pick/
+// combine fields into a handful of shared adult-oriented questions.
+async function crearAnamnesisNinos(d, contactoID) {
+  const token = await getZohoAccessToken();
+  const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
+
+  const edadConsultanteInfo = d.edadConsultante ? `Consultante: ${d.edadConsultante} años` : '';
+  const edadPadresInfo = d.edadPadresCuidadores ? ` | Padres/cuidadores: ${d.edadPadresCuidadores} años` : '';
+
+  const comoSupoMapeado = mapearComoSupoAnamnesis(d.comoSupo);
+
+  const data = {
+    Fecha_de_elaboraci_n1: d.fechaElaboracion || '',
+    Psicologo_Integral1: 'Website',
+    // "2" suffix on this link name (vs. "Nombre_del_consultante" on the
+    // adults Anamnesis form) could mean this is a different field type
+    // (e.g. plain text instead of a lookup) — confirm on first live test
+    // that posting the numeric contactoID resolves correctly here.
+    Nombre_del_consultante2: contactoID,
+    Informaci_n_general_b_sica_Qu_edad_tiene_el_consultante_y_que_edad_tienen_los_padres_y_o_cuidadores:
+      `${edadConsultanteInfo}${edadPadresInfo}`,
+    Lareralidad: d.lateralidad || '',
+    A_que_te_dedicas: d.dedicacionPadres || '',
+    Con_quien_viven: d.conQuienVive || '',
+    Que_te_trae_por_ac: d.motivoConsulta || '',
+    Estado_actual_y_antecedentes: d.estadoActualAntecedentes || '',
+    // Link name is a leftover from an earlier field purpose (prenatal
+    // check-up attendance) — currently displays "Número de embarazos de la
+    // madre" in Zoho, confirmed live 2026-07-28.
+    Asistieron_a_controles_prenatales: d.numEmbarazos || '',
+    La_madre_consumi_alg_n_medicamento_o_sustancia_durante_el_embarazo: d.medicamentosEmbarazo || '',
+    Como_fue_el_embarazo_para_tu_madre: d.complicacionesEmbarazo || '',
+    // Link name says "nacimiento" but currently displays "Duración del
+    // embarazo" in Zoho — same repurposed-field pattern as above, confirmed
+    // live 2026-07-28. Distinct from the field below, which does match its
+    // own "¿Cómo fue el nacimiento?" label.
+    Como_fue_tu_nacimiento_Hubo_alguna_complicacion: d.duracionEmbarazo || '',
+    C_mo_fue_el_nacimiento_Hubo_alguna_complicaci_n: d.complicacionesNacimiento || '',
+    Antecedentes: d.incubadoraEnfermedades || '',
+    Asisti_a_los_controles_de_crecimiento_y_desarrollo_Hubo_alguna_particularidad: d.controlesDesarrollo || '',
+    A_que_edad_gate: d.dificultadesGateo || '',
+    Control_de_esfinteres: d.controlEsfinteres || '',
+    A_que_edad_dijo_sus_primeras_palabras: d.primerasPalabras || '',
+    C_mo_era_su_temperamento: d.temperamento || '',
+    // Link name says "¿Tus padres están vivos?" but currently displays
+    // "¿Cómo está conformada la familia?" in Zoho — same repurposed-field
+    // pattern as the two comments above, confirmed live 2026-07-28.
+    Tus_padres_est_n_vivos: d.conformacionFamilia || '',
+    Como_recuerdas_tu_infancia: d.infanciaDesarrollo || '',
+    C_mo_es_la_din_mica_familiar_Cu_les_son_los_problemas_percibidos: d.dinamicaFamiliar || '',
+    Como_han_sido_tus_relaciones_afectivas: d.relacionesPares || '',
+    C_mo_son_las_pautas_de_crianza_en_la_familia: d.pautasCrianza || '',
+    Has_sufrido_abusos_o_violencia_intrafamiliar: d.abusosViolencia || '',
+    Si_el_consultante_es_estudiante_A_que_instituci_n_educativa_asiste_Qu_grado_semestre_cursa: d.gradoInstitucion || '',
+    // Deliberately mapped from rendimientoAcademico (academic performance),
+    // NOT from any "muertes violentas / asesinatos" question — the kids form
+    // has no such question. This Zoho field's live label is mismatched vs.
+    // what it's actually used for on the client's form; confirmed live
+    // 2026-07-28 that academic performance is the intended content here.
+    Han_existido_muertes_violentas_o_asesinatos_en_la_familia: d.rendimientoAcademico || '',
+    Que_enfermedades_has_sufrido: d.enfermedades || '',
+    Restricciones_para_uso_de_la_tecnolog_a: Array.isArray(d.restriccionesTecnologia)
+      ? d.restriccionesTecnologia.join(', ')
+      : (d.restriccionesTecnologia || ''),
+    El_consultante_o_su_familia_han_hecho_alg_n_tipo_de_trabajo_psicol_gico_anteriormente_Qu_han_descu: d.trabajoPsicologico || '',
+    Tomas_alg_n_tipo_de_medicina: d.medicamentos || '',
+    Que_enfermedades_hay_en_tu_familia: d.antecedentesSalud || '',
+    Haces_deporte: d.actividadesExtracurriculares || '',
+    Cu_les_son_los_factores_motivacionales_y_estresores_del_consultante: d.factoresMotivacion || '',
+    C_mo_es_la_alimentaci_n_Es_balanceada_Come_en_horarios_establecidos: d.alimentacion || '',
+    Como_estas_durmiendo: d.sueno || '',
+    Consumes_alg_n_tipo_de_sustancia: d.consumeSustancias || '',
+    Cu_nto_tiempo_est_el_consultante_expuesto_a_a_pantallas_durante_el_d_a: d.exposicionPantallas || '',
+    Que_esperas_comprender_con_este_diagnostico: d.expectativasProceso || '',
+    // Note: distinct from "Deseas_agregar_algo_mas" (the CURRENTLY-mislabeled
+    // "Comentarios del profesional" field in Anamnesis_nna2) — that link name
+    // is deliberately left unset from this flow; the patient form no longer
+    // collects that value at all (see anamnesis-clinica-infantil.html).
+    Deseas_agregar_algo_m_s_a_la_entrevista: d.agregarAlgo || '',
+    C_mo_supo_de_nosotros: comoSupoMapeado ? [comoSupoMapeado] : [],
+    Comentario_Devoluci_n_Inicial: d.comentarioDevolucion || '',
+    Recomendaciones_terap_uticas_iniciales: d.recomendacionesTerapeuticas || '',
+    Neurotecnolog_as_que_NO_puede_usar_el_paciente: Array.isArray(d.neurotecnologiasNoUsar)
+      ? d.neurotecnologiasNoUsar.join(', ')
+      : (d.neurotecnologiasNoUsar || ''),
+    // TODO: Test_BASCH — client hasn't provided this field's Zoho link name yet, skip for now.
+  };
+
+  // Conditional: only include substance-use detail fields when consumeSustancias = 'Sí'
+  // (same conditional already used for HISTORIAS_CLINICAS).
+  if (d.consumeSustancias === 'Sí') {
+    data.Cu_les_de_estas_sustancias_consume = d.tipoSustancias || '';
+    data.Cu_l_es_la_periodicidad_del_consumo = d.periodicidadConsumo || '';
+  }
+
+  const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Anamnesis_nna2', {
+    method: 'POST', headers,
+    body: JSON.stringify({ data }),
+  });
+  const result = await res.json();
+  console.log('ZOHO ANAMNESIS_NNA2:', JSON.stringify(result));
+  return result;
 }
 
 // ─── ZOHO CALENDARIO ──────────────────────────────────────────────────────────
@@ -323,6 +435,7 @@ module.exports = {
   buscarOCrearContactoAnamnesisClinica,
   crearTriajeInfantil,
   crearAnamnesisPsicologo,
+  crearAnamnesisNinos,
   crearCitasCalendario,
   getContactoPorId,
   getDisponibilidad,

@@ -225,7 +225,7 @@ const formData = {
   enfermedades:'', restriccionesTecnologia:[], trabajoPsicologico:'', medicamentos:'', antecedentesSalud:'',
   actividadesExtracurriculares:'', factoresMotivacion:'', alimentacion:'', sueno:'',
   consumeSustancias:'', tipoSustancias:'', periodicidadConsumo:'', exposicionPantallas:'',
-  expectativasProceso:'', agregarAlgo:'', comentariosProfesional:'', testBASCH:'', comoSupo:'',
+  expectativasProceso:'', agregarAlgo:'', testBASCH:'', comoSupo:'',
   comentarioDevolucion:'', recomendacionesTerapeuticas:'', neurotecnologiasNoUsar:'',
 };
 
@@ -296,12 +296,11 @@ const SECTIONS = [
   { id:9, title:'Cierre de la entrevista', fields:[
     { key:'expectativasProceso',      label:'¿Cuáles son tus expectativas con este proceso?',  type:'textarea', required:true, rows:4, placeholder:'Describe lo que espera lograr con esta evaluación' },
     { key:'agregarAlgo',              label:'¿Deseas agregar algo más a la entrevista?',        type:'textarea', placeholder:'Información adicional relevante' },
-    { key:'comentariosProfesional',   label:'Comentarios del profesional',                      type:'textarea', placeholder:'Observaciones del profesional durante la entrevista' },
     { key:'testBASCH',                label:'Test BASCH',                                       type:'textarea', placeholder:'Resultados o notas del test BASCH' },
     { key:'comoSupo', label:'¿Cómo supo de nosotros?', type:'select', required:true,
       options:['Recomendación de familiar o amigo','Recomendación médica / profesional','Redes sociales','Búsqueda en Google','Publicidad / medios','Evento o charla','Otro'] },
   ]},
-  { id:10, title:'Devolución inicial', subtitle:'Uso exclusivo del profesional', fields:[
+  { id:10, title:'Devolución inicial', subtitle:'Uso exclusivo del profesional', professionalOnly:true, fields:[
     { key:'comentarioDevolucion',         label:'Comentario devolución inicial',                          type:'textarea', rows:5, placeholder:'Observaciones clínicas de la devolución' },
     { key:'recomendacionesTerapeuticas',  label:'Recomendaciones terapéuticas iniciales',                 type:'textarea', rows:5, placeholder:'Plan de acción recomendado' },
     { key:'neurotecnologiasNoUsar',       label:'Neurotecnologías que no puede usar el paciente',         type:'textarea', rows:3, placeholder:'Lista las restricciones de neurotecnologías' },
@@ -377,33 +376,29 @@ function renderSection(idx) {
     <div class="section-title">${sec.title}</div>`;
 
   if (sec.subtitle) html += `<div class="section-subtitle">${sec.subtitle}</div>`;
-  if (idx === 10)   html += `<div class="pro-banner">🔒 Esta sección es de uso exclusivo del profesional — campos bloqueados</div>`;
 
-  html += `<div class="section-divider"></div>
-    <div class="fields-container">`;
-  sec.fields.forEach(f => { html += renderField(f); });
-  html += `</div>
-    <div class="error-msg" id="sec-err"></div>
+  html += `<div class="section-divider"></div>`;
+
+  // Professional-only sections (e.g. "Devolución inicial") are filled by the
+  // psychologist directly in Zoho, never by the patient. Real hide: the
+  // input elements are never added to the DOM at all — not just disabled/
+  // dimmed via CSS, which still let the values be read/submitted before.
+  if (sec.professionalOnly) {
+    html += `<div class="pro-banner">🔒 Esta sección es de uso exclusivo del profesional y se completa directamente en el sistema — no forma parte del formulario del paciente.</div>
+      <div class="fields-container"></div>`;
+  } else {
+    html += `<div class="fields-container">`;
+    sec.fields.forEach(f => { html += renderField(f); });
+    html += `</div>`;
+  }
+
+  html += `<div class="error-msg" id="sec-err"></div>
     <button class="btn-primary" id="btnNext" onclick="${isLast ? 'generateAndSubmit()' : 'nextSection()'}">
       ${isLast ? 'Generar PDF →' : 'Siguiente →'}
     </button>`;
   if (idx > 0) html += `<button class="btn-back" onclick="backSection()">← Atrás</button>`;
 
   card.innerHTML = html;
-  if (idx === 10) disableProfessionalSection();
-}
-
-function disableProfessionalSection() {
-  const card = document.getElementById('mainCard');
-  card.querySelectorAll('.field-input, .field-textarea, .field-select').forEach(el => {
-    el.disabled = true;
-    el.style.cursor = 'not-allowed';
-    el.style.color = '#94a3b8';
-  });
-  card.querySelectorAll('.fields-container').forEach(el => {
-    el.style.opacity = '0.55';
-    el.style.pointerEvents = 'none';
-  });
 }
 
 // ── Progress ────────────────────────────────────────────────────────────────────
