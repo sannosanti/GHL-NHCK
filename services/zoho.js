@@ -152,6 +152,13 @@ async function crearAnamnesisNinos(d, contactoID) {
 
   const comoSupoMapeado = mapearComoSupoAnamnesis(d.comoSupo);
 
+  // The Zoho picklist's real option is "Dieztro" (typo, with a "z") — the
+  // patient form's dropdown correctly says "Diestro", so translate before
+  // sending or Zoho rejects the whole record with "Invalid column value
+  // for Lareralidad" (confirmed live 2026-07-28). "Ambidiestro" has no
+  // confirmed Zoho option yet — passed through as-is for now.
+  const lateralidadZoho = d.lateralidad === 'Diestro' ? 'Dieztro' : (d.lateralidad || '');
+
   const data = {
     Fecha_de_elaboraci_n1: d.fechaElaboracion || '',
     Psicologo_Integral1: 'Website',
@@ -162,7 +169,7 @@ async function crearAnamnesisNinos(d, contactoID) {
     Nombre_del_consultante2: contactoID,
     Informaci_n_general_b_sica_Qu_edad_tiene_el_consultante_y_que_edad_tienen_los_padres_y_o_cuidadores:
       `${edadConsultanteInfo}${edadPadresInfo}`,
-    Lareralidad: d.lateralidad || '',
+    Lareralidad: lateralidadZoho,
     A_que_te_dedicas: d.dedicacionPadres || '',
     Con_quien_viven: d.conQuienVive || '',
     Que_te_trae_por_ac: d.motivoConsulta || '',
