@@ -160,8 +160,17 @@ async function crearAnamnesisNinos(d, contactoID) {
   const LATERALIDAD_ZOHO = { Diestro: 'Diestro(a)', Zurdo: 'Zurdo(a)' };
   const lateralidadZoho = LATERALIDAD_ZOHO[d.lateralidad] || '';
 
+  // Zoho date fields need "dd-MMM-yyyy" (confirmed live 2026-07-28); the
+  // patient form sends an ISO "yyyy-mm-dd" date input value.
+  const MESES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let fechaElaboracionZoho = '';
+  if (d.fechaElaboracion) {
+    const [y, m, day] = d.fechaElaboracion.split('-');
+    if (y && m && day) fechaElaboracionZoho = `${day}-${MESES[Number(m) - 1]}-${y}`;
+  }
+
   const data = {
-    Fecha_de_elaboraci_n1: d.fechaElaboracion || '',
+    Fecha_de_elaboraci_n1: fechaElaboracionZoho,
     Psicologo_Integral1: 'Website',
     // "2" suffix on this link name (vs. "Nombre_del_consultante" on the
     // adults Anamnesis form) could mean this is a different field type
