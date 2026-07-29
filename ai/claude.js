@@ -20,6 +20,37 @@ const PRICING = {
 // checked 2026-07-16).
 const CACHE_BETA_HEADER = 'extended-cache-ttl-2025-04-11';
 
+// The Anthropic API rejects the whole request when any text block is empty
+// ("messages: text content blocks must be non-empty"), and empty blocks do
+// reach here: a GHL media webhook can arrive before its transcription exists
+// (`MEDIA19: no content found yet`), and the state machine still pushes that
+// turn into history as `[{ type: 'text', text: '' }]`. One such message then
+// poisons every later call on that conversation — both the customer-facing
+// webhook reply and the recoveryJob, which was failing on the same row every
+// 15 minutes because of it. Strip empty blocks here, at the single boundary
+// every caller goes through, so no caller can build an invalid request.
+function sanitizeHistory(messages) {
+  if (!Array.isArray(messages)) return [];
+  const cleaned = [];
+  for (const m of messages) {
+    if (!m || !m.role) continue;
+    let content = m.content;
+    if (typeof content === 'string') {
+      if (!content.trim()) continue;
+    } else if (Array.isArray(content)) {
+      // Keep non-text blocks (images, documents) untouched; drop blank text.
+      content = content.filter(b => b && (b.type !== 'text' || String(b.text ?? '').trim() !== ''));
+      if (content.length === 0) continue;
+    } else {
+      continue;
+    }
+    cleaned.push({ ...m, content });
+  }
+  // The API requires the first message to use the user role.
+  while (cleaned.length && cleaned[0].role !== 'user') cleaned.shift();
+  return cleaned;
+}
+
 function calcCostUsd(model, usage) {
   const p = PRICING[model];
   if (!p || !usage) return 0;
@@ -42,6 +73,10 @@ function calcCostUsd(model, usage) {
  * @returns {Promise<string>} raw reply text
  */
 async function callClaude(systemPrompt, history, maxTokens = 600) {
+  const messages = sanitizeHistory(history);
+  if (messages.length === 0) {
+    throw new Error('Claude API error: historial vacío tras descartar bloques de texto vacíos');
+  }
   const isCacheable = systemPrompt && typeof systemPrompt === 'object';
   const system = isCacheable
     ? [
@@ -62,7 +97,7 @@ async function callClaude(systemPrompt, history, maxTokens = 600) {
       model: MODEL_ID,
       max_tokens: maxTokens,
       system,
-      messages: history,
+      messages,
     }),
   });
   const data = await res.json();

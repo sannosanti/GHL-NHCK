@@ -63,9 +63,20 @@ REGLAS:
 async function generateRecoveryMessage(messages, attempt) {
   const systemPrompt = attempt === 1 ? SYSTEM_PROMPT_ATTEMPT_1 : SYSTEM_PROMPT_ATTEMPT_2;
 
-  // Build a short history summary for Claude to draw context from
-  const history = Array.isArray(messages) && messages.length > 0
-    ? messages.slice(-6) // last 6 messages for context
+  // Build a short history summary for Claude to draw context from. Messages
+  // whose only text is blank are dropped first: a media webhook that arrived
+  // without its transcription leaves one behind, and it made this job fail on
+  // the same conversation every 15 minutes forever (the row never advances
+  // past its recovery_status because that update happens after this call).
+  const usable = (Array.isArray(messages) ? messages : []).filter(m => {
+    const c = m?.content;
+    if (typeof c === 'string') return c.trim() !== '';
+    if (Array.isArray(c)) return c.some(b => b && (b.type !== 'text' || String(b.text ?? '').trim() !== ''));
+    return false;
+  });
+
+  const history = usable.length > 0
+    ? usable.slice(-6) // last 6 messages for context
     : [{ role: 'user', content: 'Hola' }];
 
   // Ensure it ends with a user message so Claude can reply
