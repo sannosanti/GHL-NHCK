@@ -433,8 +433,16 @@ async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad
         }),
       });
       const ghlData = await ghlRes.json();
-      ghlId = ghlData?.contact?.id || '';
+      // GHL rejects creation with a 400 when the location disallows duplicate
+      // contacts, but still returns the existing contact's ID in meta — reuse it
+      // instead of treating it as a failure. Without this, any returning patient
+      // left ghlId empty, and Zoho's Contactos form rejects the record with
+      // `CRM: Select a value for CRM`, so contactoID came back null and the
+      // patient's name was sent into a lookup field. Same fix the adults repo
+      // already carries (live test 2026-07-16); it was never ported here.
+      ghlId = ghlData?.contact?.id || ghlData?.meta?.contactId || '';
       console.log('[historia] GHL contact:', ghlId || 'not created');
+      if (!ghlId) console.warn('[historia] GHL response (no contact.id):', JSON.stringify(ghlData));
     } catch (e) { console.warn('[historia] GHL creation failed:', e.message); }
   }
 
