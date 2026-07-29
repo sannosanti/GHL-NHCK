@@ -224,7 +224,7 @@ const formData = {
   gradoInstitucion:'', rendimientoAcademico:'',
   enfermedades:'', restriccionesTecnologia:[], trabajoPsicologico:'', medicamentos:'', antecedentesSalud:'',
   actividadesExtracurriculares:'', factoresMotivacion:'', alimentacion:'', sueno:'',
-  consumeSustancias:'', tipoSustancias:'', periodicidadConsumo:'', exposicionPantallas:'',
+  consumeSustancias:'', tipoSustancias:[], periodicidadConsumo:'', exposicionPantallas:'',
   expectativasProceso:'', agregarAlgo:'', comoSupo:'',
   comentarioDevolucion:'', recomendacionesTerapeuticas:'', neurotecnologiasNoUsar:'',
 };
@@ -289,7 +289,8 @@ const SECTIONS = [
     { key:'alimentacion',                 label:'¿Cómo es la alimentación? ¿Es balanceada? ¿Come en horarios establecidos?',                  type:'textarea', placeholder:'Describe los hábitos alimentarios' },
     { key:'sueno',                        label:'¿Cómo está durmiendo el consultante? (¿A qué hora se acuesta y a qué hora se levanta?)',     type:'textarea', placeholder:'Describe los hábitos de sueño' },
     { key:'consumeSustancias',            label:'¿El consultante consume algún tipo de sustancia alucinógena?',                               type:'radio',    options:['Sí','No'] },
-    { key:'tipoSustancias',               label:'¿Cuáles de estas sustancias consume?',      type:'conditional-textarea', condition:'consumeSustancias', conditionValue:'Sí', placeholder:'Describe las sustancias que consume' },
+    { key:'tipoSustancias',               label:'¿Cuáles de estas sustancias consume?',      type:'conditional-checkboxes', condition:'consumeSustancias', conditionValue:'Sí',
+      options:['Bebidas alcohólicas','Tabaco','Cannabis','Cocaína','Estimulantes de tipo Anfetaminas','Inhalantes (popper, pegamento)','Sedantes o pastillas para dormir','Alucinógenos (LSD, ácidos)','Opiáceos (heroína, morfina)','2CB'] },
     { key:'periodicidadConsumo',          label:'¿Cuál es la periodicidad del consumo?',     type:'conditional-textarea', condition:'consumeSustancias', conditionValue:'Sí', placeholder:'Describe la frecuencia de consumo' },
     { key:'exposicionPantallas',          label:'¿Cuánto tiempo está el consultante expuesto/a a pantallas durante el día?',                  type:'textarea', placeholder:'Ej: 3 horas diarias entre TV y celular' },
   ]},
@@ -362,6 +363,18 @@ function renderField(f) {
       <textarea id="${f.key}" class="field-textarea" rows="3" placeholder="${ph}"></textarea>
     </div>`;
   }
+  if (f.type === 'conditional-checkboxes') {
+    const items = f.options.map(o =>
+      `<div class="checkbox-item" onclick="toggleCb(this)">
+        <input type="checkbox" name="${f.key}" value="${o}" style="display:none"/>
+        <div class="checkbox-mark"></div>
+        <span class="checkbox-text">${o}</span>
+      </div>`).join('');
+    return `<div class="field-group" id="cond-${f.key}" style="display:none">
+      <div class="field-label">${f.label}</div>
+      <div class="checkboxes-grid">${items}</div>
+    </div>`;
+  }
   return '';
 }
 
@@ -411,7 +424,7 @@ function updateProgress(idx) {
 // ── Save / Restore section data ────────────────────────────────────────────────
 function saveSection(idx) {
   SECTIONS[idx].fields.forEach(f => {
-    if (f.type === 'checkboxes') {
+    if (f.type === 'checkboxes' || f.type === 'conditional-checkboxes') {
       const checked = [...document.querySelectorAll(`input[name="${f.key}"]:checked`)].map(cb => cb.value);
       formData[f.key] = checked;
     } else if (f.type === 'radio') {
@@ -430,7 +443,7 @@ function saveSection(idx) {
 function restoreSection(idx) {
   SECTIONS[idx].fields.forEach(f => {
     const val = formData[f.key];
-    if (f.type === 'checkboxes') {
+    if (f.type === 'checkboxes' || f.type === 'conditional-checkboxes') {
       const saved = Array.isArray(val) ? val : [];
       document.querySelectorAll(`input[name="${f.key}"]`).forEach(cb => {
         if (saved.includes(cb.value)) {
@@ -461,7 +474,7 @@ function restoreSection(idx) {
 // ── Conditional field show/hide ────────────────────────────────────────────────
 function updateConditionals(key, value, sectionIdx) {
   const sec = SECTIONS[sectionIdx];
-  sec.fields.filter(f => f.type === 'conditional-textarea' && f.condition === key).forEach(f => {
+  sec.fields.filter(f => (f.type === 'conditional-textarea' || f.type === 'conditional-checkboxes') && f.condition === key).forEach(f => {
     const el = document.getElementById(`cond-${f.key}`);
     if (el) el.style.display = (value === f.conditionValue) ? 'block' : 'none';
   });
@@ -590,15 +603,15 @@ function generatePDF(data) {
 
     sec.fields.forEach(f => {
       // Skip conditional fields when condition not met
-      if (f.type === 'conditional-textarea') {
+      if (f.type === 'conditional-textarea' || f.type === 'conditional-checkboxes') {
         if ((data[f.condition] || '') !== f.conditionValue) return;
       }
 
       let val;
-      if (f.type === 'checkboxes') {
+      if (f.type === 'checkboxes' || f.type === 'conditional-checkboxes') {
         const arr = Array.isArray(data[f.key]) ? data[f.key] : [];
         val = arr.length > 0 ? arr.join(' · ') : null;
-        if (!val) { val = 'Ninguna restricción marcada'; }
+        if (!val) { val = 'Ninguna seleccionada'; }
       } else {
         val = (data[f.key] || '').toString().trim();
         if (!val) return; // skip empty fields

@@ -344,7 +344,12 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
 
   // Conditional: only include substance fields when consumeSustancias = 'Sí'
   if (d.consumeSustancias === 'Sí') {
-    creatorPayload.Tipo_sustancias      = d.tipoSustancias      || '';
+    // tipoSustancias is a checkbox list now (see anamnesis-clinica-infantil.html).
+    // HISTORIAS_CLINICAS takes it as plain text, same as Restricciones_tecnologia
+    // above — Anamnesis_nna2 is the one that needs the raw array.
+    creatorPayload.Tipo_sustancias      = Array.isArray(d.tipoSustancias)
+                                            ? d.tipoSustancias.join(', ')
+                                            : (d.tipoSustancias || '');
     creatorPayload.Periodicidad_consumo = d.periodicidadConsumo || '';
   }
 

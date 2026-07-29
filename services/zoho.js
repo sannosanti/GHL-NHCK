@@ -258,7 +258,18 @@ async function crearAnamnesisNinos(d, contactoID) {
   // Conditional: only include substance-use detail fields when consumeSustancias = 'Sí'
   // (same conditional already used for HISTORIAS_CLINICAS).
   if (d.consumeSustancias === 'Sí') {
-    data.Cu_les_de_estas_sustancias_consume = d.tipoSustancias || '';
+    // Real Zoho multi-select (the field list shows "-Seleccionar-" under it),
+    // so it needs a JSON array of exact option strings. It used to receive the
+    // patient form's free-text answer, and Zoho rejected the whole
+    // Anamnesis_nna2 record with `Invalid column value for
+    // Cu_les_de_estas_sustancias_consume` — confirmed live 2026-07-29 23:20.
+    // Every submission that answered "Sí" here lost its psychologist-review
+    // record while Historia Clínica saved fine, which is why it looked like
+    // nothing arrived. The patient form now offers the same fixed option list
+    // the adults form uses.
+    data.Cu_les_de_estas_sustancias_consume = Array.isArray(d.tipoSustancias)
+      ? d.tipoSustancias
+      : (d.tipoSustancias ? [d.tipoSustancias] : []);
     data.Cu_l_es_la_periodicidad_del_consumo = d.periodicidadConsumo || '';
   }
 
