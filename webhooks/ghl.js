@@ -26,32 +26,10 @@ const textQueues = {};
 /** Random human-like delay between 3 and 6 seconds. */
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
-// Strips every internal tag the model can emit, not just the one tag a given
-// branch cares about. Each early-return branch below used to strip only its
-// own tag (e.g. the [ESCALAR] branch only removed "[ESCALAR]"), so a reply
-// that combined tags — e.g. "[TRIAJE_P3: X] [TRIAJE_COMPLETO] ... [ESCALAR]",
-// which the prompt explicitly asks the model to do when triage completion
-// and escalation happen in the same turn — leaked the untouched tag straight
-// to the patient (confirmed live 2026-07-25: "[TRIAJE COMPLETO]" visible at
-// the end of escalated chats). One shared cleaner used everywhere closes the
-// whole class of bug instead of just this one instance.
-function limpiarTags(text) {
-  return (text || '')
-    .replace(/\[TRIAJE_P[123]:[^\]]+\]/g, '')
-    .replace(/\[TRIAJE_COMPLETO\]/g, '')
-    .replace(/\[NOMBRE_PADRE:[^\]]+\]/g, '')
-    .replace(/\[CIUDAD_VALIDA:[^\]]+\]/g, '')
-    .replace(/\[MEDIO_WOMPI\]/g, '')
-    .replace(/\[MEDIO_TRANSFERENCIA\]/g, '')
-    .replace(/\[MEDIO_QR\]/g, '')
-    .replace(/\[CIUDAD_NO_DISPONIBLE\]/g, '')
-    .replace(/\[SIN_PRESUPUESTO\]/g, '')
-    .replace(/\[FUERA_SEGMENTO\]/g, '')
-    .replace(/\[NHC_ADULTOS\]/g, '')
-    .replace(/\[ESCALAR\]/g, '')
-    .replace(/\[POSPONER\]/g, '')
-    .split('\n').filter(l => l.trim() !== '').join('\n');
-}
+// Moved to ai/tags.js so every sender of model output shares one cleaner —
+// the recoveryJob was sending raw output and leaked a literal referral tag to
+// a patient (confirmed live 2026-07-29).
+const { limpiarTags } = require('../ai/tags');
 
 /**
  * Wraps ghl.sendMessage for inactivity timers: these fire minutes after being

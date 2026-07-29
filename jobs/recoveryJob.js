@@ -4,6 +4,7 @@ const cron = require('node-cron');
 const { pool } = require('../db');
 const { sendMessage, addTag, getContact } = require('../services/ghl');
 const { callClaude } = require('../ai/claude');
+const { limpiarTags } = require('../ai/tags');
 const { CONOCIMIENTO_NHC, env } = require('../config');
 const { triggerAnalysis } = require('./insightJob');
 const { notifyError } = require('../services/notifier');
@@ -149,12 +150,27 @@ async function runRecoveryJob() {
 
       // 1. Generate recovery message via Claude
       const parsedMessages = Array.isArray(messages) ? messages : [];
-      const recoveryMessage = await generateRecoveryMessage(parsedMessages, attempt);
+      const rawRecovery = await generateRecoveryMessage(parsedMessages, attempt);
+
+      // The history handed to Claude is full of internal tags, so the model
+      // imitates them: the adults bot shipped a literal "[NHC_MENOR]" to a
+      // patient on WhatsApp (2026-07-29). Clean it like every other sender.
+      const recoveryMessage = limpiarTags(rawRecovery).trim();
+
+      // Nothing left to send once the tags are gone. Still advance
+      // recovery_status below rather than skipping, because the row would
+      // otherwise stay eligible and this job would retry it every 15 minutes
+      // forever — the loop this whole path was already stuck in.
+      if (!recoveryMessage) {
+        console.warn(`[recoveryJob] Mensaje vacío tras limpiar tags — no se envía nada para ${conversation_id}`);
+      }
 
       // 2. Send via GHL — detect channel so IG/FB conversations reply correctly
-      const { getConversationChannel } = require('../services/ghl');
-      const channel = await getConversationChannel(contact_id).catch(() => 'WhatsApp');
-      await sendMessage(conversation_id, recoveryMessage, contact_id, channel);
+      if (recoveryMessage) {
+        const { getConversationChannel } = require('../services/ghl');
+        const channel = await getConversationChannel(contact_id).catch(() => 'WhatsApp');
+        await sendMessage(conversation_id, recoveryMessage, contact_id, channel);
+      }
 
       // 3. Apply label and update recovery_status
       if (attempt === 1) {
