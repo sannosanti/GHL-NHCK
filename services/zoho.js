@@ -152,13 +152,15 @@ async function crearAnamnesisNinos(d, contactoID) {
 
   const comoSupoMapeado = mapearComoSupoAnamnesis(d.comoSupo);
 
-  // Zoho's real dropdown options are "Diestro(a)"/"Zurdo(a)" (confirmed
-  // live 2026-07-28) — the patient form's dropdown says "Diestro"/"Zurdo"/
-  // "Ambidiestro". Translate the two that map; "Ambidiestro" has no
-  // matching Zoho option, so it's left blank rather than forcing a wrong
-  // value — Zoho rejects the whole record on an invalid picklist value.
-  const LATERALIDAD_ZOHO = { Diestro: 'Diestro(a)', Zurdo: 'Zurdo(a)' };
-  const lateralidadZoho = LATERALIDAD_ZOHO[d.lateralidad] || '';
+  // Zoho's Lareralidad dropdown has exactly two options: "Diestro(a)" and
+  // "Zurdo(a)". The patient form now offers those same two strings verbatim,
+  // so no translation is needed — but anything else is dropped rather than
+  // forwarded, since Zoho rejects the whole record on an invalid picklist
+  // value. (The form used to offer a third option, "Ambidiestro", which has
+  // no Zoho equivalent and was silently discarded here, leaving the field
+  // blank in the record.)
+  const LATERALIDAD_ZOHO = ['Diestro(a)', 'Zurdo(a)'];
+  const lateralidadZoho = LATERALIDAD_ZOHO.includes(d.lateralidad) ? d.lateralidad : '';
 
   // Zoho date fields need "dd-MMM-yyyy" (confirmed live 2026-07-28); the
   // patient form sends an ISO "yyyy-mm-dd" date input value.
@@ -248,7 +250,9 @@ async function crearAnamnesisNinos(d, contactoID) {
     Neurotecnolog_as_que_NO_puede_usar_el_paciente: Array.isArray(d.neurotecnologiasNoUsar)
       ? d.neurotecnologiasNoUsar
       : (d.neurotecnologiasNoUsar ? [d.neurotecnologiasNoUsar] : []),
-    // TODO: Test_BASCH — client hasn't provided this field's Zoho link name yet, skip for now.
+    // Test BASCH is filled by the professional directly in Zoho — the patient
+    // form no longer collects it (it was a dead field: rendered for patients
+    // but never sent anywhere, since its Zoho link name was never provided).
   };
 
   // Conditional: only include substance-use detail fields when consumeSustancias = 'Sí'

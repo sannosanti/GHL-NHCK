@@ -225,7 +225,7 @@ const formData = {
   enfermedades:'', restriccionesTecnologia:[], trabajoPsicologico:'', medicamentos:'', antecedentesSalud:'',
   actividadesExtracurriculares:'', factoresMotivacion:'', alimentacion:'', sueno:'',
   consumeSustancias:'', tipoSustancias:'', periodicidadConsumo:'', exposicionPantallas:'',
-  expectativasProceso:'', agregarAlgo:'', testBASCH:'', comoSupo:'',
+  expectativasProceso:'', agregarAlgo:'', comoSupo:'',
   comentarioDevolucion:'', recomendacionesTerapeuticas:'', neurotecnologiasNoUsar:'',
 };
 
@@ -240,7 +240,7 @@ const SECTIONS = [
   { id:1, title:'Información general básica', fields:[
     { key:'edadConsultante',       label:'¿Qué edad tiene el consultante?',                    type:'number',   required:true, placeholder:'Ej: 9' },
     { key:'edadPadresCuidadores',  label:'Edad de los padres y/o cuidadores',                 type:'text',     placeholder:'Ej: Mamá 35, Papá 38' },
-    { key:'lateralidad',           label:'Lateralidad',                                       type:'select',   options:['Diestro','Zurdo','Ambidiestro'] },
+    { key:'lateralidad',           label:'Lateralidad',                                       type:'select',   options:['Diestro(a)','Zurdo(a)'] },
     { key:'dedicacionPadres',      label:'¿A qué se dedican los padres y/o cuidadores?',      type:'textarea', placeholder:'Describe la ocupación principal' },
     { key:'conQuienVive',          label:'¿Con quién vive y dónde vive?',                     type:'textarea', placeholder:'Describe la convivencia y lugar de residencia' },
   ]},
@@ -296,7 +296,6 @@ const SECTIONS = [
   { id:9, title:'Cierre de la entrevista', fields:[
     { key:'expectativasProceso',      label:'¿Cuáles son tus expectativas con este proceso?',  type:'textarea', required:true, rows:4, placeholder:'Describe lo que espera lograr con esta evaluación' },
     { key:'agregarAlgo',              label:'¿Deseas agregar algo más a la entrevista?',        type:'textarea', placeholder:'Información adicional relevante' },
-    { key:'testBASCH',                label:'Test BASCH',                                       type:'textarea', placeholder:'Resultados o notas del test BASCH' },
     { key:'comoSupo', label:'¿Cómo supo de nosotros?', type:'select', required:true,
       options:['Recomendación de familiar o amigo','Recomendación médica / profesional','Redes sociales','Búsqueda en Google','Publicidad / medios','Evento o charla','Otro'] },
   ]},
