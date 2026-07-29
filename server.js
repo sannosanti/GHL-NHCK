@@ -228,6 +228,28 @@ app.get('/informe/negocio', async (req, res) => {
 
 // ─── ANAMNESIS CLÍNICA Y TRIAJE NHCK ─────────────────────────────────────────
 
+// Zoho Creator rejects a record with the offending VALUE quoted but no column
+// name (`Invalid column value "chicunguna" specified`), so a real submission
+// that fails is untraceable to the question that caused it. Match the quoted
+// value back to the payload keys that hold it and log those key names. Logs
+// the KEYS only — the patient's answers stay out of the log, which is not a
+// place for clinical data.
+function logOffendingCreatorFields(tag, crData, payload) {
+  if (crData?.code === 3000 || crData?.data?.ID) return;
+  const errors = Array.isArray(crData?.error) ? crData.error : [crData?.error].filter(Boolean);
+  for (const e of errors) {
+    if (typeof e !== 'string') continue;
+    const quoted = e.match(/"([^"]+)"/);
+    if (!quoted) continue;
+    const value = quoted[1];
+    const keys = Object.keys(payload).filter(k => {
+      const v = payload[k];
+      return Array.isArray(v) ? v.includes(value) : String(v ?? '') === value;
+    });
+    console.warn(`${tag} Creator rechazó el valor de: ${keys.length ? keys.join(', ') : '(ningún campo coincide — revisar tipo de campo en Zoho)'}`);
+  }
+}
+
 // Alias used by anamnesis-clinica-infantil.html
 app.get('/zoho-creator-token', async (req, res) => {
   try {
@@ -335,6 +357,12 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
     });
     const crData = await cr.json();
     console.log('[/anamnesis-clinica-infantil] Creator response:', JSON.stringify(crData));
+    // Creator's rejection names the offending VALUE but not the column
+    // (e.g. `Invalid column value "chicunguna" specified`), which makes a
+    // real-world failure impossible to trace back to a question. Report
+    // which payload keys carry that value — key names only, never the
+    // clinical answers themselves, since these logs are not a PHI store.
+    logOffendingCreatorFields('/anamnesis-clinica-infantil', crData, creatorPayload);
 
     if (crData.code === 3000 || crData.data?.ID) {
       // ── 6. Also create the record in the KIDS psychologist-review module ──

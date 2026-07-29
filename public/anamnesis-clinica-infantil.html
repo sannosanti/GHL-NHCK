@@ -193,9 +193,9 @@
   <div class="card" id="mainCard"></div>
 
   <div class="success-card" id="successCard">
-    <div class="success-icon">✓</div>
-    <h2>Anamnesis clínica completada</h2>
-    <p>El PDF se descargó automáticamente.<br>Si no aparece, podés volver a descargarlo abajo.</p>
+    <div class="success-icon" id="successIcon">✓</div>
+    <h2 id="successTitle">Anamnesis clínica completada</h2>
+    <p id="pdfNote">La información quedó registrada correctamente.</p>
     <button class="btn-primary" onclick="redownloadPDF()">Descargar PDF de nuevo ↓</button>
     <button class="btn-secondary" onclick="reiniciar()">Iniciar nueva historia</button>
   </div>
@@ -646,6 +646,11 @@ function generatePDF(data) {
 }
 
 // ── Creator submission ─────────────────────────────────────────────────────────
+// Returns true only when the record actually landed in Creator. This used to
+// swallow every failure and return nothing, so the form showed "completada"
+// even when Zoho had rejected the record — which is why field-level
+// rejections went unnoticed until someone opened Zoho and found the record
+// missing. Never report success we cannot confirm.
 async function submitToCreator(data) {
   try {
     const tokenRes = await fetch(`${SERVER_URL}/zoho-creator-token`);
@@ -659,56 +664,79 @@ async function submitToCreator(data) {
     const result = await submitRes.json();
     if (result.ok) {
       console.log('[Creator] Anamnesis clínica guardada. ID:', result.id);
-    } else {
-      console.warn('[Creator] Error al guardar:', result.error, '| Stage:', result.stage);
+      return true;
     }
+    console.warn('[Creator] Error al guardar:', result.error, '| Stage:', result.stage);
+    return false;
   } catch (err) {
     console.warn('[Creator] No se pudo enviar a Zoho Creator:', err.message);
+    return false;
   }
 }
 
-// ── Main action: generate PDF + submit ────────────────────────────────────────
+// ── Main action: submit + generate PDF ────────────────────────────────────────
 async function generateAndSubmit() {
   if (!validateSection(currentSection)) return;
   saveSection(currentSection);
 
   const btn = document.getElementById('btnNext');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Generando PDF...';
+  btn.innerHTML = '<span class="spinner"></span>Enviando...';
 
   // Collect all data
   const data = { ...formData };
 
-  // Generate PDF (always happens, regardless of Creator)
+  // Send the clinical record FIRST. The PDF is a convenience copy for the
+  // patient; the record in Creator is the part that must never be lost.
+  // This ran in the opposite order before, and the PDF's catch block did an
+  // early return — so on mobile, where the CDN-hosted jsPDF can fail to load
+  // and in-app browsers (WhatsApp, Instagram) block blob downloads, the
+  // answers never reached Creator at all. Reported by the client 2026-07-29:
+  // same person submitted from phone and from PC, only the PC one landed.
+  // submitToCreator never throws, so it never breaks this flow.
+  const saved = await submitToCreator(data);
+
+  // Now the PDF. A failure here no longer costs the submission.
+  btn.innerHTML = '<span class="spinner"></span>Generando PDF...';
+  let pdfOk = false;
   try {
     const doc = generatePDF(data);
     savedPdfDoc = doc;
     const nombre = (data.nombreConsultante || 'paciente').replace(/[^a-zA-Z0-9\s]/g,'').trim().replace(/\s+/g,'_');
     const fecha  = new Date().toISOString().split('T')[0];
     doc.save(`Historia_Clinica_${nombre}_${fecha}.pdf`);
+    pdfOk = true;
   } catch (pdfErr) {
     console.error('[PDF]', pdfErr.message);
-    btn.disabled = false;
-    btn.innerHTML = 'Generar PDF →';
-    const errEl = document.getElementById('sec-err');
-    errEl.textContent = 'Error al generar el PDF: ' + pdfErr.message;
-    errEl.style.display = 'block';
-    return;
   }
 
-  // Submit to Creator (non-blocking — PDF already downloaded)
-  btn.innerHTML = '<span class="spinner"></span>Enviando a Creator...';
-  await submitToCreator(data);
-
-  // Show success
-  showSuccess();
+  showSuccess(pdfOk, saved);
 }
 
 // ── Success ───────────────────────────────────────────────────────────────────
-function showSuccess() {
+function showSuccess(pdfOk, saved) {
   document.getElementById('mainCard').style.display     = 'none';
   document.getElementById('progressWrap').style.display = 'none';
   document.getElementById('successCard').style.display  = 'block';
+
+  const icon  = document.getElementById('successIcon');
+  const title = document.getElementById('successTitle');
+  const note  = document.getElementById('pdfNote');
+
+  if (!saved) {
+    // Do not claim a record exists when Zoho rejected it. The PDF is the
+    // patient's only copy in this case, so point them at it.
+    icon.textContent  = '!';
+    icon.style.background = '#fef3c7';
+    title.textContent = 'No pudimos guardar la información';
+    note.innerHTML = pdfOk
+      ? 'Sus respuestas no quedaron registradas en el sistema, pero el PDF sí se descargó.<br>Por favor envíelo al centro para que no se pierda la información.'
+      : 'Sus respuestas no quedaron registradas en el sistema.<br>Por favor comuníquese con el centro antes de cerrar esta página.';
+  } else {
+    note.innerHTML = pdfOk
+      ? 'La información quedó registrada y el PDF se descargó automáticamente.<br>Si no aparece, puede descargarlo de nuevo abajo.'
+      : 'La información quedó registrada correctamente.<br>El PDF no se pudo descargar en este dispositivo. Puede intentarlo abajo, o abrir el formulario desde un computador.';
+  }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
