@@ -268,7 +268,13 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
   const d = req.body;
 
   // ── 1. Validate required fields ──────────────────────────────────────────
-  const REQUIRED = ['fechaElaboracion', 'nombreConsultante', 'emailConsultante', 'edadConsultante', 'motivoConsulta', 'expectativasProceso', 'comoSupo'];
+  // movilConsultante is mandatory because Zoho's own schema forces it, not as
+  // a preference: Contactos rejects a record without Movil ("Enter a value for
+  // Movil"), and HISTORIAS_CLINICAS requires the Nombre_del_consultante lookup
+  // that points at a Contactos record. No phone means no contact, and no
+  // contact means the anamnesis cannot be saved at all. Confirmed live
+  // 2026-07-30 by submitting without one.
+  const REQUIRED = ['fechaElaboracion', 'nombreConsultante', 'movilConsultante', 'emailConsultante', 'edadConsultante', 'motivoConsulta', 'expectativasProceso', 'comoSupo'];
   const missing = REQUIRED.filter(k => !d[k] || String(d[k]).trim() === '');
   if (missing.length) {
     return res.status(400).json({ ok: false, stage: 'validation', missing, error: `Campos requeridos faltantes: ${missing.join(', ')}` });
