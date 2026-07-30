@@ -290,7 +290,13 @@ const SECTIONS = [
     { key:'sueno',                        label:'¿Cómo está durmiendo el consultante? (¿A qué hora se acuesta y a qué hora se levanta?)',     type:'textarea', placeholder:'Describe los hábitos de sueño' },
     { key:'consumeSustancias',            label:'¿El consultante consume algún tipo de sustancia alucinógena?',                               type:'radio',    options:['Sí','No'] },
     { key:'tipoSustancias',               label:'¿Cuáles de estas sustancias consume?',      type:'conditional-checkboxes', condition:'consumeSustancias', conditionValue:'Sí',
-      options:['Bebidas alcohólicas','Tabaco','Cannabis','Cocaína','Estimulantes de tipo Anfetaminas','Inhalantes (popper, pegamento)','Sedantes o pastillas para dormir','Alucinógenos (LSD, ácidos)','Opiáceos (heroína, morfina)','2CB'] },
+      // The Anamnesis_nna2 dropdown accepts ONLY these four, probed one by one
+      // against live Zoho 2026-07-30. It is NOT the adults list: "Bebidas
+      // alcohólicas", "Anfetaminas", "Inhalantes", "Sedantes", "Alucinógenos",
+      // "Opiáceos" and "2CB" are all rejected here, and any one of them takes
+      // the whole record down. Keep this in sync with SUSTANCIAS_ZOHO in
+      // services/zoho.js, which filters the payload as a safety net.
+      options:['Tabaco','Cannabis','Cocaína','Ninguna'] },
     { key:'periodicidadConsumo',          label:'¿Cuál es la periodicidad del consumo?',     type:'conditional-textarea', condition:'consumeSustancias', conditionValue:'Sí', placeholder:'Describe la frecuencia de consumo' },
     { key:'exposicionPantallas',          label:'¿Cuánto tiempo está el consultante expuesto/a a pantallas durante el día?',                  type:'textarea', placeholder:'Ej: 3 horas diarias entre TV y celular' },
   ]},

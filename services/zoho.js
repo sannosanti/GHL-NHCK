@@ -267,9 +267,24 @@ async function crearAnamnesisNinos(d, contactoID) {
     // record while Historia Clínica saved fine, which is why it looked like
     // nothing arrived. The patient form now offers the same fixed option list
     // the adults form uses.
-    data.Cu_les_de_estas_sustancias_consume = Array.isArray(d.tipoSustancias)
+    // Filter to the values Zoho actually accepts. A single unknown option makes
+    // Creator reject the ENTIRE Anamnesis_nna2 record, so one stale browser tab
+    // sending an old option list costs the whole psychologist-review entry —
+    // exactly what happened on 2026-07-30. Dropping an unrecognised value
+    // loses one answer; not filtering loses the whole anamnesis. The patient's
+    // PDF still carries everything they typed either way.
+    // Keep in sync with the field's `options` in anamnesis-clinica-infantil.html.
+    const SUSTANCIAS_ZOHO = ['Tabaco', 'Cannabis', 'Cocaína', 'Ninguna'];
+    const sustancias = (Array.isArray(d.tipoSustancias)
       ? d.tipoSustancias
-      : (d.tipoSustancias ? [d.tipoSustancias] : []);
+      : (d.tipoSustancias ? [d.tipoSustancias] : []))
+      .filter(s => SUSTANCIAS_ZOHO.includes(s));
+    const descartadas = (Array.isArray(d.tipoSustancias) ? d.tipoSustancias : [])
+      .filter(s => !SUSTANCIAS_ZOHO.includes(s));
+    if (descartadas.length) {
+      console.warn('[anamnesis-ninos] Sustancias no reconocidas por Zoho, descartadas:', JSON.stringify(descartadas));
+    }
+    data.Cu_les_de_estas_sustancias_consume = sustancias;
     data.Cu_l_es_la_periodicidad_del_consumo = d.periodicidadConsumo || '';
   }
 
