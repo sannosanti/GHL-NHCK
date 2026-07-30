@@ -28,6 +28,20 @@ const CALENDAR_GENERAL = 'lzwahRhkogIG1Ct9BX7p';
 
 const MESES_ZOHO = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 
+// Zoho Creator sends an unset lookup as the literal string "null" (or an empty
+// string), never as JSON null. Those are truthy in JavaScript, so they sailed
+// past `if (!contactoRef)` and reached getContactoPorId('null') — which is what
+// produced the misleading "contacto sin celular, contactoID= null" in
+// production on 2026-07-30. Normalizes both the object form ({ID, display_value})
+// and the bare-string form into an ID, or '' when the field is genuinely empty.
+const VALORES_VACIOS = new Set(['', 'null', 'undefined', 'none', '-none-']);
+
+function refZoho(campo) {
+  const raw = campo && typeof campo === 'object' ? campo.ID : campo;
+  const valor = String(raw ?? '').trim();
+  return VALORES_VACIOS.has(valor.toLowerCase()) ? '' : valor;
+}
+
 // Zoho Creator datetime strings look like "03-Jul-2026 10:00:00" in Colombia
 // local time (UTC-5, no DST). Converts to an ISO string in UTC.
 function parseZohoDateTime(str) {
@@ -52,8 +66,34 @@ async function zohoCitaWebhookHandler(req, res) {
 
   try {
     const b = req.body || {};
-    const consultorID = typeof b.Consultor === 'object' ? b.Consultor?.ID : b.Consultor;
+
+    // The Consultor -> calendar routing had never been observable: an unmapped
+    // consultant and a genuine clinic-wide block both fell through the same
+    // `|| CALENDAR_GENERAL` without a word in the logs. Confirmed in production
+    // on 2026-07-30 that all ~30 citas of the day landed on CALENDAR_GENERAL and
+    // not one reached a therapist's calendar — invisible until the client
+    // noticed it in the GHL calendar view. Logs the routing fields only, never
+    // Observaciones or Email: these logs are not a PHI store.
+    console.log('ZOHO-CITA payload:', JSON.stringify({
+      claves: Object.keys(b),
+      Consultor: b.Consultor,
+      Contacto: b.Contacto,
+      Tipo: b.Tipo,
+      Inicio: b.Inicio,
+      Fin: b.Fin,
+      ID: b.ID,
+    }));
+
+    const consultorID = refZoho(b.Consultor);
     const calendarId = CALENDARIOS[consultorID] || CALENDAR_GENERAL;
+    if (!consultorID) {
+      console.log('ZOHO-CITA: entrada sin Consultor — va a CALENDAR_GENERAL');
+    } else if (!CALENDARIOS[consultorID]) {
+      console.error(
+        'ZOHO-CITA: Consultor sin calendario mapeado, cae en CALENDAR_GENERAL —',
+        JSON.stringify(b.Consultor)
+      );
+    }
 
     const startISO = parseZohoDateTime(b.Inicio);
     const endISO = parseZohoDateTime(b.Fin);
@@ -61,7 +101,7 @@ async function zohoCitaWebhookHandler(req, res) {
 
     const tipo = b.Tipo || 'Cita';
     const obs = b.Observaciones || '';
-    const contactoRef = typeof b.Contacto === 'object' ? b.Contacto?.ID : b.Contacto;
+    const contactoRef = refZoho(b.Contacto);
 
     if (!contactoRef) {
       const title = obs ? `${tipo} - ${obs}` : tipo;
@@ -72,7 +112,9 @@ async function zohoCitaWebhookHandler(req, res) {
 
     const contacto = await zoho.getContactoPorId(contactoRef);
     if (!contacto?.Movil) {
-      console.error('ZOHO-CITA: contacto sin celular, contactoID=', contactoRef, '— creando como bloqueo');
+      console.error(contacto
+        ? `ZOHO-CITA: contacto ${contactoRef} existe pero no tiene Movil — creando como bloqueo`
+        : `ZOHO-CITA: no se encontró el contacto Zoho ${contactoRef} — creando como bloqueo`);
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: obs ? `${tipo} - ${obs}` : tipo });
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
@@ -94,4 +136,4 @@ async function zohoCitaWebhookHandler(req, res) {
   }
 }
 
-module.exports = { zohoCitaWebhookHandler, parseZohoDateTime };
+module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho };
