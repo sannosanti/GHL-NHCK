@@ -421,9 +421,16 @@ async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad
   const idNombre = await buscarContactoPorNombre(nombre);
   if (idNombre) return idNombre;
 
-  // 3. Create new contacto — requires phone to satisfy Creator's CRM lookup via GHL
-  if (!movil) {
-    console.log('[historia] Sin celular — no se crea contacto nuevo');
+  // 3. Create new contacto. Email alone is enough: GHL accepts a contact with
+  // only an email, and the patient form already requires it. This used to bail
+  // out whenever the phone was missing, and the phone is an OPTIONAL field on
+  // the form — so any patient who skipped it got no contact, and the caller
+  // then sent their NAME into Nombre_del_consultante, a lookup expecting an
+  // ID. Zoho rejected the entire record with `Invalid column value "<nombre>"
+  // specified` and the anamnesis never reached the psychologist's module.
+  // Confirmed live on the adults side 2026-07-30 and reproduced deliberately.
+  if (!movil && !email) {
+    console.log('[historia] Sin celular ni email — no se crea contacto nuevo');
     return null;
   }
 
@@ -437,7 +444,7 @@ async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad
         body: JSON.stringify({
           firstName: parts[0],
           lastName: parts.slice(1).join(' ') || '',
-          phone: movil,
+          phone: movil || undefined,
           email: email || undefined,
           locationId: env.ghlLocationId,
           tags: ['anamnesis-clinica-infantil'],
@@ -463,7 +470,7 @@ async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad
     headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ data: {
       Nombre_Completo: nombre,
-      Movil: movil,
+      Movil: movil || '',
       Email: email || '',
       CRM: ghlId,
       Edad: String(edad || ''),

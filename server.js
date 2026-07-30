@@ -244,7 +244,11 @@ function logOffendingCreatorFields(tag, crData, payload) {
     const value = quoted[1];
     const keys = Object.keys(payload).filter(k => {
       const v = payload[k];
-      return Array.isArray(v) ? v.includes(value) : String(v ?? '') === value;
+      // Compare trimmed: Zoho echoes the value normalized, so a name typed
+      // with a stray space matched nothing and the log said "ningun campo
+      // coincide" on the very failure it was built to explain (2026-07-30).
+      const norm = s => String(s ?? '').trim();
+      return Array.isArray(v) ? v.some(x => norm(x) === norm(value)) : norm(v) === norm(value);
     });
     console.warn(`${tag} Creator rechazó el valor de: ${keys.length ? keys.join(', ') : '(ningún campo coincide — revisar tipo de campo en Zoho)'}`);
   }
@@ -292,7 +296,11 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
   // ── 4. Build Creator payload ──────────────────────────────────────────────
   const creatorPayload = {
     Fecha_elaboracion:             d.fechaElaboracion,
-    Nombre_del_consultante:        contactoID || d.nombreConsultante,
+    // Lookup field — it takes a Contactos record ID, never free text. Sending
+    // the patient's name here made Zoho reject the WHOLE record with
+    // `Invalid column value "<nombre>" specified`, losing the anamnesis
+    // entirely. Better to save the record unlinked than to lose it.
+    Nombre_del_consultante:        contactoID || '',
     Edad_consultante:              d.edadConsultante,
     Edad_padres_cuidadores:        d.edadPadresCuidadores        || '',
     Lateralidad:                   d.lateralidad                 || '',
