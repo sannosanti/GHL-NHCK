@@ -590,6 +590,41 @@ async function getConversationVolumeDaily(days = 30) {
   return res.rows;
 }
 
+// Events split per day AND per type, for the day-by-day view. getEventBreakdown
+// aggregates the same table over the whole period; this keeps the day axis so
+// the dashboard can show what happened on each specific date. Bucketed by
+// Bogotá day for the same reason getTokenUsageDaily is.
+async function getEventsDaily(days = 30) {
+  const res = await pool.query(
+    `SELECT agent,
+       to_char(date_trunc('day', created_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM-DD') AS day,
+       event_type,
+       COUNT(*)::int AS count
+     FROM transaction_logs
+     WHERE created_at > NOW() - ($1 || ' days')::interval
+     GROUP BY agent, day, event_type
+     ORDER BY day ASC`,
+    [days]
+  );
+  return res.rows;
+}
+
+// Insights (root cause of drop-off) per day. Same shape and caveats as above.
+async function getInsightsDaily(days = 30) {
+  const res = await pool.query(
+    `SELECT agent,
+       to_char(date_trunc('day', created_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM-DD') AS day,
+       root_cause,
+       COUNT(*)::int AS count
+     FROM conversation_insights
+     WHERE created_at > NOW() - ($1 || ' days')::interval
+     GROUP BY agent, day, root_cause
+     ORDER BY day ASC`,
+    [days]
+  );
+  return res.rows;
+}
+
 module.exports = {
   pool,
   initDB,
@@ -598,6 +633,8 @@ module.exports = {
   getConversationFunnel,
   getEventBreakdown,
   getConversationVolumeDaily,
+  getEventsDaily,
+  getInsightsDaily,
   getConversationData,
   saveConversationData,
   limpiarContactoDB,

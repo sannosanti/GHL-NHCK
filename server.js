@@ -226,6 +226,28 @@ app.get('/informe/negocio', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Day-by-day view for the dashboard. Everything here is bucketed by Bogotá
+// calendar day, not UTC, so an evening still inside business hours does not
+// land in the next day's row.
+//
+// Caveat worth knowing before reading these numbers: `conversations` has no
+// created_at column, only updated_at, which is overwritten on every touch.
+// So `conversaciones` is "conversations ACTIVE that day", not "new that day" —
+// a lead that keeps replying counts on each day it was touched. Events and
+// insights do have their own created_at, so those are true per-day counts.
+app.get('/informe/diario', async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
+    const [volumen, eventos, insights, tokens] = await Promise.all([
+      db.getConversationVolumeDaily(days),
+      db.getEventsDaily(days),
+      db.getInsightsDaily(days),
+      db.getTokenUsageDaily(days),
+    ]);
+    res.json({ generado: new Date().toISOString(), dias: days, volumen, eventos, insights, tokens });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── ANAMNESIS CLÍNICA Y TRIAJE NHCK ─────────────────────────────────────────
 
 // Zoho Creator rejects a record with the offending VALUE quoted but no column

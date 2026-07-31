@@ -99,6 +99,10 @@ router.get('/', (_req, res) => {
     #err { display: none; background: rgba(239,68,68,.1); border: 1px solid var(--red); color: var(--red); padding: 0.6rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.82rem; }
     .spin { display: inline-block; width: 9px; height: 9px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: s .8s linear infinite; margin-right: 4px; }
     @keyframes s { to { transform: rotate(360deg); } }
+    .filters { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; }
+    .filters label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .filters select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.6rem; font-family: inherit; font-size: 0.8rem; cursor: pointer; }
+    h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; margin-left: 0.5rem; }
   </style>
 </head>
 <body>
@@ -112,6 +116,41 @@ router.get('/', (_req, res) => {
 </header>
 
 <div id="err"></div>
+
+<!-- Filters: apply to the day-by-day section and to every agent-scoped table -->
+<section>
+  <div class="filters">
+    <label>Periodo
+      <select id="f-dias" onchange="load()">
+        <option value="7">Últimos 7 días</option>
+        <option value="15">Últimos 15 días</option>
+        <option value="30" selected>Últimos 30 días</option>
+        <option value="90">Últimos 90 días</option>
+      </select>
+    </label>
+    <label>Agente
+      <select id="f-agente" onchange="render()">
+        <option value="todos" selected>Ambos</option>
+        <option value="carolina">Carolina (niños)</option>
+        <option value="luisa">Luisa (adultos)</option>
+      </select>
+    </label>
+    <label>Día
+      <select id="f-dia" onchange="render()">
+        <option value="todos" selected>Todos</option>
+      </select>
+    </label>
+  </div>
+</section>
+
+<!-- Row 0: Day by day -->
+<section>
+  <h2>Por día <small id="dia-nota"></small></h2>
+  <div class="tcard"><table>
+    <thead><tr><th>Día</th><th>Agente</th><th>Conversaciones activas</th><th>Escalados</th><th>Cierres</th><th>Citas confirmadas</th><th>Llamadas IA</th><th>Costo</th></tr></thead>
+    <tbody id="t-diario"></tbody>
+  </table></div>
+</section>
 
 <!-- Row 1: KPIs -->
 <section>
@@ -204,7 +243,7 @@ function renderKPIs(inf, leads) {
   const leadsPorAgente = {};
   (leads.conversaciones || []).forEach(l => { leadsPorAgente[l.agent] = (leadsPorAgente[l.agent] || 0) + 1; });
 
-  el.innerHTML = AGENTS.map(agent => {
+  el.innerHTML = agentesVisibles().map(agent => {
     const f = funnelFor(inf, agent);
     const total = +f.total || 0;
     const triaje = +f.con_triaje || 0;
@@ -229,7 +268,7 @@ function renderKPIs(inf, leads) {
 
 function renderFunnels(inf) {
   const el = document.getElementById('funnels');
-  el.innerHTML = AGENTS.map(agent => {
+  el.innerHTML = agentesVisibles().map(agent => {
     const f = funnelFor(inf, agent);
     const steps = [
       ['Total entrantes', +f.total || 0, '#3B82F6'],
@@ -265,7 +304,7 @@ function renderSintomas(inf) {
 function renderAlerts(inf, leads) {
   const alerts = [];
 
-  AGENTS.forEach(agent => {
+  agentesVisibles().forEach(agent => {
     const f = funnelFor(inf, agent);
     const ep = +f.esperando_pago || 0;
     const esc = +f.escalados || 0;
@@ -302,7 +341,7 @@ function renderAlerts(inf, leads) {
 
 function renderRecovery(inf) {
   const el = document.getElementById('recovery');
-  el.innerHTML = AGENTS.map(agent => {
+  el.innerHTML = agentesVisibles().map(agent => {
     const r = (inf.recovery || []).filter(x => x.agent === agent);
     const i1 = +((r.find(x => x.recovery_status === 'intento-1') || {}).total) || 0;
     const i2 = +((r.find(x => x.recovery_status === 'intento-2') || {}).total) || 0;
@@ -355,19 +394,107 @@ window.toggle = function(i) {
   document.getElementById('m' + i).classList.toggle('open');
 };
 
+// Only the period filter needs the server; agent and day filters slice data
+// already in memory, so switching them is instant and costs no query.
+let DATA = { inf: null, leads: null, diario: null };
+
+function agenteFiltro() { return document.getElementById('f-agente').value; }
+function diaFiltro()    { return document.getElementById('f-dia').value; }
+function agentesVisibles() {
+  const a = agenteFiltro();
+  return a === 'todos' ? AGENTS : [a];
+}
+
+// Rebuilds the day dropdown from whatever days the current period returned,
+// keeping the selection if that day still exists.
+function poblarDias(dias) {
+  const sel = document.getElementById('f-dia');
+  const previo = sel.value;
+  sel.innerHTML = '<option value="todos">Todos</option>' +
+    dias.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+  sel.value = dias.includes(previo) ? previo : 'todos';
+}
+
+function renderDiario() {
+  const tbody = document.getElementById('t-diario');
+  const nota  = document.getElementById('dia-nota');
+  const d = DATA.diario;
+  if (!d) { tbody.innerHTML = '<tr><td colspan="8" class="muted">Sin datos</td></tr>'; return; }
+
+  nota.textContent = '(' + d.dias + ' días · "conversaciones activas" = tocadas ese día, no nuevas)';
+
+  const visibles = agentesVisibles();
+  const dia = diaFiltro();
+
+  // One row per (day, agent): conversations touched, plus the events that
+  // actually happened that day, plus AI calls and cost.
+  const filas = {};
+  const key = (day, agent) => day + '|' + agent;
+  const fila = (day, agent) => (filas[key(day, agent)] = filas[key(day, agent)] ||
+    { day, agent, conversaciones: 0, escalados: 0, cierres: 0, citas: 0, calls: 0, costo: 0 });
+
+  d.volumen.forEach(r => { fila(r.day, r.agent).conversaciones += r.conversaciones; });
+  d.eventos.forEach(r => {
+    const f = fila(r.day, r.agent);
+    if (r.event_type && r.event_type.startsWith('escalado'))      f.escalados += r.count;
+    else if (r.event_type && r.event_type.startsWith('cierre_'))  f.cierres   += r.count;
+    else if (r.event_type === 'cita_confirmada')                  f.citas     += r.count;
+  });
+  d.tokens.forEach(r => { const f = fila(r.day, r.agent); f.calls += r.calls; f.costo += Number(r.cost_usd) || 0; });
+
+  const rows = Object.values(filas)
+    .filter(f => visibles.includes(f.agent))
+    .filter(f => dia === 'todos' || f.day === dia)
+    .sort((a, b) => b.day.localeCompare(a.day) || a.agent.localeCompare(b.agent));
+
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8" class="muted">Sin datos para este filtro</td></tr>'; return; }
+
+  tbody.innerHTML = rows.map(f => '<tr>' +
+    '<td class="mono">' + f.day + '</td>' +
+    '<td>' + agentDot(f.agent) + (AGENT_LABEL[f.agent] || f.agent) + '</td>' +
+    '<td class="mono">' + f.conversaciones + '</td>' +
+    '<td class="mono">' + (f.escalados || '—') + '</td>' +
+    '<td class="mono">' + (f.cierres || '—') + '</td>' +
+    '<td class="mono">' + (f.citas || '—') + '</td>' +
+    '<td class="mono muted">' + (f.calls || '—') + '</td>' +
+    '<td class="mono">$' + f.costo.toFixed(2) + '</td>' +
+  '</tr>').join('');
+}
+
+// Re-renders from cached data. Called by the agent and day filters.
+function render() {
+  if (!DATA.inf) return;
+  renderDiario();
+  renderKPIs(DATA.inf, DATA.leads);
+  renderFunnels(DATA.inf);
+  renderEstados(DATA.inf);
+  renderSintomas(DATA.inf);
+  renderAlerts(DATA.inf, DATA.leads);
+  renderRecovery(DATA.inf);
+  renderLeads(DATA.leads);
+}
+
 async function load() {
   try {
-    const [r1, r2] = await Promise.all([fetch('/informe'), fetch('/informe/triaje-completo')]);
-    if (!r1.ok || !r2.ok) throw new Error('HTTP ' + r1.status);
-    const [inf, leads] = await Promise.all([r1.json(), r2.json()]);
+    const days = document.getElementById('f-dias').value;
+    const [r1, r2, r3] = await Promise.all([
+      fetch('/informe'),
+      fetch('/informe/triaje-completo'),
+      fetch('/informe/diario?days=' + days),
+    ]);
+    if (!r1.ok || !r2.ok || !r3.ok) throw new Error('HTTP ' + r1.status + '/' + r2.status + '/' + r3.status);
+    const [inf, leads, diario] = await Promise.all([r1.json(), r2.json(), r3.json()]);
+    DATA = { inf, leads, diario };
     document.getElementById('err').style.display = 'none';
-    renderKPIs(inf, leads);
-    renderFunnels(inf);
-    renderEstados(inf);
-    renderSintomas(inf);
-    renderAlerts(inf, leads);
-    renderRecovery(inf);
-    renderLeads(leads);
+
+    const dias = [...new Set([
+      ...diario.volumen.map(r => r.day),
+      ...diario.eventos.map(r => r.day),
+      ...diario.tokens.map(r => r.day),
+    ])].sort((a, b) => b.localeCompare(a));
+    poblarDias(dias);
+
+    render();
     lastUpdate = Date.now();
   } catch (e) {
     const el = document.getElementById('err');
