@@ -147,7 +147,7 @@ router.get('/', (_req, res) => {
 <section>
   <h2>Por día <small id="dia-nota"></small></h2>
   <div class="tcard"><table>
-    <thead><tr><th>Día</th><th>Agente</th><th>Conversaciones activas</th><th>Escalados</th><th>Cierres</th><th>Citas confirmadas</th><th>Llamadas IA</th><th>Costo</th></tr></thead>
+    <thead><tr><th>Día</th><th>Agente</th><th>Conversaciones activas</th><th>Escalados</th><th>Cierres</th><th>Derivados</th><th>Llamadas IA</th><th>Costo</th></tr></thead>
     <tbody id="t-diario"></tbody>
   </table></div>
 </section>
@@ -431,14 +431,21 @@ function renderDiario() {
   const filas = {};
   const key = (day, agent) => day + '|' + agent;
   const fila = (day, agent) => (filas[key(day, agent)] = filas[key(day, agent)] ||
-    { day, agent, conversaciones: 0, escalados: 0, cierres: 0, citas: 0, calls: 0, costo: 0 });
+    { day, agent, conversaciones: 0, escalados: 0, cierres: 0, derivados: 0, calls: 0, costo: 0 });
 
   d.volumen.forEach(r => { fila(r.day, r.agent).conversaciones += r.conversaciones; });
+  // Buckets chosen from the event types that actually occur: escalado,
+  // escalado_nhc_adultos, cierre_fuera_ciudad, cierre_fuera_segmento,
+  // cierre_sin_presupuesto, derivado_nhck_a_nhc, derivado_nhc_a_nhck.
+  // "Derivados" replaced a "citas confirmadas" column: cita_confirmada has
+  // never been logged (zero rows in 90 days), so that column was always empty
+  // while 63 real cross-referrals between the two bots went uncounted.
   d.eventos.forEach(r => {
     const f = fila(r.day, r.agent);
-    if (r.event_type && r.event_type.startsWith('escalado'))      f.escalados += r.count;
-    else if (r.event_type && r.event_type.startsWith('cierre_'))  f.cierres   += r.count;
-    else if (r.event_type === 'cita_confirmada')                  f.citas     += r.count;
+    const t = r.event_type || '';
+    if (t.startsWith('escalado'))      f.escalados += r.count;
+    else if (t.startsWith('cierre_'))  f.cierres   += r.count;
+    else if (t.startsWith('derivado_')) f.derivados += r.count;
   });
   d.tokens.forEach(r => { const f = fila(r.day, r.agent); f.calls += r.calls; f.costo += Number(r.cost_usd) || 0; });
 
@@ -455,7 +462,7 @@ function renderDiario() {
     '<td class="mono">' + f.conversaciones + '</td>' +
     '<td class="mono">' + (f.escalados || '—') + '</td>' +
     '<td class="mono">' + (f.cierres || '—') + '</td>' +
-    '<td class="mono">' + (f.citas || '—') + '</td>' +
+    '<td class="mono">' + (f.derivados || '—') + '</td>' +
     '<td class="mono muted">' + (f.calls || '—') + '</td>' +
     '<td class="mono">$' + f.costo.toFixed(2) + '</td>' +
   '</tr>').join('');
