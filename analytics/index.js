@@ -103,6 +103,33 @@ router.get('/', (_req, res) => {
     .filters label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
     .filters select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.6rem; font-family: inherit; font-size: 0.8rem; cursor: pointer; }
     h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; margin-left: 0.5rem; }
+
+    /* Glossary */
+    .glos { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+    .glos summary { cursor: pointer; font-size: 0.8rem; font-weight: 700; color: var(--text); list-style: none; }
+    .glos summary::-webkit-details-marker { display: none; }
+    .glos summary::before { content: '▸ '; color: var(--blue); }
+    .glos[open] summary::before { content: '▾ '; }
+    .glos-hint { font-weight: 400; color: var(--muted); font-size: 0.72rem; }
+    .glos-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem; margin-top: 0.9rem; }
+    .glos-grid div { border-left: 2px solid var(--border); padding-left: 0.6rem; }
+    .glos-grid b { display: block; font-size: 0.78rem; color: var(--blue); margin-bottom: 0.15rem; }
+    .glos-grid span { font-size: 0.75rem; color: var(--muted); line-height: 1.45; }
+
+    /* Agent panels: identical structure on both sides so they read as a pair */
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.1rem; }
+    .panel-head { display: flex; align-items: center; gap: 0.5rem; font-size: 0.95rem; font-weight: 700; padding-bottom: 0.7rem; margin-bottom: 0.9rem; border-bottom: 1px solid var(--border); }
+    .panel-head .sub { font-size: 0.7rem; font-weight: 400; color: var(--muted); margin-left: auto; }
+    .panel h3 { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 1.1rem 0 0.5rem; }
+    .panel h3:first-of-type { margin-top: 0; }
+    .pk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+    .pk { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 0.6rem 0.7rem; }
+    .pk-l { font-size: 0.63rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .pk-v { font-family: var(--mono); font-size: 1.45rem; font-weight: 700; line-height: 1.15; }
+    .pk-s { font-size: 0.63rem; color: var(--muted); }
+    .panel table { width: 100%; }
+    .panel .tcard { background: var(--bg); }
+    .ayuda { cursor: help; border-bottom: 1px dotted var(--muted); }
   </style>
 </head>
 <body>
@@ -143,6 +170,30 @@ router.get('/', (_req, res) => {
   </div>
 </section>
 
+<!-- Glossary: every term on this page in plain language, so the numbers can be
+     read without knowing the state machine behind them. -->
+<section>
+  <details class="glos">
+    <summary>¿Qué significa cada término? <span class="glos-hint">(clic para abrir)</span></summary>
+    <div class="glos-grid">
+      <div><b>Conversación</b><span>Un chat de WhatsApp con una persona. Se cuenta una sola vez, aunque escriba muchos mensajes.</span></div>
+      <div><b>Conversaciones activas</b><span>Chats que tuvieron actividad ese día. Ojo: NO son leads nuevos. Si alguien responde tres días seguidos, cuenta en los tres.</span></div>
+      <div><b>Triaje</b><span>Las 3 preguntas iniciales: qué dificultad hay, hace cuánto, y qué han intentado antes. Es el filtro que decide si el caso encaja.</span></div>
+      <div><b>Triaje completo</b><span>Contestó las 3 preguntas. Recién ahí el bot puede ofrecer fechas y agendar. Antes de este punto no hay venta posible.</span></div>
+      <div><b>Escalado</b><span>El bot le pasó el caso a un asesor humano y dejó de responder. Pasa con autismo o TEA, condiciones crónicas, afiliados a COMFAMA o FEISA, o si piden hablar con una persona.</span></div>
+      <div><b>Cierre</b><span>El bot cerró la conversación por su cuenta, sin pasarla a nadie. Tres motivos: fuera de ciudad (no es Medellín ni alrededores), fuera de segmento (no es el perfil que atiende el centro) o sin presupuesto.</span></div>
+      <div><b>Derivado</b><span>El lead tocó la puerta equivocada y pasó al otro bot: Carolina manda a Luisa si el paciente es adulto, Luisa manda a Carolina si es menor. La conversación sigue viva.</span></div>
+      <div><b>Cita confirmada</b><span>El lead eligió fecha y hora y entregó sus datos. Es el momento en que el bot genera la cita real.</span></div>
+      <div><b>Esperando pago</b><span>Ya tiene cita y se le envió el link de pago, pero todavía no se confirma el abono.</span></div>
+      <div><b>Completado</b><span>Pagó. Es el final del embudo, la venta cerrada.</span></div>
+      <div><b>Recovery</b><span>Job automático que reescribe al lead que dejó de responder. Intento 1 a las 3 horas, intento 2 a las 6. Si no contesta, se da por perdido.</span></div>
+      <div><b>Llamadas IA</b><span>Cuántas veces se consultó a la inteligencia artificial ese día. Cada respuesta del bot es una llamada, más los análisis automáticos.</span></div>
+      <div><b>Costo</b><span>Lo que costaron esas llamadas en dólares ese día.</span></div>
+      <div><b>Inactividad</b><span>El lead dejó de responder a mitad de la conversación. Es la principal causa de pérdida.</span></div>
+    </div>
+  </details>
+</section>
+
 <!-- Row 0: Day by day -->
 <section>
   <h2>Por día <small id="dia-nota"></small></h2>
@@ -152,48 +203,16 @@ router.get('/', (_req, res) => {
   </table></div>
 </section>
 
-<!-- Row 1: KPIs -->
+<!-- One mirrored panel per bot, side by side and identically ordered so the
+     two can be read against each other without hunting across mixed tables. -->
 <section>
-  <h2>KPIs</h2>
-  <div class="kpi-grid" id="kpis"></div>
+  <div class="col2" id="paneles"></div>
 </section>
 
-<!-- Row 2: Funnel -->
-<section>
-  <h2>Embudo de conversión</h2>
-  <div class="col2" id="funnels"></div>
-</section>
-
-<!-- Row 3: Estados + Síntomas -->
-<section>
-  <div class="col2">
-    <div>
-      <h2>Estados actuales</h2>
-      <div class="tcard"><table>
-        <thead><tr><th>Agente</th><th>Estado</th><th>Cant.</th><th>%</th></tr></thead>
-        <tbody id="t-estados"></tbody>
-      </table></div>
-    </div>
-    <div>
-      <h2>Síntomas más frecuentes</h2>
-      <div class="tcard"><table>
-        <thead><tr><th>Agente</th><th>Motivo de consulta</th><th>Cant.</th></tr></thead>
-        <tbody id="t-sintomas"></tbody>
-      </table></div>
-    </div>
-  </div>
-</section>
-
-<!-- Row 4: Alertas -->
+<!-- Cross-agent: alerts concern the whole operation -->
 <section>
   <h2>Alertas activas</h2>
   <div class="alerts" id="alerts"></div>
-</section>
-
-<!-- Row 5: Recovery -->
-<section>
-  <h2>Recovery — estado del job de reactivación</h2>
-  <div class="col2" id="recovery"></div>
 </section>
 
 <!-- Row 6: Leads calificados -->
@@ -238,67 +257,98 @@ function funnelFor(inf, agent) {
   return inf.funnel.find(f => f.agent === agent) || { total: 0, con_triaje: 0, esperando_pago: 0, completados: 0, cerrados: 0, escalados: 0 };
 }
 
-function renderKPIs(inf, leads) {
-  const el = document.getElementById('kpis');
-  const leadsPorAgente = {};
-  (leads.conversaciones || []).forEach(l => { leadsPorAgente[l.agent] = (leadsPorAgente[l.agent] || 0) + 1; });
+// One panel per bot, same sections in the same order on both sides. The old
+// layout mixed both agents into shared tables (one row tagged "Carolina", the
+// next "Luisa"), which made comparing them a hunt. Tooltips repeat the glossary
+// wording so a term can be resolved without scrolling back up.
+function panelHTML(agent, inf, leads) {
+  const f = funnelFor(inf, agent);
+  const total  = +f.total || 0;
+  const triaje = +f.con_triaje || 0;
+  const ep     = +f.esperando_pago || 0;
+  const comp   = +f.completados || 0;
+  const esc    = +f.escalados || 0;
+  const citas  = ep + comp;
+  const tasa   = total ? (comp / total * 100).toFixed(1) + '%' : '0%';
+  const activos72h = (inf.recientes_72h || []).filter(r => r.agent === agent).reduce((s, r) => s + (+r.total || 0), 0);
+  const ls = (leads.conversaciones || []).filter(l => l.agent === agent).length;
 
-  el.innerHTML = agentesVisibles().map(agent => {
-    const f = funnelFor(inf, agent);
-    const total = +f.total || 0;
-    const triaje = +f.con_triaje || 0;
-    const ep = +f.esperando_pago || 0;
-    const comp = +f.completados || 0;
-    const esc = +f.escalados || 0;
-    const citas = ep + comp;
-    const tasa = total ? (comp / total * 100).toFixed(1) + '%' : '0%';
-    const activos72h = (inf.recientes_72h || []).filter(r => r.agent === agent).reduce((s, r) => s + (+r.total || 0), 0);
-    const ls = leadsPorAgente[agent] || 0;
+  const kpi = (label, val, cls, sub, ayuda) =>
+    '<div class="pk"><div class="pk-l"><span class="ayuda" title="' + ayuda + '">' + label + '</span></div>' +
+    '<div class="pk-v ' + cls + '">' + val + '</div><div class="pk-s">' + sub + '</div></div>';
 
-    return \`
-    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Total</div><div class="kpi-value c-blue">\${total}</div><div class="kpi-sub">\${activos72h} activos últimas 72h</div></div>
-    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Triaje completado</div><div class="kpi-value \${triaje > 0 ? 'c-green' : 'c-muted'}">\${pct(triaje, total)}</div><div class="kpi-sub">\${triaje} conversaciones</div></div>
-    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Citas confirmadas</div><div class="kpi-value \${citas > 0 ? 'c-yellow' : 'c-muted'}">\${citas}</div><div class="kpi-sub">\${ep} pendientes de pago</div></div>
-    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Tasa de conversión</div><div class="kpi-value \${comp > 0 ? 'c-green' : 'c-red'}">\${tasa}</div><div class="kpi-sub">\${comp} completados</div></div>
-    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Leads sin convertir</div><div class="kpi-value \${ls > 0 ? 'c-yellow' : 'c-green'}">\${ls}</div><div class="kpi-sub">contacto manual recomendado</div></div>
-    <div class="kpi"><div class="kpi-label">\${agentDot(agent)}\${AGENT_LABEL[agent]} — Escalados pendientes</div><div class="kpi-value \${esc > 0 ? 'c-red' : 'c-green'}">\${esc}</div><div class="kpi-sub">\${esc > 0 ? 'requieren atención del asesor' : 'sin escalados pendientes'}</div></div>
-  \`;
+  const kpis =
+    kpi('Total', total, 'c-blue', activos72h + ' activos 72h',
+        'Todas las conversaciones que ha tenido este bot.') +
+    kpi('Triaje completo', pct(triaje, total), triaje > 0 ? 'c-green' : 'c-muted', triaje + ' conversaciones',
+        'Contestaron las 3 preguntas iniciales. Recien aca el bot puede agendar.') +
+    kpi('Citas confirmadas', citas, citas > 0 ? 'c-yellow' : 'c-muted', ep + ' esperando pago',
+        'Eligieron fecha y hora y entregaron sus datos.') +
+    kpi('Conversion', tasa, comp > 0 ? 'c-green' : 'c-red', comp + ' pagaron',
+        'Porcentaje del total que llego a pagar.') +
+    kpi('Escalados', esc, esc > 0 ? 'c-red' : 'c-green', 'esperan al asesor',
+        'El bot le paso el caso a un humano y dejo de responder.') +
+    kpi('Leads sin convertir', ls, ls > 0 ? 'c-yellow' : 'c-green', 'contacto manual',
+        'Calificaron pero no avanzaron. Vale contactarlos a mano.');
+
+  const steps = [
+    ['Total entrantes', total,  '#3B82F6'],
+    ['Triaje completo', triaje, '#8B5CF6'],
+    ['Cita confirmada', citas,  '#EAB308'],
+    ['Pagaron',         comp,   '#22C55E'],
+  ];
+  const max = steps[0][1] || 1;
+  const embudo = steps.map(function (st) {
+    const label = st[0], v = st[1], color = st[2];
+    const w = Math.max(Math.round(v / max * 100), v > 0 ? 2 : 0);
+    const pp = v === steps[0][1] ? '100%' : pct(v, steps[0][1]);
+    return '<div class="f-row"><span class="f-label">' + label + '</span><div class="f-track">' +
+           '<div class="f-bar" style="background:' + color + ';width:' + w + '%"><span class="f-count">' + v + '</span></div>' +
+           '</div><span class="f-pct">' + pp + '</span></div>';
   }).join('');
-}
 
-function renderFunnels(inf) {
-  const el = document.getElementById('funnels');
-  el.innerHTML = agentesVisibles().map(agent => {
-    const f = funnelFor(inf, agent);
-    const steps = [
-      ['Total entrantes', +f.total || 0, '#3B82F6'],
-      ['Triaje completo', +f.con_triaje || 0, '#8B5CF6'],
-      ['Cita confirmada', (+f.esperando_pago || 0) + (+f.completados || 0), '#EAB308'],
-      ['Pagaron', +f.completados || 0, '#22C55E'],
-    ];
-    const max = steps[0][1] || 1;
-    const rows = steps.map(([label, v]) => {
-      const w = Math.max(Math.round(v / max * 100), v > 0 ? 2 : 0);
-      const p = v === steps[0][1] ? '100%' : pct(v, steps[0][1]);
-      return \`<div class="f-row"><span class="f-label">\${label}</span><div class="f-track"><div class="f-bar" style="background:\${steps[steps.findIndex(s=>s[0]===label)][2]};width:\${w}%"><span class="f-count">\${v}</span></div></div><span class="f-pct">\${p}</span></div>\`;
-    }).join('');
-    return \`<div><h2>\${agentDot(agent)}\${AGENT_LABEL[agent]}</h2><div class="funnel">\${rows}</div></div>\`;
-  }).join('');
-}
-
-function renderEstados(inf) {
-  const totalPorAgente = {};
-  inf.funnel.forEach(f => { totalPorAgente[f.agent] = +f.total || 1; });
-  document.getElementById('t-estados').innerHTML = inf.estados.map(r =>
-    \`<tr><td><span class="agent-tag \${r.agent}">\${AGENT_LABEL[r.agent] || r.agent}</span></td><td>\${LABELS[r.estado] || r.estado}</td><td class="mono">\${r.total}</td><td class="mono muted">\${pct(+r.total, totalPorAgente[r.agent] || 1)}</td></tr>\`
-  ).join('');
-}
-
-function renderSintomas(inf) {
-  const rows = inf.sintomas || [];
-  document.getElementById('t-sintomas').innerHTML = rows.length
-    ? rows.map(r => \`<tr><td><span class="agent-tag \${r.agent}">\${AGENT_LABEL[r.agent] || r.agent}</span></td><td>\${r.sintoma}</td><td class="mono">\${r.total}</td></tr>\`).join('')
+  const estados = (inf.estados || []).filter(r => r.agent === agent).sort((a, b) => +b.total - +a.total);
+  const tEstados = estados.length
+    ? estados.map(r => '<tr><td>' + (LABELS[r.estado] || r.estado) + '</td><td class="mono">' + r.total +
+        '</td><td class="mono muted">' + pct(+r.total, total || 1) + '</td></tr>').join('')
     : '<tr><td colspan="3" class="muted">Sin datos</td></tr>';
+
+  const sintomas = (inf.sintomas || []).filter(r => r.agent === agent).slice(0, 8);
+  const tSintomas = sintomas.length
+    ? sintomas.map(r => '<tr><td>' + r.sintoma + '</td><td class="mono">' + r.total + '</td></tr>').join('')
+    : '<tr><td colspan="2" class="muted">Sin datos</td></tr>';
+
+  const rec = (inf.recovery || []).filter(x => x.agent === agent);
+  const i1 = +((rec.find(x => x.recovery_status === 'intento-1') || {}).total) || 0;
+  const i2 = +((rec.find(x => x.recovery_status === 'intento-2') || {}).total) || 0;
+  const cerr = +((inf.estados.find(x => x.agent === agent && x.estado === 'cerrado') || {}).total) || 0;
+
+  return '<div class="panel">' +
+    '<div class="panel-head">' + agentDot(agent) + AGENT_LABEL[agent] +
+      '<span class="sub">' + (agent === 'carolina' ? 'NHC Kids · niños' : 'NHC · adultos') + '</span></div>' +
+    '<h3>Indicadores</h3><div class="pk-grid">' + kpis + '</div>' +
+    '<h3><span class="ayuda" title="Cada escalon es una etapa que el lead debe superar. La caida entre uno y otro muestra donde se pierde.">Embudo de conversion</span></h3>' +
+      '<div class="funnel">' + embudo + '</div>' +
+    '<h3><span class="ayuda" title="En que etapa esta parada hoy cada conversacion.">Estados actuales</span></h3>' +
+      '<div class="tcard"><table><thead><tr><th>Estado</th><th>Cant.</th><th>%</th></tr></thead><tbody>' + tEstados + '</tbody></table></div>' +
+    '<h3><span class="ayuda" title="Motivo de consulta declarado en la primera pregunta del triaje.">Motivos de consulta</span></h3>' +
+      '<div class="tcard"><table><thead><tr><th>Motivo</th><th>Cant.</th></tr></thead><tbody>' + tSintomas + '</tbody></table></div>' +
+    '<h3><span class="ayuda" title="Reintentos automaticos al lead que dejo de responder: intento 1 a las 3h, intento 2 a las 6h.">Recovery</span></h3>' +
+      '<div class="rec-grid">' +
+        '<div class="rec-card"><div class="rec-val ' + (i1 > 0 ? 'c-yellow' : 'c-green') + '">' + i1 + '</div><div class="rec-lbl">Intento 1</div></div>' +
+        '<div class="rec-card"><div class="rec-val ' + (i2 > 0 ? 'c-red' : 'c-green') + '">' + i2 + '</div><div class="rec-lbl">Intento 2</div></div>' +
+        '<div class="rec-card"><div class="rec-val c-muted">' + cerr + '</div><div class="rec-lbl">Cerrados</div></div>' +
+      '</div>' +
+  '</div>';
+}
+
+function renderPaneles(inf, leads) {
+  const cont = document.getElementById('paneles');
+  const visibles = agentesVisibles();
+  // With a single agent selected the panel takes the full width instead of
+  // leaving an empty half.
+  cont.style.gridTemplateColumns = visibles.length === 1 ? '1fr' : '';
+  cont.innerHTML = visibles.map(a => panelHTML(a, inf, leads)).join('');
 }
 
 function renderAlerts(inf, leads) {
@@ -310,51 +360,35 @@ function renderAlerts(inf, leads) {
     const esc = +f.escalados || 0;
     const pagoPendiente = (inf.pagos_pendientes || []).find(p => p.agent === agent);
 
-    if (ep > 0 && pagoPendiente?.mas_antigua) {
+    if (ep > 0 && pagoPendiente && pagoPendiente.mas_antigua) {
       const mins = Math.round((Date.now() - new Date(pagoPendiente.mas_antigua).getTime()) / 60000);
       if (mins > 120) {
-        alerts.push({ t: 'r', icon: '🔴', tag: 'URGENTE', agent,
-          msg: \`\${ep} lead(s) en <strong>esperando_pago</strong> — abono sin confirmar hace \${fmt(mins)}. Contactar manualmente.\` });
+        alerts.push({ t: 'r', icon: '\u{1F534}', tag: 'URGENTE', agent,
+          msg: ep + ' lead(s) en <strong>esperando pago</strong> — abono sin confirmar hace ' + fmt(mins) + '. Contactar manualmente.' });
       }
     }
 
     const inact24 = (leads.conversaciones || []).filter(l => l.agent === agent && l.inactivo_minutos > 1440);
     if (inact24.length > 0) {
-      alerts.push({ t: 'y', icon: '🟡', tag: 'ATENCIÓN', agent,
-        msg: \`\${inact24.length} lead(s) calificado(s) con más de 24h de inactividad. Recovery agotado — requieren contacto del asesor.\` });
+      alerts.push({ t: 'y', icon: '\u{1F7E1}', tag: 'ATENCIÓN', agent,
+        msg: inact24.length + ' lead(s) calificado(s) con más de 24h sin responder. Recovery agotado — requieren contacto del asesor.' });
     }
 
     if (esc > 0) {
-      alerts.push({ t: 'y', icon: '🟡', tag: 'ATENCIÓN', agent,
-        msg: \`\${esc} conversación(es) escalada(s) esperando respuesta del asesor.\` });
+      alerts.push({ t: 'y', icon: '\u{1F7E1}', tag: 'ATENCIÓN', agent,
+        msg: esc + ' conversación(es) escalada(s) esperando respuesta del asesor.' });
     }
   });
 
   if (alerts.length === 0) {
-    alerts.push({ t: 'g', icon: '🟢', tag: 'OK', agent: null, msg: 'Todo dentro de rangos normales — ambos agentes.' });
+    alerts.push({ t: 'g', icon: '\u{1F7E2}', tag: 'OK', agent: null, msg: 'Todo dentro de rangos normales.' });
   }
 
   document.getElementById('alerts').innerHTML = alerts.map(a =>
-    \`<div class="alert \${a.t}"><span>\${a.icon}</span>\${a.agent ? \`<span class="agent-tag \${a.agent}">\${AGENT_LABEL[a.agent]}</span>\` : ''}<span class="a-msg">\${a.msg}</span><span class="a-tag \${a.t}">\${a.tag}</span></div>\`
+    '<div class="alert ' + a.t + '"><span>' + a.icon + '</span>' +
+    (a.agent ? '<span class="agent-tag ' + a.agent + '">' + AGENT_LABEL[a.agent] + '</span>' : '') +
+    '<span class="a-msg">' + a.msg + '</span><span class="a-tag ' + a.t + '">' + a.tag + '</span></div>'
   ).join('');
-}
-
-function renderRecovery(inf) {
-  const el = document.getElementById('recovery');
-  el.innerHTML = agentesVisibles().map(agent => {
-    const r = (inf.recovery || []).filter(x => x.agent === agent);
-    const i1 = +((r.find(x => x.recovery_status === 'intento-1') || {}).total) || 0;
-    const i2 = +((r.find(x => x.recovery_status === 'intento-2') || {}).total) || 0;
-    const cerr = +((inf.estados.find(x => x.agent === agent && x.estado === 'cerrado') || {}).total) || 0;
-    return \`<div>
-      <h2>\${agentDot(agent)}\${AGENT_LABEL[agent]}</h2>
-      <div class="rec-grid">
-        <div class="rec-card"><div class="rec-val \${i1 > 0 ? 'c-yellow' : 'c-green'}">\${i1}</div><div class="rec-lbl">Intento 1 pendiente</div></div>
-        <div class="rec-card"><div class="rec-val \${i2 > 0 ? 'c-red' : 'c-green'}">\${i2}</div><div class="rec-lbl">Intento 2 agotado</div></div>
-        <div class="rec-card"><div class="rec-val c-muted">\${cerr}</div><div class="rec-lbl">Cerrados (excluidos)</div></div>
-      </div>
-    </div>\`;
-  }).join('');
 }
 
 function renderLeads(leads) {
@@ -472,12 +506,8 @@ function renderDiario() {
 function render() {
   if (!DATA.inf) return;
   renderDiario();
-  renderKPIs(DATA.inf, DATA.leads);
-  renderFunnels(DATA.inf);
-  renderEstados(DATA.inf);
-  renderSintomas(DATA.inf);
+  renderPaneles(DATA.inf, DATA.leads);
   renderAlerts(DATA.inf, DATA.leads);
-  renderRecovery(DATA.inf);
   renderLeads(DATA.leads);
 }
 
