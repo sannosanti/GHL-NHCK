@@ -104,6 +104,8 @@ router.get('/', (_req, res) => {
     .filters select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.6rem; font-family: inherit; font-size: 0.8rem; cursor: pointer; }
     h2 small { text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; margin-left: 0.5rem; }
 
+    .periodo-nota { margin-top: 0.6rem; font-size: 0.72rem; color: var(--muted); }
+
     /* Glossary */
     .glos { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
     .glos summary { cursor: pointer; font-size: 0.8rem; font-weight: 700; color: var(--text); list-style: none; }
@@ -163,11 +165,12 @@ router.get('/', (_req, res) => {
       </select>
     </label>
     <label>Día
-      <select id="f-dia" onchange="render()">
+      <select id="f-dia" onchange="load()">
         <option value="todos" selected>Todos</option>
       </select>
     </label>
   </div>
+  <div id="periodo-nota" class="periodo-nota"></div>
 </section>
 
 <!-- Glossary: every term on this page in plain language, so the numbers can be
@@ -270,7 +273,6 @@ function panelHTML(agent, inf, leads) {
   const esc    = +f.escalados || 0;
   const citas  = ep + comp;
   const tasa   = total ? (comp / total * 100).toFixed(1) + '%' : '0%';
-  const activos72h = (inf.recientes_72h || []).filter(r => r.agent === agent).reduce((s, r) => s + (+r.total || 0), 0);
   const ls = (leads.conversaciones || []).filter(l => l.agent === agent).length;
 
   const kpi = (label, val, cls, sub, ayuda) =>
@@ -278,8 +280,8 @@ function panelHTML(agent, inf, leads) {
     '<div class="pk-v ' + cls + '">' + val + '</div><div class="pk-s">' + sub + '</div></div>';
 
   const kpis =
-    kpi('Total', total, 'c-blue', activos72h + ' activos 72h',
-        'Todas las conversaciones que ha tenido este bot.') +
+    kpi('Total', total, 'c-blue', 'en el periodo elegido',
+        'Conversaciones de este bot con actividad dentro del filtro seleccionado.') +
     kpi('Triaje completo', pct(triaje, total), triaje > 0 ? 'c-green' : 'c-muted', triaje + ' conversaciones',
         'Contestaron las 3 preguntas iniciales. Recien aca el bot puede agendar.') +
     kpi('Citas confirmadas', citas, citas > 0 ? 'c-yellow' : 'c-muted', ep + ' esperando pago',
@@ -503,8 +505,21 @@ function renderDiario() {
 }
 
 // Re-renders from cached data. Called by the agent and day filters.
+// States are overwritten in place, so a filtered board describes conversations
+// ACTIVE in the window shown in the state they hold today. Saying it out loud
+// beats letting the number read as history it cannot be.
+function renderPeriodo() {
+  const dia = diaFiltro();
+  const d = document.getElementById('periodo-nota');
+  if (!d) return;
+  d.textContent = dia !== 'todos'
+    ? 'Mostrando solo ' + dia + ' — todo el informe está filtrado a ese día.'
+    : 'Mostrando los últimos ' + document.getElementById('f-dias').value + ' días — todo el informe está filtrado a ese periodo.';
+}
+
 function render() {
   if (!DATA.inf) return;
+  renderPeriodo();
   renderDiario();
   renderPaneles(DATA.inf, DATA.leads);
   renderAlerts(DATA.inf, DATA.leads);
@@ -514,9 +529,15 @@ function render() {
 async function load() {
   try {
     const days = document.getElementById('f-dias').value;
+    const dia  = diaFiltro();
+    // The panels and the leads list follow both filters. The day table keeps
+    // asking for the WHOLE period on purpose: it feeds the day dropdown, which
+    // would collapse to a single option if the server pre-filtered it, leaving
+    // no way to switch back to another day.
+    const q = 'days=' + days + (dia !== 'todos' ? '&day=' + encodeURIComponent(dia) : '');
     const [r1, r2, r3] = await Promise.all([
-      fetch('/informe'),
-      fetch('/informe/triaje-completo'),
+      fetch('/informe?' + q),
+      fetch('/informe/triaje-completo?' + q),
       fetch('/informe/diario?days=' + days),
     ]);
     if (!r1.ok || !r2.ok || !r3.ok) throw new Error('HTTP ' + r1.status + '/' + r2.status + '/' + r3.status);

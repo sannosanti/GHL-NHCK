@@ -91,28 +91,64 @@ app.post('/webhook/contact-deleted', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Every dashboard query is scoped to the same window so the whole report
+// answers one question ("what happened in this period"), instead of the panels
+// showing all-time totals next to a filtered day table.
+//
+// `day` wins over `days` when present, and buckets by Bogota calendar day for
+// the same reason getTokenUsageDaily does: an evening still inside business
+// hours would otherwise fall into the next day.
+//
+// IMPORTANT about conversations: the table has no created_at, only updated_at,
+// overwritten on every touch, and `estado` is overwritten in place too. So a
+// filtered funnel reads "conversations ACTIVE in this window, in the state they
+// are in TODAY" — not the state they were in back then. There is no history
+// table to do better; the UI labels it accordingly.
+function rangoFecha(req, col) {
+  const day = String(req.query.day || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return {
+      clause: `date_trunc('day', ${col} AT TIME ZONE 'America/Bogota') = $1::date`,
+      params: [day],
+      dia: day,
+      dias: null,
+    };
+  }
+  const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
+  return {
+    clause: `${col} > NOW() - ($1 || ' days')::interval`,
+    params: [String(days)],
+    dia: null,
+    dias: days,
+  };
+}
+
 // Both agents, since Carolina and Luisa share this Postgres instance — same
 // scope decision as /informe/tokens and /informe/negocio. Every query returns
 // an `agent` column instead of filtering to env.agentName so the dashboard
 // can compare Carolina vs Luisa side by side.
 app.get('/informe', async (req, res) => {
   try {
-    const [estados, eventos, causas, sintomas, recovery, funnel, gaps, pendientes, recientes] = await Promise.all([
-      db.pool.query(`SELECT agent, estado, COUNT(*) as total FROM conversations GROUP BY agent, estado ORDER BY agent, total DESC`),
-      db.pool.query(`SELECT agent, event_type, COUNT(*) as total FROM transaction_logs GROUP BY agent, event_type ORDER BY agent, total DESC`),
-      db.pool.query(`SELECT agent, root_cause, outcome, COUNT(*) as total FROM conversation_insights GROUP BY agent, root_cause, outcome ORDER BY agent, total DESC`),
-      db.pool.query(`SELECT agent, triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY agent, sintoma ORDER BY agent, total DESC`),
-      db.pool.query(`SELECT agent, recovery_status, COUNT(*) as total FROM conversations WHERE recovery_status IS NOT NULL GROUP BY agent, recovery_status`),
-      db.pool.query(`SELECT agent, COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations GROUP BY agent`),
-      db.pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps ORDER BY frecuencia DESC LIMIT 10`),
-      db.pool.query(`SELECT agent, COUNT(*) as total, MIN(created_at) as mas_antigua FROM pending_payments GROUP BY agent`),
-      db.pool.query(`SELECT agent, estado, COUNT(*) as total FROM conversations WHERE updated_at > NOW() - INTERVAL '72 hours' GROUP BY agent, estado ORDER BY agent, total DESC`),
+    const conv = rangoFecha(req, 'updated_at');   // conversations
+    const crea = rangoFecha(req, 'created_at');   // event/insight/payment tables
+    const P = conv.params;
+
+    const [estados, eventos, causas, sintomas, recovery, funnel, gaps, pendientes] = await Promise.all([
+      db.pool.query(`SELECT agent, estado, COUNT(*) as total FROM conversations WHERE ${conv.clause} GROUP BY agent, estado ORDER BY agent, total DESC`, P),
+      db.pool.query(`SELECT agent, event_type, COUNT(*) as total FROM transaction_logs WHERE ${crea.clause} GROUP BY agent, event_type ORDER BY agent, total DESC`, P),
+      db.pool.query(`SELECT agent, root_cause, outcome, COUNT(*) as total FROM conversation_insights WHERE ${crea.clause} GROUP BY agent, root_cause, outcome ORDER BY agent, total DESC`, P),
+      db.pool.query(`SELECT agent, triaje->>'triaje1' as sintoma, COUNT(*) as total FROM conversations WHERE ${conv.clause} AND triaje->>'triaje1' IS NOT NULL AND triaje->>'triaje1' != '' GROUP BY agent, sintoma ORDER BY agent, total DESC`, P),
+      db.pool.query(`SELECT agent, recovery_status, COUNT(*) as total FROM conversations WHERE ${conv.clause} AND recovery_status IS NOT NULL GROUP BY agent, recovery_status`, P),
+      db.pool.query(`SELECT agent, COUNT(*) FILTER (WHERE estado IN ('triaje_completo','agendando','esperando_pago','completado')) as con_triaje, COUNT(*) FILTER (WHERE estado='esperando_pago') as esperando_pago, COUNT(*) FILTER (WHERE estado='completado') as completados, COUNT(*) FILTER (WHERE estado='cerrado') as cerrados, COUNT(*) FILTER (WHERE estado='escalado') as escalados, COUNT(*) as total FROM conversations WHERE ${conv.clause} GROUP BY agent`, P),
+      db.pool.query(`SELECT pregunta, frecuencia FROM knowledge_gaps WHERE ${crea.clause} ORDER BY frecuencia DESC LIMIT 10`, P),
+      db.pool.query(`SELECT agent, COUNT(*) as total, MIN(created_at) as mas_antigua FROM pending_payments WHERE ${crea.clause} GROUP BY agent`, P),
     ]);
     res.json({
       generado: new Date().toISOString(),
+      dias: conv.dias,
+      dia: conv.dia,
       funnel: funnel.rows,
       estados: estados.rows,
-      recientes_72h: recientes.rows,
       eventos: eventos.rows,
       root_causes: causas.rows,
       sintomas: sintomas.rows,
@@ -125,6 +161,9 @@ app.get('/informe', async (req, res) => {
 
 app.get('/informe/triaje-completo', async (req, res) => {
   try {
+    // Scoped to the same window as /informe so the "leads sin convertir" count
+    // in each panel matches the period the rest of the board is showing.
+    const conv = rangoFecha(req, 'c.updated_at');
     const { rows } = await db.pool.query(`
       SELECT
         c.conversation_id,
@@ -138,9 +177,9 @@ app.get('/informe/triaje-completo', async (req, res) => {
         cc.contact_data
       FROM conversations c
       LEFT JOIN contact_cache cc ON cc.contact_id = c.contact_id
-      WHERE c.estado = 'triaje_completo'
+      WHERE c.estado = 'triaje_completo' AND ${conv.clause}
       ORDER BY c.updated_at DESC
-    `);
+    `, conv.params);
 
     const result = rows.map(r => {
       const msgs = Array.isArray(r.messages) ? r.messages : [];
