@@ -590,6 +590,33 @@ async function getConversationVolumeDaily(days = 30) {
   return res.rows;
 }
 
+// Cost per calendar month per agent — the billing view. Grouped on Bogotá
+// months for the same reason the daily queries are: an evening still inside
+// business hours would otherwise be billed to the following day, and on the
+// 31st, to the following MONTH. Returns whole months back from today, so the
+// current month is always partial and must be labelled as such.
+async function getTokenUsageMonthly(months = 12) {
+  const res = await pool.query(
+    `SELECT
+       agent,
+       to_char(date_trunc('month', created_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM') AS mes,
+       SUM(input_tokens)::bigint AS input_tokens,
+       SUM(output_tokens)::bigint AS output_tokens,
+       SUM(cache_creation_input_tokens)::bigint AS cache_creation_input_tokens,
+       SUM(cache_read_input_tokens)::bigint AS cache_read_input_tokens,
+       SUM(cost_usd)::float AS cost_usd,
+       COUNT(*)::int AS calls,
+       MIN(created_at AT TIME ZONE 'America/Bogota')::date AS primer_dia,
+       MAX(created_at AT TIME ZONE 'America/Bogota')::date AS ultimo_dia
+     FROM token_usage
+     WHERE created_at > date_trunc('month', NOW() AT TIME ZONE 'America/Bogota') - ($1 || ' months')::interval
+     GROUP BY agent, mes
+     ORDER BY mes DESC`,
+    [months]
+  );
+  return res.rows;
+}
+
 // Events split per day AND per type, for the day-by-day view. getEventBreakdown
 // aggregates the same table over the whole period; this keeps the day axis so
 // the dashboard can show what happened on each specific date. Bucketed by
@@ -635,6 +662,7 @@ module.exports = {
   getConversationVolumeDaily,
   getEventsDaily,
   getInsightsDaily,
+  getTokenUsageMonthly,
   getConversationData,
   saveConversationData,
   limpiarContactoDB,

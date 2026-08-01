@@ -214,7 +214,31 @@ app.get('/informe/triaje-completo', async (req, res) => {
 app.get('/informe/tokens', async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
-    const diario = await db.getTokenUsageDaily(days);
+    const mes = String(req.query.month || '').trim();
+    const porMes = /^\d{4}-\d{2}$/.test(mes);
+
+    // Billing view: whole calendar months, always returned so the month picker
+    // stays populated no matter which window is being shown.
+    const mensual = await db.getTokenUsageMonthly(12);
+
+    // Picking a month shows that month day by day instead of a rolling window,
+    // which is what you want when reconciling an invoice.
+    const diario = porMes
+      ? (await db.pool.query(
+          `SELECT
+             agent,
+             to_char(date_trunc('day', created_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM-DD') AS day,
+             SUM(input_tokens)::bigint AS input_tokens,
+             SUM(output_tokens)::bigint AS output_tokens,
+             SUM(cache_creation_input_tokens)::bigint AS cache_creation_input_tokens,
+             SUM(cache_read_input_tokens)::bigint AS cache_read_input_tokens,
+             SUM(cost_usd)::float AS cost_usd,
+             COUNT(*)::int AS calls
+           FROM token_usage
+           WHERE to_char(date_trunc('month', created_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM') = $1
+           GROUP BY agent, day
+           ORDER BY day ASC`, [mes])).rows
+      : await db.getTokenUsageDaily(days);
     // "hoy"/"este mes" boundaries in Bogotá local time — created_at is UTC,
     // so comparing against date_trunc('day', NOW()) directly (UTC midnight)
     // cuts off Bogotá business hours from 7pm to midnight into "today"
@@ -230,7 +254,15 @@ app.get('/informe/tokens', async (req, res) => {
       FROM token_usage
       GROUP BY agent
     `);
-    res.json({ generado: new Date().toISOString(), dias: days, diario, totales: totales.rows });
+    res.json({
+      generado: new Date().toISOString(),
+      dias: porMes ? null : days,
+      mes: porMes ? mes : null,
+      mesActual: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).slice(0, 7),
+      diario,
+      mensual,
+      totales: totales.rows,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
