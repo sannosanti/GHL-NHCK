@@ -239,21 +239,22 @@ app.get('/informe/tokens', async (req, res) => {
            GROUP BY agent, day
            ORDER BY day ASC`, [mes])).rows
       : await db.getTokenUsageDaily(days);
-    // "hoy"/"este mes" boundaries in Bogotá local time — created_at is UTC,
-    // so comparing against date_trunc('day', NOW()) directly (UTC midnight)
-    // cuts off Bogotá business hours from 7pm to midnight into "today"
-    // instead of the day they actually happened (confirmed live 2026-07-21).
-    const totales = await db.pool.query(`
-      SELECT
-        agent,
-        SUM(cost_usd) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('day', NOW() AT TIME ZONE 'America/Bogota'))::float AS costo_hoy,
-        SUM(cost_usd) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('month', NOW() AT TIME ZONE 'America/Bogota'))::float AS costo_mes,
-        SUM(input_tokens + output_tokens) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('day', NOW() AT TIME ZONE 'America/Bogota'))::bigint AS tokens_hoy,
-        SUM(input_tokens + output_tokens) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('month', NOW() AT TIME ZONE 'America/Bogota'))::bigint AS tokens_mes,
-        COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'America/Bogota') > date_trunc('day', NOW() AT TIME ZONE 'America/Bogota'))::int AS llamadas_hoy
-      FROM token_usage
-      GROUP BY agent
-    `);
+    // Totals for the SELECTED window, summed from the very rows the detail
+    // table renders. They used to be hardcoded to "today" and "this month" and
+    // ignored the filters entirely, so the headline numbers contradicted the
+    // table right below them. Deriving them here makes disagreement impossible.
+    const acc = {};
+    for (const r of diario) {
+      const a = (acc[r.agent] = acc[r.agent] || { agent: r.agent, costo: 0, tokens: 0, llamadas: 0, cacheRead: 0 });
+      a.costo     += Number(r.cost_usd) || 0;
+      a.tokens    += Number(r.input_tokens || 0) + Number(r.output_tokens || 0);
+      a.llamadas  += Number(r.calls) || 0;
+      a.cacheRead += Number(r.cache_read_input_tokens) || 0;
+    }
+    const totales = Object.values(acc).map(a => ({
+      ...a,
+      costoPorLlamada: a.llamadas > 0 ? a.costo / a.llamadas : 0,
+    }));
     res.json({
       generado: new Date().toISOString(),
       dias: porMes ? null : days,
@@ -261,7 +262,7 @@ app.get('/informe/tokens', async (req, res) => {
       mesActual: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).slice(0, 7),
       diario,
       mensual,
-      totales: totales.rows,
+      totales,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -272,11 +273,17 @@ app.get('/informe/tokens', async (req, res) => {
 app.get('/informe/negocio', async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days, 10) || 30, 90);
+    const mes = String(req.query.month || '').trim();
+    const porMes = /^\d{4}-\d{2}$/.test(mes);
+    // Same window object every query understands, so picking a month on the
+    // tokens dashboard moves these sections too instead of leaving them on a
+    // rolling 30-day view next to month-scoped costs.
+    const win = porMes ? { month: mes } : { days };
     const [funnel, eventos, volumenDiario, costoDiario] = await Promise.all([
-      db.getConversationFunnel(days),
-      db.getEventBreakdown(days),
-      db.getConversationVolumeDaily(days),
-      db.getTokenUsageDaily(days),
+      db.getConversationFunnel(win),
+      db.getEventBreakdown(win),
+      db.getConversationVolumeDaily(win),
+      db.getTokenUsageDaily(win),
     ]);
     const porAgente = {};
     for (const row of volumenDiario) {
@@ -293,7 +300,7 @@ app.get('/informe/negocio', async (req, res) => {
       costoTotal: v.costo,
       costoPorConversacion: v.conversaciones > 0 ? v.costo / v.conversaciones : 0,
     }));
-    res.json({ generado: new Date().toISOString(), dias: days, funnel, eventos, volumenDiario, costoPromedio });
+    res.json({ generado: new Date().toISOString(), dias: porMes ? null : days, mes: porMes ? mes : null, funnel, eventos, volumenDiario, costoPromedio });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -119,7 +119,7 @@ router.get('/', (_req, res) => {
 </section>
 
 <section>
-  <h2>Hoy / Este mes</h2>
+  <h2>Resumen del periodo <small id="kpi-nota"></small></h2>
   <div class="kpi-grid" id="kpis"></div>
 </section>
 
@@ -144,7 +144,7 @@ router.get('/', (_req, res) => {
 </section>
 
 <section>
-  <h2>Conversaciones (últimos <span id="dias-label-neg">30</span> días)</h2>
+  <h2>Conversaciones <small id="dias-label-neg">últimos 30 días</small></h2>
   <div class="kpi-grid" id="kpis-negocio"></div>
 </section>
 
@@ -185,14 +185,14 @@ function renderKpis(totales) {
   if (!totales.length) { el.innerHTML = '<div class="kpi"><div class="kpi-sub">Sin datos todavía — se registran a partir del primer llamado a Claude tras este deploy.</div></div>'; return; }
   el.innerHTML = totales.map(t => \`
     <div class="kpi">
-      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[t.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[t.agent] || t.agent} — hoy</div>
-      <div class="kpi-value">\${usd(t.costo_hoy)}</div>
-      <div class="kpi-sub">\${num(t.tokens_hoy)} tokens · \${num(t.llamadas_hoy)} llamadas</div>
+      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[t.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[t.agent] || t.agent} — costo</div>
+      <div class="kpi-value">\${usd(t.costo)}</div>
+      <div class="kpi-sub">\${num(t.tokens)} tokens · \${num(t.llamadas)} llamadas</div>
     </div>
     <div class="kpi">
-      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[t.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[t.agent] || t.agent} — este mes</div>
-      <div class="kpi-value">\${usd(t.costo_mes)}</div>
-      <div class="kpi-sub">\${num(t.tokens_mes)} tokens</div>
+      <div class="kpi-label"><span class="dot" style="background:\${AGENT_COLOR[t.agent] || '#94A3B8'}"></span>\${AGENT_LABEL[t.agent] || t.agent} — costo por llamada</div>
+      <div class="kpi-value">\${'$' + (Number(t.costoPorLlamada) || 0).toFixed(4)}</div>
+      <div class="kpi-sub">\${num(t.cacheRead)} tokens leídos de caché</div>
     </div>
   \`).join('');
 }
@@ -461,6 +461,8 @@ function render() {
   if (!DATA.tokens) return;
   const d = DATA.tokens, negocio = DATA.negocio;
   renderPeriodo(d);
+  document.getElementById('kpi-nota').textContent =
+    d.mes ? ('mes ' + d.mes) : ('últimos ' + d.dias + ' días');
   renderMensual(d);
 
   const diario = (d.diario || []).filter(visible);
@@ -469,7 +471,7 @@ function render() {
   renderChart(diario);
   renderTable(diario);
 
-  document.getElementById('dias-label-neg').textContent = negocio.dias;
+  document.getElementById('dias-label-neg').textContent = negocio.mes ? ('mes ' + negocio.mes) : ('últimos ' + negocio.dias + ' días');
   renderKpisNegocio((negocio.costoPromedio || []).filter(visible), (negocio.funnel || []).filter(visible));
   renderCategoryChart('chart-funnel', 'tooltip-funnel', (negocio.funnel || []).filter(visible), ESTADO_ORDER, ESTADO_LABEL);
   renderCategoryChart('chart-eventos', 'tooltip-eventos', (negocio.eventos || []).filter(visible), EVENT_ORDER, EVENT_LABEL);
@@ -483,7 +485,7 @@ async function load() {
 
     const [rTokens, rNegocio] = await Promise.all([
       fetch('/informe/tokens?' + q),
-      fetch('/informe/negocio?days=' + days),
+      fetch('/informe/negocio?' + q),
     ]);
     if (!rTokens.ok) throw new Error('HTTP ' + rTokens.status);
     if (!rNegocio.ok) throw new Error('HTTP ' + rNegocio.status);

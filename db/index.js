@@ -516,13 +516,32 @@ async function logTokenUsage(agent, model, usage, costUsd) {
   } catch (err) { console.error('Error logging token usage:', err.message); }
 }
 
+// Shared window predicate so every dashboard query can be scoped the same way,
+// by rolling days or by a calendar month, without each one growing its own
+// copy of the logic. Accepts a plain number for the old days-only callers.
+// Months and days both resolve on Bogota time: on the 31st, an evening still
+// inside business hours would otherwise land in the next month.
+function rango(opts, col) {
+  const o = (typeof opts === 'number' || opts == null) ? { days: opts } : opts;
+  const mes = String(o.month || '').trim();
+  if (/^\d{4}-\d{2}$/.test(mes)) {
+    return {
+      clause: `to_char(date_trunc('month', ${col} AT TIME ZONE 'America/Bogota'), 'YYYY-MM') = $1`,
+      params: [mes],
+    };
+  }
+  const days = Math.min(parseInt(o.days, 10) || 30, 90);
+  return { clause: `${col} > NOW() - ($1 || ' days')::interval`, params: [String(days)] };
+}
+
 // Buckets by Bogotá calendar day, not UTC day — created_at is UTC
 // (timestamptz), so grouping on date_trunc('day', created_at) directly
 // splits every Bogotá evening (7pm-midnight, still inside business hours)
 // into the "next day" bucket. Converting to America/Bogota before truncating
 // fixes that (confirmed live 2026-07-21: ~15-30 calls/day were landing in
 // the wrong bucket).
-async function getTokenUsageDaily(days = 30) {
+async function getTokenUsageDaily(opts = 30) {
+  const r = rango(opts, 'created_at');
   const res = await pool.query(
     `SELECT
        agent,
@@ -534,10 +553,10 @@ async function getTokenUsageDaily(days = 30) {
        SUM(cost_usd)::float AS cost_usd,
        COUNT(*)::int AS calls
      FROM token_usage
-     WHERE created_at > NOW() - ($1 || ' days')::interval
+     WHERE ${r.clause}
      GROUP BY agent, day
      ORDER BY day ASC`,
-    [days]
+    r.params
   );
   return res.rows;
 }
@@ -546,28 +565,30 @@ async function getTokenUsageDaily(days = 30) {
 // triaje_p1/p2/p3 -> triaje_completo -> escalado/cerrado). estado is
 // overwritten in place on every touch (no history table), so this is a
 // snapshot of where conversations stand today, not a true day-by-day funnel.
-async function getConversationFunnel(days = 30) {
+async function getConversationFunnel(opts = 30) {
+  const r = rango(opts, 'updated_at');
   const res = await pool.query(
     `SELECT agent, estado, COUNT(*)::int AS count
      FROM conversations
-     WHERE updated_at > NOW() - ($1 || ' days')::interval
+     WHERE ${r.clause}
      GROUP BY agent, estado
      ORDER BY agent, count DESC`,
-    [days]
+    r.params
   );
   return res.rows;
 }
 
 // Why conversations close or escalate, from the same transaction_logs the
 // weekly/daily reports already use — feeds the "motivos de cierre" chart.
-async function getEventBreakdown(days = 30) {
+async function getEventBreakdown(opts = 30) {
+  const r = rango(opts, 'created_at');
   const res = await pool.query(
     `SELECT agent, event_type, COUNT(*)::int AS count
      FROM transaction_logs
-     WHERE created_at > NOW() - ($1 || ' days')::interval
+     WHERE ${r.clause}
      GROUP BY agent, event_type
      ORDER BY agent, count DESC`,
-    [days]
+    r.params
   );
   return res.rows;
 }
@@ -576,16 +597,17 @@ async function getEventBreakdown(days = 30) {
 // conversation_id, so cost-per-conversation can only be an average over the
 // period (total cost / total conversations), not a true per-lead figure.
 // Bucketed by Bogotá day for the same reason getTokenUsageDaily is.
-async function getConversationVolumeDaily(days = 30) {
+async function getConversationVolumeDaily(opts = 30) {
+  const r = rango(opts, 'updated_at');
   const res = await pool.query(
     `SELECT agent,
        to_char(date_trunc('day', updated_at AT TIME ZONE 'America/Bogota'), 'YYYY-MM-DD') AS day,
        COUNT(DISTINCT conversation_id)::int AS conversaciones
      FROM conversations
-     WHERE updated_at > NOW() - ($1 || ' days')::interval
+     WHERE ${r.clause}
      GROUP BY agent, day
      ORDER BY day ASC`,
-    [days]
+    r.params
   );
   return res.rows;
 }
