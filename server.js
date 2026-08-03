@@ -208,6 +208,55 @@ app.get('/informe/triaje-completo', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// The individual conversations behind a root_cause bucket, with contact and
+// phone so they can actually be followed up. /informe only returns the counts,
+// which tells you 164 cases escalated as caso_complejo but not WHICH ones, so
+// nobody could act on the number.
+app.get('/informe/casos', async (req, res) => {
+  try {
+    const causa = String(req.query.root_cause || '').trim();
+    const rango = rangoFecha(req, 'i.created_at');
+    const params = [...rango.params];
+    let filtroCausa = '';
+    if (causa) { params.push(causa); filtroCausa = ` AND i.root_cause = $${params.length}`; }
+
+    const { rows } = await db.pool.query(`
+      SELECT
+        i.conversation_id, i.contact_id, i.agent, i.root_cause, i.outcome,
+        i.estado_final, i.drop_off_point, i.improvement_suggestion, i.created_at,
+        c.estado AS estado_actual, c.updated_at, c.triaje,
+        cc.contact_data
+      FROM conversation_insights i
+      LEFT JOIN conversations c ON c.conversation_id = i.conversation_id AND c.agent = i.agent
+      LEFT JOIN contact_cache cc ON cc.contact_id = i.contact_id
+      WHERE ${rango.clause}${filtroCausa}
+      ORDER BY i.created_at DESC
+      LIMIT 500
+    `, params);
+
+    const casos = rows.map(r => {
+      const cd = r.contact_data || {};
+      return {
+        conversation_id: r.conversation_id,
+        contact_id: r.contact_id,
+        agent: r.agent,
+        contacto: cd.firstName ? `${cd.firstName} ${cd.lastName || ''}`.trim() : (r.contact_id || '—'),
+        telefono: cd.phone || null,
+        sintoma: r.triaje?.triaje1 || null,
+        root_cause: r.root_cause,
+        outcome: r.outcome,
+        estado_final: r.estado_final,
+        estado_actual: r.estado_actual,
+        drop_off_point: r.drop_off_point,
+        sugerencia: r.improvement_suggestion,
+        fecha: r.created_at,
+      };
+    });
+
+    res.json({ total: casos.length, dias: rango.dias, dia: rango.dia, root_cause: causa || null, casos });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Token/cost usage — both agents, since Carolina and Luisa share this Postgres
 // instance (see db/index.js token_usage table). Not filtered by env.agentName
 // on purpose: this dashboard is meant to compare the two bots side by side.
