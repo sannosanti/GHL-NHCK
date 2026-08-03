@@ -564,7 +564,10 @@ function renderCasos() {
     const tel = c.telefono
       ? '<span class="mono">' + c.telefono + '</span>'
       : '<span class="muted" title="No está en la caché de contactos; buscar en GHL por contact_id">sin teléfono</span>';
-    const detalle = (c.drop_off_point || '') + (c.sugerencia ? '\n\nSUGERENCIA: ' + c.sugerencia : '');
+    // Double-escaped on purpose: this file is one big template literal, so a
+    // single backslash is consumed at evaluation time and the browser would
+    // receive a real newline, breaking the string.
+    const detalle = (c.drop_off_point || '') + (c.sugerencia ? '\\n\\nSUGERENCIA: ' + c.sugerencia : '');
     return '<tr>' +
       '<td><span class="rbadge ' + (pend ? 'rb-i2' : 'rb-no') + '">' + (pend ? 'PENDIENTE' : (c.estado_actual || '—')) + '</span></td>' +
       '<td><span class="agent-tag ' + c.agent + '">' + (AGENT_LABEL[c.agent] || c.agent) + '</span></td>' +
@@ -574,7 +577,7 @@ function renderCasos() {
       '<td class="mono muted">' + String(c.fecha || '').slice(0, 10) + '</td>' +
       '<td><button class="tbtn" onclick="toggleCaso(' + i + ')">ver</button>' +
         '<div class="msgs" id="caso' + i + '"><div class="mline">' +
-        (detalle ? detalle.replace(/</g, '&lt;').replace(/\n/g, '<br>') : 'Sin detalle registrado') +
+        (detalle ? detalle.replace(/</g, '&lt;').replace(/\\n/g, '<br>') : 'Sin detalle registrado') +
         '</div><div class="mline muted">contact_id: ' + (c.contact_id || '—') + '</div></div></td>' +
     '</tr>';
   }).join('');
