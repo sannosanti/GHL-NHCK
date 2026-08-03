@@ -218,6 +218,27 @@ router.get('/', (_req, res) => {
   <div class="alerts" id="alerts"></div>
 </section>
 
+<!-- The conversations behind each root_cause bucket. The panels say how many
+     closed for a given reason; this says WHICH ones, with a phone to call. -->
+<section>
+  <h2>Casos por motivo <small id="casos-nota"></small></h2>
+  <div class="filters" style="margin-bottom:0.75rem">
+    <label>Motivo
+      <select id="f-causa" onchange="render()"></select>
+    </label>
+    <label>Solo pendientes
+      <select id="f-pendientes" onchange="render()">
+        <option value="si" selected>Sí — aún sin resolver</option>
+        <option value="no">Todos</option>
+      </select>
+    </label>
+  </div>
+  <div class="tcard"><table>
+    <thead><tr><th>Estado</th><th>Bot</th><th>Contacto</th><th>Teléfono</th><th>Motivo consulta</th><th>Fecha</th><th>Detalle</th></tr></thead>
+    <tbody id="t-casos"></tbody>
+  </table></div>
+</section>
+
 <!-- Row 6: Leads calificados -->
 <section>
   <h2>Leads calificados sin convertir</h2>
@@ -432,7 +453,7 @@ window.toggle = function(i) {
 
 // Only the period filter needs the server; agent and day filters slice data
 // already in memory, so switching them is instant and costs no query.
-let DATA = { inf: null, leads: null, diario: null };
+let DATA = { inf: null, leads: null, diario: null, casos: null };
 
 function agenteFiltro() { return document.getElementById('f-agente').value; }
 function diaFiltro()    { return document.getElementById('f-dia').value; }
@@ -505,6 +526,64 @@ function renderDiario() {
 }
 
 // Re-renders from cached data. Called by the agent and day filters.
+// Cases are fetched once for the whole window with no root_cause filter, so
+// changing the motivo dropdown is instant. "Pendiente" means the conversation
+// is still sitting in escalado: the bot handed it over and nobody closed it.
+function renderCasos() {
+  const tbody = document.getElementById('t-casos');
+  const nota  = document.getElementById('casos-nota');
+  const sel   = document.getElementById('f-causa');
+  const todos = (DATA.casos && DATA.casos.casos) || [];
+
+  // Rebuild the motivo options from what the window actually contains, keeping
+  // the current pick when it survives the new window.
+  const conteo = {};
+  todos.forEach(c => { conteo[c.root_cause] = (conteo[c.root_cause] || 0) + 1; });
+  const causas = Object.keys(conteo).sort((a, b) => conteo[b] - conteo[a]);
+  const previo = sel.value;
+  sel.innerHTML = causas.map(c => '<option value="' + c + '">' + c + ' (' + conteo[c] + ')</option>').join('')
+    || '<option value="">sin datos</option>';
+  sel.value = causas.includes(previo) ? previo : (causas[0] || '');
+
+  const causa = sel.value;
+  const soloPendientes = document.getElementById('f-pendientes').value === 'si';
+  const esPendiente = c => c.estado_actual === 'escalado' || String(c.estado_actual || '').startsWith('triaje');
+
+  let filas = todos.filter(c => c.root_cause === causa).filter(c => agentesVisibles().includes(c.agent));
+  const pendientes = filas.filter(esPendiente).length;
+  if (soloPendientes) filas = filas.filter(esPendiente);
+
+  nota.textContent = causa
+    ? '— ' + pendientes + ' sin resolver de ' + todos.filter(c => c.root_cause === causa && agentesVisibles().includes(c.agent)).length + ' en el periodo'
+    : '';
+
+  if (!filas.length) { tbody.innerHTML = '<tr><td colspan="7" class="muted">Sin casos para este filtro</td></tr>'; return; }
+
+  tbody.innerHTML = filas.slice(0, 200).map((c, i) => {
+    const pend = esPendiente(c);
+    const tel = c.telefono
+      ? '<span class="mono">' + c.telefono + '</span>'
+      : '<span class="muted" title="No está en la caché de contactos; buscar en GHL por contact_id">sin teléfono</span>';
+    const detalle = (c.drop_off_point || '') + (c.sugerencia ? '\n\nSUGERENCIA: ' + c.sugerencia : '');
+    return '<tr>' +
+      '<td><span class="rbadge ' + (pend ? 'rb-i2' : 'rb-no') + '">' + (pend ? 'PENDIENTE' : (c.estado_actual || '—')) + '</span></td>' +
+      '<td><span class="agent-tag ' + c.agent + '">' + (AGENT_LABEL[c.agent] || c.agent) + '</span></td>' +
+      '<td>' + (c.contacto || '—') + '</td>' +
+      '<td>' + tel + '</td>' +
+      '<td>' + (c.sintoma || '—') + '</td>' +
+      '<td class="mono muted">' + String(c.fecha || '').slice(0, 10) + '</td>' +
+      '<td><button class="tbtn" onclick="toggleCaso(' + i + ')">ver</button>' +
+        '<div class="msgs" id="caso' + i + '"><div class="mline">' +
+        (detalle ? detalle.replace(/</g, '&lt;').replace(/\n/g, '<br>') : 'Sin detalle registrado') +
+        '</div><div class="mline muted">contact_id: ' + (c.contact_id || '—') + '</div></div></td>' +
+    '</tr>';
+  }).join('');
+}
+
+window.toggleCaso = function (i) {
+  document.getElementById('caso' + i).classList.toggle('open');
+};
+
 // States are overwritten in place, so a filtered board describes conversations
 // ACTIVE in the window shown in the state they hold today. Saying it out loud
 // beats letting the number read as history it cannot be.
@@ -523,6 +602,7 @@ function render() {
   renderDiario();
   renderPaneles(DATA.inf, DATA.leads);
   renderAlerts(DATA.inf, DATA.leads);
+  renderCasos();
   renderLeads(DATA.leads);
 }
 
@@ -535,14 +615,15 @@ async function load() {
     // would collapse to a single option if the server pre-filtered it, leaving
     // no way to switch back to another day.
     const q = 'days=' + days + (dia !== 'todos' ? '&day=' + encodeURIComponent(dia) : '');
-    const [r1, r2, r3] = await Promise.all([
+    const [r1, r2, r3, r4] = await Promise.all([
       fetch('/informe?' + q),
       fetch('/informe/triaje-completo?' + q),
       fetch('/informe/diario?days=' + days),
+      fetch('/informe/casos?' + q),
     ]);
     if (!r1.ok || !r2.ok || !r3.ok) throw new Error('HTTP ' + r1.status + '/' + r2.status + '/' + r3.status);
-    const [inf, leads, diario] = await Promise.all([r1.json(), r2.json(), r3.json()]);
-    DATA = { inf, leads, diario };
+    const [inf, leads, diario, casos] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json()]);
+    DATA = { inf, leads, diario, casos };
     document.getElementById('err').style.display = 'none';
 
     const dias = [...new Set([
