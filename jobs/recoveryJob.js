@@ -61,8 +61,27 @@ REGLAS:
 - Solo español
 - Este es el último mensaje — hazlo memorable`;
 
+const SYSTEM_PROMPT_ATTEMPT_3 = `Eres Carolina, asesora de NHC Kids. Escribes por WhatsApp.
+
+${CONOCIMIENTO_NHC}
+
+TU TAREA — MENSAJE DE RECUPERACIÓN (intento 3, al día siguiente):
+Escribe UN mensaje corto (1-2 oraciones) para un cliente que no respondió los dos mensajes anteriores, enviado al día siguiente.
+
+REGLAS:
+- Ya pasó un día: NO repitas el tono de los dos intentos previos, suena a insistencia
+- Abrí una puerta concreta y fácil de contestar: ofrecé resolver UNA duda puntual, o preguntá si prefiere que lo contacten en otro momento
+- Tono tranquilo y sin presión — si no responde, no se vuelve a escribir
+- NO menciones que es el último intento ni que le escribiste antes varias veces
+- NO menciones que eres IA
+- NO uses asteriscos ni negritas
+- Máximo 2 oraciones
+- Solo español`;
+
 async function generateRecoveryMessage(messages, attempt) {
-  const systemPrompt = attempt === 1 ? SYSTEM_PROMPT_ATTEMPT_1 : SYSTEM_PROMPT_ATTEMPT_2;
+  const systemPrompt = attempt === 1 ? SYSTEM_PROMPT_ATTEMPT_1
+    : attempt === 2 ? SYSTEM_PROMPT_ATTEMPT_2
+    : SYSTEM_PROMPT_ATTEMPT_3;
 
   // Build a short history summary for Claude to draw context from. Messages
   // whose only text is blank are dropped first: a media webhook that arrived
@@ -98,6 +117,10 @@ async function runRecoveryJob() {
   const now = new Date();
   const threeHoursAgo = new Date(now.getTime() - 3 * 60 * 60 * 1000);
   const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+  // Attempts 1 and 2 both land within six hours, i.e. the same afternoon. A
+  // lead who simply put the phone down never saw either. The third waits a
+  // full day so it arrives as a fresh contact, not as more of the same thread.
+  const oneDayAgo = new Date(now.getTime() - 26 * 60 * 60 * 1000);
 
   let rows;
   try {
@@ -109,6 +132,7 @@ async function runRecoveryJob() {
         AND (
           recovery_status IS NULL
           OR recovery_status = 'intento-1'
+          OR recovery_status = 'intento-2'
           OR (recovery_status = 'pospuesto' AND updated_at <= NOW() - INTERVAL '24 hours')
         )
     `, [...EXCLUDED_STATES, env.agentName]);
@@ -136,6 +160,8 @@ async function runRecoveryJob() {
         attempt = 1;
       } else if (recovery_status === 'intento-1' && updatedAt <= sixHoursAgo) {
         attempt = 2;
+      } else if (recovery_status === 'intento-2' && updatedAt <= oneDayAgo) {
+        attempt = 3;
       }
 
       if (!attempt) continue;
@@ -179,12 +205,21 @@ async function runRecoveryJob() {
           'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2 AND agent=$3',
           ['intento-1', conversation_id, env.agentName]
         );
-      } else {
+      } else if (attempt === 2) {
         await addTag(contact_id, 'recuperacion-2');
-        await addTag(contact_id, 'recuperacion-fallida');
         await pool.query(
           'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2 AND agent=$3',
           ['intento-2', conversation_id, env.agentName]
+        );
+      } else {
+        // Third and last. `recuperacion-fallida` and the drop-off analysis move
+        // here: marking the lead lost after attempt 2 was premature now that
+        // another message still goes out the following day.
+        await addTag(contact_id, 'recuperacion-3');
+        await addTag(contact_id, 'recuperacion-fallida');
+        await pool.query(
+          'UPDATE conversations SET recovery_status=$1 WHERE conversation_id=$2 AND agent=$3',
+          ['intento-3', conversation_id, env.agentName]
         );
         triggerAnalysis(conversation_id, contact_id, 'recovery_fallido');
       }
