@@ -55,9 +55,13 @@ async function fetchJson(url, options = {}) {
 // Walks the whole pipeline. GHL's search endpoint pages via startAfterId +
 // startAfter; when a page comes back short we are done.
 async function listarOportunidades() {
-  const todas = [];
+  // Keyed by id: if the cursor params ever stop advancing, the API replays the
+  // same page and a plain array would grow forever while hammering GHL. The map
+  // makes repeats visible, and a page that adds nothing new stops the walk.
+  const porId = new Map();
   let startAfter = null;
   let startAfterId = null;
+  let paginas = 0;
 
   for (;;) {
     const params = new URLSearchParams({
@@ -70,10 +74,26 @@ async function listarOportunidades() {
 
     const data = await fetchJson(`https://services.leadconnectorhq.com/opportunities/search?${params}`);
     const lote = data?.opportunities || [];
-    todas.push(...lote);
-    process.stdout.write(`\r  leídas ${todas.length} oportunidades...`);
+
+    const antes = porId.size;
+    for (const o of lote) if (o?.id) porId.set(o.id, o);
+    const nuevos = porId.size - antes;
+
+    paginas++;
+    process.stdout.write(`\r  leídas ${porId.size} oportunidades (${paginas} páginas)...`);
 
     if (lote.length < PAGE_SIZE) break;
+    if (nuevos === 0) {
+      process.stdout.write('\n');
+      console.warn('  La paginación dejó de avanzar (página repetida) — corto acá.');
+      break;
+    }
+    if (paginas > 200) {
+      process.stdout.write('\n');
+      console.warn('  Límite de 200 páginas alcanzado — corto por seguridad.');
+      break;
+    }
+
     const ultima = lote[lote.length - 1];
     startAfterId = ultima.id;
     startAfter = ultima.createdAt ? new Date(ultima.createdAt).getTime() : null;
@@ -81,7 +101,7 @@ async function listarOportunidades() {
     await sleep(DELAY_MS);
   }
   process.stdout.write('\n');
-  return todas;
+  return [...porId.values()];
 }
 
 async function main() {
