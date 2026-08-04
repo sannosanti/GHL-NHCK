@@ -385,8 +385,13 @@ async function buscarCitaPorInicio(inicioZoho, contactoID, finZoho) {
 
     const token = await getZohoAccessToken();
     const criteria = `(Inicio >= "${yyyy}-${mes}-${dd} 00:00:00" && Inicio <= "${yyyy}-${mes}-${dd} 23:59:59")`;
-    // A busy day runs past 70 records — getDisponibilidad's max_records=50 would
-    // silently drop the tail, and a dropped record here means a misrouted cita.
+    // max_records is passed for readability only — Creator ignores it on this
+    // report. Probed on 2026-08-04 against a 72-record day: 5, 50, 200 and
+    // omitting it all returned the same 72. Which also means getDisponibilidad's
+    // max_records=50 has never truncated anything, contrary to how it reads.
+    // The real ceiling is Creator's own page size, and nothing here handles the
+    // record_cursor pagination that would be needed past it — busiest day seen
+    // so far is 72, so that is a latent limit rather than a live bug.
     const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=200`;
     const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
     const data = await res.json();

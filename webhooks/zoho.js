@@ -41,6 +41,24 @@ const MESES_ZOHO = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug
 // and the bare-string form into an ID, or '' when the field is genuinely empty.
 const VALORES_VACIOS = new Set(['', 'null', 'undefined', 'none', '-none-']);
 
+// GHL rejects a calendar title containing a line break with
+// `422 Title must be a valid text`, and Zoho's Observaciones is a free-text
+// field: it holds pasted Google Meet invitations, payment arrangements, whole
+// paragraphs. This only became reachable once the sync started reading the
+// record back from Citas_Report — before that Observaciones never arrived and
+// every title was a bare "Cita". Found while migrating the historical blocks,
+// where 10 of 271 were refused for exactly this.
+//
+// Flattening whitespace keeps the useful head of the note instead of losing the
+// entry, and the cap keeps a pasted invitation from becoming the title.
+const LARGO_MAXIMO_TITULO = 100;
+
+function tituloGHL(partes, porDefecto = 'Bloqueo') {
+  const texto = partes.filter(Boolean).join(' - ').replace(/\s+/g, ' ').trim();
+  if (!texto) return porDefecto;
+  return texto.length > LARGO_MAXIMO_TITULO ? `${texto.slice(0, LARGO_MAXIMO_TITULO - 3)}...` : texto;
+}
+
 function refZoho(campo) {
   const raw = campo && typeof campo === 'object' ? campo.ID : campo;
   const valor = String(raw ?? '').trim();
@@ -120,7 +138,7 @@ async function zohoCitaWebhookHandler(req, res) {
     const obs = b.Observaciones || registro?.Observaciones || '';
 
     if (!contactoRef) {
-      const title = obs ? `${tipo} - ${obs}` : tipo;
+      const title = tituloGHL([tipo, obs], tipo || 'Bloqueo');
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title });
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
@@ -131,7 +149,7 @@ async function zohoCitaWebhookHandler(req, res) {
       console.error(contacto
         ? `ZOHO-CITA: contacto ${contactoRef} existe pero no tiene Movil — creando como bloqueo`
         : `ZOHO-CITA: no se encontró el contacto Zoho ${contactoRef} — creando como bloqueo`);
-      const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: obs ? `${tipo} - ${obs}` : tipo });
+      const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
@@ -139,12 +157,12 @@ async function zohoCitaWebhookHandler(req, res) {
     const ghlContactId = await ghl.buscarOCrearContactoPorTelefono(contacto.Movil, contacto.Nombre_Completo);
     if (!ghlContactId) {
       console.error('ZOHO-CITA: no se pudo resolver contacto GHL para', contacto.Movil, '— creando como bloqueo');
-      const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: obs ? `${tipo} - ${obs}` : tipo });
+      const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
 
-    const title = `${tipo} - ${contacto.Nombre_Completo || 'NHC'}`;
+    const title = tituloGHL([tipo, contacto.Nombre_Completo || 'NHC'], 'Cita');
     const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title });
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));
   } catch (err) {
@@ -155,4 +173,4 @@ async function zohoCitaWebhookHandler(req, res) {
   }
 }
 
-module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho };
+module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho, tituloGHL };
