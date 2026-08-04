@@ -8,9 +8,14 @@ const ghl = require('../services/ghl');
 // deliberately separate from the personal calendars already in GHL. Both
 // Carolina (NHCK) and Luisa (NHC) share this same Zoho calendar and GHL
 // location, so this single webhook covers both brands.
+// Zoho Consultor ID -> GHL calendar ID. Both sides audited live on 2026-08-04
+// against the location's 19 calendars, so the comment names the GHL calendar the
+// entry actually lands in — not the consultant it came from. They diverge: Juan
+// Esteban Tamayo's citas go to "Pre-evaluación NHC" and the "Mapeos" resource to
+// "Neuromapeo NHC", which read as mismatches until you know they are deliberate.
 const CALENDARIOS = {
-  '3572150000004930155': 'MvnOMgGMs69y6Ewix22r', // Juan Esteban Tamayo
-  '3572150000005140253': 'iTdbaauOdCrcNHwsIe2h', // Mapeos
+  '3572150000004930155': 'MvnOMgGMs69y6Ewix22r', // Juan Esteban Tamayo -> Pre-evaluación NHC
+  '3572150000005140253': 'iTdbaauOdCrcNHwsIe2h', // Mapeos -> Neuromapeo NHC
   '3572150000004871148': 'M1fNQqz0yn8LH1op8I4s', // Neurotecnologías
   '3572150000009238003': 'pLhcRJMTzeTjhrv8dqDY', // Katerine Bolivar Uribe
   '3572150000004912180': 'vvb8taavISxlgeGoXd78', // Santiago Gallego (Asesorias y Cursos)
@@ -84,24 +89,35 @@ async function zohoCitaWebhookHandler(req, res) {
       ID: b.ID,
     }));
 
-    const consultorID = refZoho(b.Consultor);
-    const calendarId = CALENDARIOS[consultorID] || CALENDAR_GENERAL;
-    if (!consultorID) {
-      console.log('ZOHO-CITA: entrada sin Consultor — va a CALENDAR_GENERAL');
-    } else if (!CALENDARIOS[consultorID]) {
-      console.error(
-        'ZOHO-CITA: Consultor sin calendario mapeado, cae en CALENDAR_GENERAL —',
-        JSON.stringify(b.Consultor)
-      );
-    }
-
     const startISO = parseZohoDateTime(b.Inicio);
     const endISO = parseZohoDateTime(b.Fin);
     if (!startISO) { console.error('ZOHO-CITA: no se pudo interpretar Inicio:', b.Inicio); return; }
 
-    const tipo = b.Tipo || 'Cita';
-    const obs = b.Observaciones || '';
     const contactoRef = refZoho(b.Contacto);
+
+    // The payload carries no Consultor, so the record is read back from
+    // Citas_Report to recover it — see buscarCitaPorInicio in services/zoho.js.
+    // Tipo and Observaciones come from there too: without them every entry was
+    // titled a bare "Cita", blocks included.
+    const registro = await zoho.buscarCitaPorInicio(b.Inicio, contactoRef, b.Fin);
+    const consultorID = refZoho(b.Consultor) || refZoho(registro?.Consultor);
+    const calendarId = CALENDARIOS[consultorID] || CALENDAR_GENERAL;
+
+    if (!consultorID) {
+      console.log(registro
+        ? `ZOHO-CITA: la cita ${registro.ID} no tiene Consultor — va a CALENDAR_GENERAL`
+        : 'ZOHO-CITA: no se encontró el registro en Citas_Report — va a CALENDAR_GENERAL');
+    } else if (!CALENDARIOS[consultorID]) {
+      console.error(
+        'ZOHO-CITA: Consultor sin calendario mapeado, cae en CALENDAR_GENERAL —',
+        JSON.stringify(registro?.Consultor || b.Consultor)
+      );
+    } else {
+      console.log(`ZOHO-CITA: ruteada a ${registro?.Consultor?.display_value || consultorID} (calendario ${calendarId})`);
+    }
+
+    const tipo = b.Tipo || registro?.Tipo || 'Cita';
+    const obs = b.Observaciones || registro?.Observaciones || '';
 
     if (!contactoRef) {
       const title = obs ? `${tipo} - ${obs}` : tipo;

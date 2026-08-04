@@ -349,6 +349,92 @@ async function getContactoPorId(contactoID) {
   } catch (err) { console.error('Error obteniendo contacto Zoho:', err.message); return null; }
 }
 
+// ─── LOOKUP DE CITA (para recuperar el Consultor) ─────────────────────────────
+// The Creator workflow webhook posts only Contacto, Inicio, Fin and Duraci_n —
+// no Consultor — so an entry cannot be routed to its therapist's calendar from
+// the payload alone. Confirmed on 2026-08-03: 15 of 15 payloads carried that
+// same key set, and 100% of citas landed on the fallback calendar while the ten
+// mapped therapist calendars stayed empty.
+//
+// Citas_Report does expose Consultor as {ID, display_value} — with IDs matching
+// the CALENDARIOS map — plus Tipo and Observaciones. Reading the record back
+// recovers the routing entirely on our side, so the clinic does not have to
+// change their Creator workflow.
+const MESES_A_NUMERO = {
+  Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06',
+  Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
+};
+
+// Creator returns "04-Aug-2026 13:00:00", which does not sort as text. Rewrites
+// it to "2026-08-04 13:00:00" so plain string comparison orders it correctly.
+function ordenarPorAddedTime(cita) {
+  const m = String(cita?.Added_Time || '').match(/^(\d{2})-(\w{3})-(\d{4}) (\d{2}:\d{2}:\d{2})$/);
+  if (!m) return null;
+  const [, dd, mmm, yyyy, hora] = m;
+  const mes = MESES_A_NUMERO[mmm];
+  return mes ? `${yyyy}-${mes}-${dd} ${hora}` : null;
+}
+
+async function buscarCitaPorInicio(inicioZoho, contactoID, finZoho) {
+  try {
+    const m = String(inicioZoho || '').match(/^(\d{2})-(\w{3})-(\d{4})/);
+    if (!m) return null;
+    const [, dd, mmm, yyyy] = m;
+    const mes = MESES_A_NUMERO[mmm];
+    if (!mes) return null;
+
+    const token = await getZohoAccessToken();
+    const criteria = `(Inicio >= "${yyyy}-${mes}-${dd} 00:00:00" && Inicio <= "${yyyy}-${mes}-${dd} 23:59:59")`;
+    // A busy day runs past 70 records — getDisponibilidad's max_records=50 would
+    // silently drop the tail, and a dropped record here means a misrouted cita.
+    const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=200`;
+    const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
+    const data = await res.json();
+
+    let candidatos = (data.data || []).filter(c => c.Inicio === inicioZoho);
+    if (candidatos.length === 1) return candidatos[0];
+    if (!candidatos.length) return null;
+
+    // Several therapists legitimately start at the same minute, so narrow by the
+    // contact and then by the end time. If it is still ambiguous, give up: the
+    // General calendar is wrong but recoverable, the wrong therapist's is not.
+    if (contactoID) {
+      const porContacto = candidatos.filter(c => (c.Contacto?.ID || '') === contactoID);
+      if (porContacto.length === 1) return porContacto[0];
+      if (porContacto.length) candidatos = porContacto;
+    }
+    if (finZoho) {
+      const porFin = candidatos.filter(c => c.Fin === finZoho);
+      if (porFin.length === 1) return porFin[0];
+      if (porFin.length) candidatos = porFin;
+    }
+
+    // Two therapists booked into the same slot are indistinguishable from the
+    // payload — it carries only Contacto, Inicio, Fin and Duraci_n, and a block
+    // has no Contacto to break the tie (three entries shared 04-Aug 13:00-14:00
+    // on the day this was written). The webhook fires on creation, so the record
+    // that triggered it is the newest of the candidates. That is a heuristic, not
+    // a guarantee, so it says out loud which one it picked and what it passed
+    // over: a misrouted cita has to be traceable from the log alone.
+    const ordenables = candidatos.filter(c => ordenarPorAddedTime(c) !== null);
+    if (ordenables.length !== candidatos.length) {
+      console.error(`[zoho-cita] ${candidatos.length} citas comparten Inicio ${inicioZoho} y falta Added_Time para desempatar`);
+      return null;
+    }
+    ordenables.sort((a, b) => ordenarPorAddedTime(b).localeCompare(ordenarPorAddedTime(a)));
+    const elegida = ordenables[0];
+    console.warn(
+      `[zoho-cita] ${candidatos.length} citas comparten Inicio ${inicioZoho}; se toma la más reciente ` +
+      `(ID ${elegida.ID}, ${elegida.Consultor?.display_value || 'sin consultor'}, agregada ${elegida.Added_Time}). ` +
+      `Descartadas: ${ordenables.slice(1).map(c => `${c.ID}/${c.Consultor?.display_value || 'sin consultor'}`).join(', ')}`
+    );
+    return elegida;
+  } catch (err) {
+    console.error('Error buscando cita en Zoho:', err.message);
+    return null;
+  }
+}
+
 // ─── DISPONIBILIDAD ───────────────────────────────────────────────────────────
 async function getDisponibilidad(fechaISO) {
   try {
@@ -505,6 +591,7 @@ module.exports = {
   crearAnamnesisNinos,
   crearCitasCalendario,
   getContactoPorId,
+  buscarCitaPorInicio,
   getDisponibilidad,
   calcularSlotsLibres,
 };
