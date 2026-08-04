@@ -312,8 +312,22 @@ async function buscarOCrearContactoPorTelefono(phone, nombre) {
   return data?.contact?.id || null;
 }
 
+// GHL answers a rejected appointment or block with an ordinary JSON body and a
+// non-2xx status, so returning that body unchecked reads exactly like success.
+// That is how `ZOHO-CITA: appointment creado en GHL: {...statusCode:500...}`
+// reached the logs on 2026-08-03: two citas hit `DEADLINE_EXCEEDED`, were never
+// created, and the line above them claimed they were. Throwing is what lets the
+// webhook handler's catch report the loss — with enough context to recreate the
+// entry by hand, since nothing retries it.
+function verificarRespuestaGHL(res, data, accion, { calendarId, startISO }) {
+  if (res.ok) return data;
+  throw new Error(
+    `${accion} falló con HTTP ${res.status} — calendario=${calendarId} inicio=${startISO} respuesta=${JSON.stringify(data)}`
+  );
+}
+
 async function crearCitaEnCalendario({ contactId, calendarId, startISO, endISO, title }) {
-  const { data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/appointments', {
+  const { res, data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/appointments', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -322,14 +336,14 @@ async function crearCitaEnCalendario({ contactId, calendarId, startISO, endISO, 
       ignoreFreeSlotValidation: true, ignoreDateRange: true, toNotify: false,
     }),
   });
-  return data;
+  return verificarRespuestaGHL(res, data, 'crearCitaEnCalendario', { calendarId, startISO });
 }
 
 // For Zoho Citas entries with no Contacto (Bloqueo/Salida/Entrada/Descanso/
 // Almuerzo/Festivo) — GHL's block-slots endpoint needs no contactId, unlike
 // the appointments one above (verified live 2026-07-24).
 async function crearBloqueoEnCalendario({ calendarId, startISO, endISO, title }) {
-  const { data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/block-slots', {
+  const { res, data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/block-slots', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -337,7 +351,7 @@ async function crearBloqueoEnCalendario({ calendarId, startISO, endISO, title })
       startTime: startISO, endTime: endISO, title: title || 'Bloqueo NHC',
     }),
   });
-  return data;
+  return verificarRespuestaGHL(res, data, 'crearBloqueoEnCalendario', { calendarId, startISO });
 }
 
 module.exports = {

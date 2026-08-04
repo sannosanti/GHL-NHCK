@@ -132,7 +132,10 @@ async function zohoCitaWebhookHandler(req, res) {
     const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title });
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));
   } catch (err) {
-    console.error('Error zohoCitaWebhookHandler:', err.message);
+    // Nothing retries a cita: the 200 went out before any of this ran, so Zoho
+    // considers it delivered. This line is the only trace the clinic gets that
+    // an entry never reached GHL — it has to name the loss, not just the error.
+    console.error('ZOHO-CITA: la entrada NO se sincronizó a GHL —', err.message);
   }
 }
 
