@@ -1,2 +1,8 @@
 node_modules
 .env
+
+# Evaluation data. The gold set is derived from real patient conversations and
+# carries clinical detail and names that regex scrubbing does not remove — it must
+# never reach the remote. eval/out holds model replies about the same patients.
+eval/gold/
+eval/out/

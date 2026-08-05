@@ -1,0 +1,59 @@
+{
+  "_comment": "Generado por: node eval/webhook-parity.test.js --update. Regeneralo SOLO después de revisar que state-spec.js sigue describiendo el comportamiento nuevo.",
+  "updatedAt": "2026-08-05T06:46:17.225Z",
+  "file": "webhooks/ghl.js",
+  "blocks": {
+    "NOMBRE_PADRE": {
+      "line": 146,
+      "sha256": "9cbb4572dc49f6b7"
+    },
+    "CIUDAD_VALIDA": {
+      "line": 161,
+      "sha256": "960485c80ee718d3"
+    },
+    "TRIAJE_P1": {
+      "line": 170,
+      "sha256": "dec443bbe8d26ed1"
+    },
+    "TRIAJE_P2": {
+      "line": 181,
+      "sha256": "3ea34eaace36a5cf"
+    },
+    "TRIAJE_P3": {
+      "line": 182,
+      "sha256": "06706e5d7c9e0473"
+    },
+    "TRIAJE_COMPLETO": {
+      "line": 183,
+      "sha256": "19642604762e2606"
+    },
+    "CITA_CONFIRMADA": {
+      "line": 190,
+      "sha256": "ce4cb09b9ff9d20a"
+    },
+    "CIUDAD_NO_DISPONIBLE": {
+      "line": 322,
+      "sha256": "db76f8a3bffae18c"
+    },
+    "SIN_PRESUPUESTO": {
+      "line": 336,
+      "sha256": "b2b692f13ceba0c0"
+    },
+    "FUERA_SEGMENTO": {
+      "line": 350,
+      "sha256": "20c0381fded21085"
+    },
+    "NHC_ADULTOS": {
+      "line": 366,
+      "sha256": "7a650610e71f1b72"
+    },
+    "ESCALAR": {
+      "line": 381,
+      "sha256": "1c615db8f8b9665b"
+    },
+    "POSPONER": {
+      "line": 400,
+      "sha256": "88a5b99e90db6132"
+    }
+  }
+}

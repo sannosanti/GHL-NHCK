@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:eval": "node eval/graders.test.js && node eval/pipeline.test.js && node eval/extract.test.js && node eval/webhook-parity.test.js"
   },
   "dependencies": {
     "express": "^4.18.2",
