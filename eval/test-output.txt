@@ -1,0 +1,362 @@
+
+> ghl-nhck@1.0.0 test:eval
+> node eval/graders.test.js && node eval/pipeline.test.js && node eval/extract.test.js && node eval/webhook-parity.test.js
+
+
+TAGS
+  ok   1. respuesta limpia con el tag esperado pasa todas las métricas
+  ok   2. ningún tag sobrevive al texto que ve el paciente
+  ok   3. detecta tag inventado (el webhook no lo rutearía)
+  ok   4. detecta tag requerido faltante
+  ok   5. detecta tag prohibido emitido
+  ok   6. el formato con payload también se acepta como requerido
+  ok   7. detecta payload vacío (escribiría un triaje vacío en la base)
+  ok   8. detecta fuga de marcador al paciente
+
+ESCALAMIENTO — matriz de confusión
+  ok   9. TP: escala cuando debe
+  ok   10. FN: NO escala cuando debe (falla clínica)
+  ok   11. FP: escala cuando NO debe (condición crónica, regla del 2026-08-04)
+  ok   12. TN: no escala y era correcto no escalar
+  ok   13. REGLA DE DENOMINADOR: turno sin decisión de escalamiento queda EXCLUIDO
+
+HIGIENE DEL ESCALAMIENTO (métrica separada)
+  ok   14. detecta pregunta en el mismo turno que escala
+  ok   15. detecta falta de la ventana de PRÓXIMO CONTACTO
+  ok   16. la higiene NO contamina la matriz de confusión
+
+FIDELIDAD AL FLUJO
+  ok   17. detecta convenio proactivo
+  ok   18. NO marca convenio si el cliente lo mencionó primero
+  ok   19. detecta pregunta repetida entre turnos
+  ok   20. NO marca preguntas distintas como repetidas
+  ok   21. detecta mezcla de tuteo y voseo
+  ok   22. NO marca registro consistente
+  ok   23. detecta asteriscos (sobre el texto crudo, antes del strip de producción)
+  ok   24. detecta que admite ser IA
+  ok   25. detecta más de 2 párrafos
+  ok   26. NO marca dos párrafos
+
+MÁQUINA DE ESTADOS (verificada contra webhooks/ghl.js:141-420)
+  ok   27. nuevo + NOMBRE_PADRE -> triaje_p1  (ghl.js:148)
+  ok   28. REGRESIÓN: CIUDAD_VALIDA NO cambia el estado  (ghl.js:160-163)
+  ok   29. TRIAJE_P1 -> triaje_p2  (ghl.js:172)
+  ok   30. TRIAJE_P2 -> triaje_p3  (ghl.js:181)
+  ok   31. REGRESIÓN: TRIAJE_P3 solo NO avanza  (ghl.js:182)
+  ok   32. CITA_CONFIRMADA -> esperando_pago  (ghl.js:257)
+  ok   33. los tres cierres -> cerrado  (ghl.js:326/340/354)
+  ok   34. REGRESIÓN: NHC_ADULTOS -> triaje_p1, NO escalado  (ghl.js:370)
+  ok   35. ESCALAR -> escalado  (ghl.js:387)
+  ok   36. REGRESIÓN: precedencia — los cierres ganan sobre ESCALAR
+  ok   37. precedencia: CITA_CONFIRMADA gana sobre todo lo demás
+  ok   38. REGRESIÓN: POSPONER NO cambia el estado  (ghl.js:404)
+  ok   39. el acumulador corre antes que las ramas de retorno temprano
+  ok   40. sin tags el estado no avanza
+
+CORTE DEL REPLAY
+  ok   41. POSPONER corta el replay aunque el estado no cambie
+  ok   42. REGRESIÓN: NHC_ADULTOS NO corta — la conversación sigue como Luisa
+  ok   43. escalado / cerrado / esperando_pago cortan el replay
+
+EFECTOS Y CONTEXTO POR COMBINACIÓN (state-spec)
+  ok   44. el acumulador aplica TODAS las reglas que matchean, no solo la última
+  ok   45. la rama sobrescribe el estado pero NO borra los efectos del acumulador
+  ok   46. CITA_CONFIRMADA arrastra el efecto de cobro, marcado como financiero
+  ok   47. NHC_ADULTOS deja el contexto derivado y NO corta
+  ok   48. POSPONER conserva lo acumulado y corta igual
+
+48/48 OK
+
+PUNTO 1 — payloads del contexto
+  ok   1. normalizeExpectedTags acepta string y objeto
+  ok   2. REGRESIÓN: el gold set con payloads llena el contexto de verdad
+  ok   3. sin payload el contexto queda vacío (el modo que teníamos)
+
+PUNTO 2 — las repeticiones no son pacientes independientes
+  ok   4. toClusters colapsa las repeticiones en UN cluster por conversación
+  ok   5. REGRESIÓN: los positivos clínicos se cuentan una vez, no una por repetición
+  ok   6. el bootstrap clusterizado da un IC más ancho que Wilson sobre turnos pooleados
+
+PUNTO 3 — comparación pareada
+  ok   7. McNemar solo usa los pares discordantes
+  ok   8. McNemar identifica EN QUÉ conversaciones difieren
+  ok   9. McNemar detecta una diferencia sistemática que el solapamiento de IC no vería
+  ok   10. el bootstrap pareado evalúa ambos modelos sobre las MISMAS conversaciones
+
+PUNTO 4 — proyección de costo
+  ok   11. REGRESIÓN: sin stratum_frequencies NO se proyecta factura
+  ok   12. la ponderación corrige el sesgo del muestreo estratificado
+  ok   13. cobertura parcial se renormaliza y se declara
+
+PUNTO 5 — el gate falla cerrado
+  ok   14. con muestra y desempeño suficientes, PASA
+  ok   15. REGRESIÓN: recall clínico 100% con muestra insuficiente NO pasa
+  ok   16. un solo FN clínico hace fallar el gate
+  ok   17. errores de API en casos clínicos hacen fallar el gate
+  ok   18. una tasa de tags por debajo del umbral hace fallar el gate
+
+INDETERMINADO — no aplica ≠ aprobado
+  ok   21. un eje indeterminado sale del denominador, no cuenta como aprobado
+
+DISPONIBILIDAD DE pending_payment — bloquea el gate financiero
+  ok   22. si pending_payment NO se pudo consultar, el resultado es BLOQUEADO
+  ok   22b. TRES resultados distintos: PASA, NO PASA y BLOQUEADO
+  ok   22c. una falla medida gana sobre un bloqueo
+  ok   22d. muestra clínica insuficiente es BLOQUEO, un FN clínico es FALLA
+  ok   23. con el dato disponible y sin FP, el gate financiero no bloquea
+  ok   24. `undefined` cuenta como no disponible, no como disponible
+
+PUNTO 8 — cuatro ejes independientes
+  ok   19. tags correctos + estado incorrecto se reportan por separado
+  ok   20. compare() aparea por id de conversación
+
+27/27 OK
+
+ESTRATOS — asignación y solapamiento
+  ok   1. cada estrato define predicado SQL Y su equivalente en JS
+  ok   2. una conversación que cumple clínico Y precio queda en clínico
+  ok   3. TDAH + precio queda en no_escalar_clinico, no en precio
+  ok   4. TDAH junto con autismo NO cae en no_escalar_clinico
+  ok   5. escalado sin mención clínica cae en escalado_otro
+  ok   6. una conversación que no cumple ningún estrato devuelve null
+  ok   7. happy_path exige 6 mensajes o más
+
+SQL GENERADO — exclusión de estratos anteriores
+  ok   8a. el primer estrato no excluye a nadie
+  ok   8b. cada estrato excluye a TODOS los anteriores
+  ok   8c. ningún estrato se excluye a sí mismo
+  ok   8d. ningún estrato excluye a los POSTERIORES
+  ok   8e. el constructor es determinista y depende solo del índice
+  ok   8e-bis. ALARMA ARQUITECTÓNICA: dos usos de stratumWhere en el extractor
+  ok   8f. el predicado exclusivo en JS equivale a "primera coincidencia gana"
+  ok   8g. REGRESIÓN: con 15 casos válidos y cuota 20, recupera 15, no 0
+
+FUENTES — degradación acotada, sin volver a la tabla base
+  ok   8l. el fallback es una VISTA de eval_ro, nunca public.conversations
+
+DECISIÓN DE FALLBACK: FUENTE + FASE, NO SOLO SQLSTATE
+
+ATRIBUCIÓN POSITIVA Y SANITIZACIÓN COMPLETA
+  ok   10e. sanitizarError limpia mensaje Y stack, y no propaga cause
+  ok   10g. ningún módulo de eval/ toca un error crudo fuera de sanitizarError()
+  ok   10h. el escáner de 10g detecta una fuga inyectada
+
+DEDUPLICACIÓN Y CUOTAS
+  ok   8. la misma conversación en dos consultas no se duplica
+  ok   9. la cuota corta el estrato y lo demás se descarta
+  ok   10. un estrato que no alcanza la cuota lo declara explícitamente
+  ok   11. una conversación con menos de 2 turnos de usuario se descarta y NO consume cuota
+
+FRECUENCIAS Y RENORMALIZACIÓN
+  ok   12. las frecuencias son proporciones del total y el resto queda explícito
+  ok   13. si los estratos suman MÁS que el total, FALLA en vez de renormalizar
+  ok   14. total cero devuelve null, no una división por cero
+
+pending_payment — TRES estados
+  ok   15. la vista reporta pendiente → true
+  ok   16. el LEFT JOIN no encontró fila → false (es conocimiento, no ignorancia)
+  ok   17. REGRESIÓN: la columna ausente → undefined, NUNCA false
+  ok   18. el dataset propaga los tres estados sin colapsarlos
+
+TURNOS Y payload hints
+  ok   19. los mensajes se convierten en turnos de usuario con su respuesta real
+  ok   20. los mensajes vacíos se descartan antes de aparear
+  ok   21. el contenido en bloques se aplana a texto
+  ok   22. _payload_hints sale de la columna triaje y va anonimizado
+
+ANONIMIZACIÓN
+  ok   23. teléfono, email y URL se redactan
+  ok   24. el +57 y los separadores también caen
+  ok   25. NO redacta números cortos legítimos
+  ok   26. el NOMBRE permanece → se marca redacción manual pendiente
+
+FUGA DE IDENTIFICADORES
+  ok   27. conversation_id y contact_id entran al transformador y NO salen en el JSON
+
+VALIDACIÓN DEL GOLD SET
+  ok   28. un dataset sin etiquetar se rechaza
+  ok   29. un dataset sin redacción manual de nombres se rechaza
+  ok   30. un dataset vacío se rechaza
+  ok   31. sin stratum_frequencies advierte pero NO bloquea
+  ok   32. un dataset completo pasa
+  ok   33. sin pending_payment el dataset corre pero marca bloqueo del gate financiero
+  ok   34. el metadato ausente cuenta como NO disponible
+  ok   8q. PARIDAD: cambiar de fuente no altera estratos ni casos clínicos
+  ok   8h. vista principal completa → se usa y el dato financiero está
+  ok   8o. un fallo tras iniciar la extracción NO genera dataset parcial
+  ok   9e. TIMEOUT en la principal → aborta, y NO se lee como degradación financiera
+  ok   10b. un objeto DESCONOCIDO tampoco degrada: exclusivo o nada
+  ok   10c. si el error nombra VARIOS objetos, todos deben ser exclusivos
+  ok   10d. err.table/err.schema ganan sobre el mensaje y se marcan como estructurados
+  ok   8i. principal ausente y básica disponible → fallback, con el savepoint revertido
+  ok   8j. principal con PERMISO DENEGADO → sí hace fallback
+  ok   8n. la principal responde al inicio pero falla DURANTE la extracción
+  ok   9a. 42501 en la vista PRINCIPAL → degrada a la básica
+  ok   9c. 42P01 en la vista PRINCIPAL → degrada a la básica
+  ok   9g. el rollback vuelve al savepoint correcto y no hay BEGIN/COMMIT propio
+  ok   9j. los registros técnicos no llevan datos de pacientes
+  ok   9h. la segunda extracción corre sobre el MISMO snapshot
+  ok   8m. ambas vistas ausentes → EnvironmentError, NO un dataset degradado
+  ok   9b. 42501 en la vista BÁSICA → error de entorno, no hay a qué degradar
+  ok   9f. cada fallo registra fuente, SQLSTATE, fase, permiso y motivo
+  ok   9i. si las dos fuentes fallan no se genera archivo
+  ok   10f. el EnvironmentError no transporta nada crudo, ni en message ni en stack ni en JSON
+  ok   8p. el metadato financiero es consistente con la fuente realmente usada
+  ok   9d. objeto COMPARTIDO ausente → error de entorno aunque el SQLSTATE degrade
+  ok   10a. sin objeto identificable NO se degrada, aunque el SQLSTATE lo permita
+  ok   8k. principal con TIMEOUT o SQL inválido → NO hace fallback
+
+70/70 OK
+
+NIVEL 1 — alarma de deriva en webhooks/ghl.js
+  ok   bloque `NOMBRE_PADRE` sin cambios
+  ok   bloque `CIUDAD_VALIDA` sin cambios
+  ok   bloque `TRIAJE_P1` sin cambios
+  ok   bloque `TRIAJE_P2` sin cambios
+  ok   bloque `TRIAJE_P3` sin cambios
+  ok   bloque `TRIAJE_COMPLETO` sin cambios
+  ok   bloque `CITA_CONFIRMADA` sin cambios
+  ok   bloque `CIUDAD_NO_DISPONIBLE` sin cambios
+  ok   bloque `SIN_PRESUPUESTO` sin cambios
+  ok   bloque `FUERA_SEGMENTO` sin cambios
+  ok   bloque `NHC_ADULTOS` sin cambios
+  ok   bloque `ESCALAR` sin cambios
+  ok   bloque `POSPONER` sin cambios
+
+NIVEL 2 — contrato semántico (resolveStateTransition)
+  ok   CITA_CONFIRMADA → estado
+  ok   CITA_CONFIRMADA → continuidad del replay
+  ok   CITA_CONFIRMADA → regla ganadora
+  ok   CITA_CONFIRMADA → cambios de contexto
+  ok   CITA_CONFIRMADA → efectos externos
+  ok   CITA_CONFIRMADA → riesgo financiero declarado
+  ok   CITA_CONFIRMADA + ESCALAR → estado
+  ok   CITA_CONFIRMADA + ESCALAR → continuidad del replay
+  ok   CITA_CONFIRMADA + ESCALAR → regla ganadora
+  ok   CITA_CONFIRMADA + ESCALAR → cambios de contexto
+  ok   CITA_CONFIRMADA + ESCALAR → efectos externos
+  ok   CITA_CONFIRMADA + ESCALAR → riesgo financiero declarado
+  ok   CITA_CONFIRMADA + CIUDAD_NO_DISPONIBLE → estado
+  ok   CITA_CONFIRMADA + CIUDAD_NO_DISPONIBLE → continuidad del replay
+  ok   CITA_CONFIRMADA + CIUDAD_NO_DISPONIBLE → regla ganadora
+  ok   CITA_CONFIRMADA + CIUDAD_NO_DISPONIBLE → cambios de contexto
+  ok   CITA_CONFIRMADA + CIUDAD_NO_DISPONIBLE → efectos externos
+  ok   CITA_CONFIRMADA + CIUDAD_NO_DISPONIBLE → riesgo financiero declarado
+  ok   CITA_CONFIRMADA + POSPONER → estado
+  ok   CITA_CONFIRMADA + POSPONER → continuidad del replay
+  ok   CITA_CONFIRMADA + POSPONER → regla ganadora
+  ok   CITA_CONFIRMADA + POSPONER → cambios de contexto
+  ok   CITA_CONFIRMADA + POSPONER → efectos externos
+  ok   CITA_CONFIRMADA + POSPONER → riesgo financiero declarado
+  ok   MEDIO_WOMPI · esperando_pago · CON pago pendiente (SEGUNDA ruta de cobro) → estado
+  ok   MEDIO_WOMPI · esperando_pago · CON pago pendiente (SEGUNDA ruta de cobro) → continuidad del replay
+  ok   MEDIO_WOMPI · esperando_pago · CON pago pendiente (SEGUNDA ruta de cobro) → regla ganadora
+  ok   MEDIO_WOMPI · esperando_pago · CON pago pendiente (SEGUNDA ruta de cobro) → cambios de contexto
+  ok   MEDIO_WOMPI · esperando_pago · CON pago pendiente (SEGUNDA ruta de cobro) → efectos externos
+  ok   MEDIO_WOMPI · esperando_pago · CON pago pendiente (SEGUNDA ruta de cobro) → riesgo financiero declarado
+  ok   MEDIO_WOMPI · esperando_pago · SIN pago pendiente cae a la rama siguiente → estado
+  ok   MEDIO_WOMPI · esperando_pago · SIN pago pendiente cae a la rama siguiente → continuidad del replay
+  ok   MEDIO_WOMPI · esperando_pago · SIN pago pendiente cae a la rama siguiente → regla ganadora
+  ok   MEDIO_WOMPI · esperando_pago · SIN pago pendiente cae a la rama siguiente → cambios de contexto
+  ok   MEDIO_WOMPI · esperando_pago · SIN pago pendiente cae a la rama siguiente → efectos externos
+  ok   MEDIO_WOMPI · esperando_pago · SIN pago pendiente cae a la rama siguiente → riesgo financiero declarado
+  ok   MEDIO_WOMPI + MEDIO_TRANSFERENCIA · SIN pendiente → gana transferencia → estado
+  ok   MEDIO_WOMPI + MEDIO_TRANSFERENCIA · SIN pendiente → gana transferencia → continuidad del replay
+  ok   MEDIO_WOMPI + MEDIO_TRANSFERENCIA · SIN pendiente → gana transferencia → regla ganadora
+  ok   MEDIO_WOMPI + MEDIO_TRANSFERENCIA · SIN pendiente → gana transferencia → cambios de contexto
+  ok   MEDIO_WOMPI + MEDIO_TRANSFERENCIA · SIN pendiente → gana transferencia → efectos externos
+  ok   MEDIO_WOMPI + MEDIO_TRANSFERENCIA · SIN pendiente → gana transferencia → riesgo financiero declarado
+  ok   MEDIO_WOMPI fuera de esperando_pago NO cobra (ni consulta el pendiente) → estado
+  ok   MEDIO_WOMPI fuera de esperando_pago NO cobra (ni consulta el pendiente) → continuidad del replay
+  ok   MEDIO_WOMPI fuera de esperando_pago NO cobra (ni consulta el pendiente) → regla ganadora
+  ok   MEDIO_WOMPI fuera de esperando_pago NO cobra (ni consulta el pendiente) → cambios de contexto
+  ok   MEDIO_WOMPI fuera de esperando_pago NO cobra (ni consulta el pendiente) → efectos externos
+  ok   MEDIO_WOMPI fuera de esperando_pago NO cobra (ni consulta el pendiente) → riesgo financiero declarado
+  ok   MEDIO_TRANSFERENCIA publica la cuenta bancaria real → estado
+  ok   MEDIO_TRANSFERENCIA publica la cuenta bancaria real → continuidad del replay
+  ok   MEDIO_TRANSFERENCIA publica la cuenta bancaria real → regla ganadora
+  ok   MEDIO_TRANSFERENCIA publica la cuenta bancaria real → cambios de contexto
+  ok   MEDIO_TRANSFERENCIA publica la cuenta bancaria real → efectos externos
+  ok   MEDIO_TRANSFERENCIA publica la cuenta bancaria real → riesgo financiero declarado
+  ok   MEDIO_QR publica la llave de pago → estado
+  ok   MEDIO_QR publica la llave de pago → continuidad del replay
+  ok   MEDIO_QR publica la llave de pago → regla ganadora
+  ok   MEDIO_QR publica la llave de pago → cambios de contexto
+  ok   MEDIO_QR publica la llave de pago → efectos externos
+  ok   MEDIO_QR publica la llave de pago → riesgo financiero declarado
+  ok   CITA_CONFIRMADA + MEDIO_WOMPI → estado
+  ok   CITA_CONFIRMADA + MEDIO_WOMPI → continuidad del replay
+  ok   CITA_CONFIRMADA + MEDIO_WOMPI → regla ganadora
+  ok   CITA_CONFIRMADA + MEDIO_WOMPI → cambios de contexto
+  ok   CITA_CONFIRMADA + MEDIO_WOMPI → efectos externos
+  ok   CITA_CONFIRMADA + MEDIO_WOMPI → riesgo financiero declarado
+  ok   ESCALAR + NHC_ADULTOS → estado
+  ok   ESCALAR + NHC_ADULTOS → continuidad del replay
+  ok   ESCALAR + NHC_ADULTOS → regla ganadora
+  ok   ESCALAR + NHC_ADULTOS → cambios de contexto
+  ok   ESCALAR + NHC_ADULTOS → efectos externos
+  ok   ESCALAR + NHC_ADULTOS → riesgo financiero declarado
+  ok   ESCALAR + FUERA_SEGMENTO → estado
+  ok   ESCALAR + FUERA_SEGMENTO → continuidad del replay
+  ok   ESCALAR + FUERA_SEGMENTO → regla ganadora
+  ok   ESCALAR + FUERA_SEGMENTO → cambios de contexto
+  ok   ESCALAR + FUERA_SEGMENTO → efectos externos
+  ok   ESCALAR + FUERA_SEGMENTO → riesgo financiero declarado
+  ok   TRIAJE_P3 sin TRIAJE_COMPLETO → estado
+  ok   TRIAJE_P3 sin TRIAJE_COMPLETO → continuidad del replay
+  ok   TRIAJE_P3 sin TRIAJE_COMPLETO → regla ganadora
+  ok   TRIAJE_P3 sin TRIAJE_COMPLETO → cambios de contexto
+  ok   TRIAJE_P3 sin TRIAJE_COMPLETO → efectos externos
+  ok   TRIAJE_P3 sin TRIAJE_COMPLETO → riesgo financiero declarado
+  ok   TRIAJE_P3 + TRIAJE_COMPLETO → estado
+  ok   TRIAJE_P3 + TRIAJE_COMPLETO → continuidad del replay
+  ok   TRIAJE_P3 + TRIAJE_COMPLETO → regla ganadora
+  ok   TRIAJE_P3 + TRIAJE_COMPLETO → cambios de contexto
+  ok   TRIAJE_P3 + TRIAJE_COMPLETO → efectos externos
+  ok   TRIAJE_P3 + TRIAJE_COMPLETO → riesgo financiero declarado
+  ok   varios tags de triaje en una sola respuesta → estado
+  ok   varios tags de triaje en una sola respuesta → continuidad del replay
+  ok   varios tags de triaje en una sola respuesta → regla ganadora
+  ok   varios tags de triaje en una sola respuesta → cambios de contexto
+  ok   varios tags de triaje en una sola respuesta → efectos externos
+  ok   varios tags de triaje en una sola respuesta → riesgo financiero declarado
+  ok   tags duplicados → estado
+  ok   tags duplicados → continuidad del replay
+  ok   tags duplicados → regla ganadora
+  ok   tags duplicados → cambios de contexto
+  ok   tags duplicados → efectos externos
+  ok   tags duplicados → riesgo financiero declarado
+  ok   tag desconocido junto a uno válido → estado
+  ok   tag desconocido junto a uno válido → continuidad del replay
+  ok   tag desconocido junto a uno válido → regla ganadora
+  ok   tag desconocido junto a uno válido → cambios de contexto
+  ok   tag desconocido junto a uno válido → efectos externos
+  ok   tag desconocido junto a uno válido → riesgo financiero declarado
+
+NIVEL 2a — condición dependiente de datos: pending_payments
+  ok   sin `pendingPayment` en el contexto la decisión es INDETERMINADA, no una suposición
+  ok   la indeterminación NO se propaga a otros tags ni a otros estados
+  ok   una rama anterior gana antes de que la condición de datos se evalúe
+  ok   con pendingPayment=false el efecto financiero desaparece
+
+NIVEL 2b — la función es pura
+  ok   resolveStateTransition no muta el contexto que recibe
+  ok   la misma entrada da la misma salida
+
+NIVEL 3 — los efectos financieros son imposibles de ejecutar desde eval/
+  ok   ningún módulo de eval/ importa efectos reales (19 archivos)
+  ok   ningún módulo de eval/ invoca efectos reales (19 archivos)
+  ok   el guard detecta una llamada real inyectada
+  ok   la exención de imports solo cubre un archivo de test que run.js nunca carga
+  ok   NINGÚN módulo de eval/ importa el pool de producción (../db)
+  ok   quien usa pg lo hace con EVAL_DATABASE_URL, nunca con DATABASE_URL
+  ok   extract-dataset.js no contiene ninguna sentencia SQL de escritura
+  ok   effects.js no importa nada más que el spec puro
+  ok   simulateEffects marca TODO como simulado y congela los registros
+  ok   el cobro aparece como registro simulado, nunca como llamada
+  ok   el gate financiero cubre LAS TRES rutas que tocan dinero, no solo la cita
+  ok   un [MEDIO_WOMPI] espurio también se detecta como sobrante financiero
+  ok   un [CITA_CONFIRMADA] espurio se detecta como sobrante financiero
+
+140/140 OK
+exit=0

@@ -1,0 +1,56 @@
+SHA-256 de los 26 archivos de eval/ en el commit 0d47ffc
+=======================================================
+dc515a68a1f45ea5f84753fc84f196ef8ec7a9cfa92b35a0ace8cf35eb3b76c7  eval/INVENTARIO.md
+7144ca4149db7c8a783d277a8ca26c78aa34b410f77e28efbbc2702432915361  eval/MATRIZ.md
+0b7a504a6d44fb429dfa4a2ec708b29fcffaaa351de7042bccf9e0277e7d8eee  eval/PARIDAD.md
+1684d5c3546256c49152d8dd1968e0318fc67bbb9740a3d977274908d3432928  eval/README.md
+581b9ea3280e03e3316834f5f16216570e8b3b9c405d853deb072a51b56d6d1e  eval/adapters.js
+9f945c86d41b9261b1a6cc6efad42913961413c9e4ab24fab875dfc1fa8094f2  eval/docs.js
+c404b17f74b2b002d2c2f53f5387480680868c406ef7c3169b63eca3d45028d6  eval/effects.js
+b6e3cb3dd71754f1d90d2ee766d4b161bd5133b18428e636f5fdddc88e39bc9f  eval/estimate-cost.js
+700aae5525e3fc390d31434cd795fd5b66f6fb9096a683cecdde66c268c46074  eval/extract-dataset.js
+12b9b318323ce85f164b9765648238a428c124cdeab22ff92ea7d300e0808fae  eval/extract-lib.js
+fe1f02fe1df8f8084ecf5ace577106fc7b66ceccde43728b47a552d5ca77019c  eval/extract.test.js
+71211a93f0420d0a276788123fa06a87eefb59ed01d2ccf4d674fb8e7a78b90c  eval/graders.js
+883a9e102c71a8a6b23921584e8a261080af95fa02e66cca38e87ce3b63222bd  eval/graders.test.js
+e84ef4401be293527e91dfa3d3474e01b57678a4bc788f40b97c2e9d59e1eaad  eval/pipeline.test.js
+46e8bfd305bc9bb7d7b3bda7a36938122bac599a07b3bf7b37998fde64b934d1  eval/predicates.integration.test.js
+d7e5d8167baba934514038edd0fef6cd51bb3bb1038ea81f8ff703c3d75d4d09  eval/preflight.js
+74e4313248cd4d6a45d7829b18b33c9fe5660a03538e83b85dc283589ffb7f5a  eval/readonly-role.PROPUESTA.sql
+272beec0e4cacfa09ce5b30e6a7efe194bebfa6fb160cc2db92d807f3b3e6261  eval/readonly-role.sql
+37c46dc10ca968c39ef00d893bdb0caab24d5949c611456988b3c95c37c0f1a0  eval/replay.js
+23ec1f264d751e8ec42b184855a6c3b9e55a9ae2dee05678894e0db05f3d8c4a  eval/run.js
+d161ea4a54cbbba5227ceb87811cc9484e13fbde8767f33ff1197a896d9e924d  eval/state-spec.js
+e6332334dbe336be1b0d321ad62e0938712e0a312f58fefa95d1cf37a93448a6  eval/stats.js
+8f6ea7067279a268767dffda8661e9d3cb5733e83fa482a6575835dd5e9b6e52  eval/verify-adapters.js
+5e448ee23a1fd9fd59303259d26290595ed3a2848a9ed71ec1cb06ff7a3d0d77  eval/verify-readonly-db.js
+b6fe926890984ab3b1dace7d41fac3ab3c9fefd3b7bd654a76bca9b89d519697  eval/webhook-baseline.json
+996752ae7190c948e5d8a9732da5ac6c28d20364b45569637a10ec6896187ee3  eval/webhook-parity.test.js
+
+Objetos git (blob) — verificables con: git cat-file -p <hash>
+e2e3893ff44460b7b7460c21e8cf3bc007ae0c78  eval/INVENTARIO.md
+54dad350852bb9665b28ff7983b1b151e129c6ad  eval/MATRIZ.md
+0e03fd0fa5d45877f3c9aec5435830400d32dd23  eval/PARIDAD.md
+407024e16439171a90bb81d68fa7f9d89386e1c7  eval/README.md
+4bce489bd21c8d46669dfa8718d2b9ec289a36ef  eval/adapters.js
+eef18cfb90b783e1387d5cf82894262771a53514  eval/docs.js
+1f6eff9ceb4993b298b8af420a986fe1544971b9  eval/effects.js
+082762243d83a8f0cae429adf5cd25551992fa4b  eval/estimate-cost.js
+15d3e1630c90868b9921862e18c3ebd6967c64f6  eval/extract-dataset.js
+cfd49c5511e1b77437f50c6d0ae6b37108cd873f  eval/extract-lib.js
+7eb6229615ca82b5727d2aa4a453c145268e3ffc  eval/extract.test.js
+78909d2f1d45136ce3d482fb1dd6b8cb634aece2  eval/graders.js
+2378d237522b45dbdcc4278b56e84b38b8a24bc7  eval/graders.test.js
+bea000a8820113be8b57272d84231e2dd631e3df  eval/pipeline.test.js
+16c415f6b457dcea8b95d211c14c73d9f3579fd5  eval/predicates.integration.test.js
+85b5818ff59052c9f73a0f87a1c53fabbcb17868  eval/preflight.js
+2f43ea454828cf82d64c0b1c2485cca9eefe257a  eval/readonly-role.PROPUESTA.sql
+b788353068262c3f91ffa0fc492d69ed3d763db9  eval/readonly-role.sql
+fe42c4151b22dff6eedb7e4e59b7c1d489c1c7b7  eval/replay.js
+bda6c6f38e63175e83d015924bc6b27c86e6ac4f  eval/run.js
+b7b3f3261cdf4366f95198cbd5243786059081d8  eval/state-spec.js
+6bc21d6043a18532314c6cbd02b889e576e3570e  eval/stats.js
+26fcd66d353dc7d2dc4e5bfd0332c744a2ac992f  eval/verify-adapters.js
+aab61e74131bf6c0f0434c982a368a63371ea32b  eval/verify-readonly-db.js
+e001147fe6440ef796da3d112703609e9e08c458  eval/webhook-baseline.json
+db33d3c5dd07a3eaebabe4bc07a59a881cfb49ee  eval/webhook-parity.test.js
