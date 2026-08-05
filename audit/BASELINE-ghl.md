@@ -51,6 +51,22 @@ línea: idénticos. **Para auditar contenido, cualquiera de los dos sirve; los
 números de línea de §4 valen para ambos.** Para verificar integridad por hash,
 usar el par correcto de la tabla.
 
+### El baseline está fijado como binario
+
+`core.autocrlf = true` iba a convertir `audit/ghl.js.baseline` a CRLF en el
+próximo checkout, y entonces su SHA-256 habría dejado de ser `b7635304…` en un
+clon nuevo — el artefacto de referencia habría sido irreproducible justo en la
+propiedad para la que existe. Se fijó con `.gitattributes`:
+
+    audit/ghl.js.baseline -text
+    audit/ghl-baseline.diff -text
+
+Con eso git lo entrega byte a byte tal como está almacenado, en cualquier
+plataforma. Verificado extrayéndolo del índice: 0 CR, SHA-256 `b7635304…`.
+
+`webhooks/ghl.js` **no** está fijado — sigue con la conversión normal del repo, y
+su copia de trabajo sigue siendo CRLF. Esto no lo cambia.
+
 ---
 
 ## 3. Diff contra `HEAD:webhooks/ghl.js`
