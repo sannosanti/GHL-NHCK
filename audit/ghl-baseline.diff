@@ -1,0 +1,37 @@
+diff --git HEAD/webhooks/ghl.js BASELINE/3f8116fe
+index d48f4bc..3f8116f 100644
+--- HEAD/webhooks/ghl.js
++++ BASELINE/3f8116fe
+@@ -26,6 +26,17 @@ const textQueues = {};
+ /** Random human-like delay between 3 and 6 seconds. */
+ const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
+ 
++// Which WhatsApp line this deployment answers on. Deliberately separate from
++// the brand tags (`cliente-nhck`, `nhc-adultos`, ...): those say who the
++// patient IS, this says which number the thread lives on. They diverge for
++// patients who arrive through Kids and turn out to be adults — they get
++// `nhc-adultos` but keep answering on Carolina's number, because switching
++// numbers mid-thread needs a Meta-approved template (see ai/prompt.js).
++// Outbound automations must pick their "from" number by this tag: a reminder
++// sent on the other line lands the patient's reply in a conversation whose
++// bot has the wrong persona and knowledge base.
++const LINEA_TAG = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
++
+ // Moved to ai/tags.js so every sender of model output shares one cleaner —
+ // the recoveryJob was sending raw output and leaked a literal referral tag to
+ // a patient (confirmed live 2026-07-29).
+@@ -506,6 +517,14 @@ async function ghlWebhookHandler(req, res) {
+       console.error('[ghlWebhookHandler] DB_ERROR getConversationData, aborting message processing:', conversationId, err.message);
+       return;
+     }
++
++    // Tag the line on the first inbound message only. GHL treats re-adding an
++    // existing tag as a no-op, but doing it per message would spend an API
++    // call on every turn for no gain.
++    if (!convData) {
++      ghl.addTag(contactId, LINEA_TAG).catch(() => {});
++    }
++
+     if (convData?.recovery_status) {
+       db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1 AND agent=$2', [conversationId, env.agentName]).catch(() => {});
+     }
