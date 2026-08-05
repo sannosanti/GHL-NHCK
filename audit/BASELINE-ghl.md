@@ -9,6 +9,51 @@ Nada de este directorio forma parte del harness ni del árbol congelado.
 
 ---
 
+## 0. Cadena de custodia
+
+Todo lo de este directorio vive en commits **posteriores** a `0d47ffc`, que no se
+tocó.
+
+| Artefacto | Commit que lo introdujo | Blob |
+| --- | --- | --- |
+| `audit/ghl.js.baseline` | `6489825b81e21f96907755c1c4124e0836989952` | `3f8116fe7d7292008eb78c95fa939b2a589becfd` |
+| `audit/ghl-baseline.diff` | `6489825b81e21f96907755c1c4124e0836989952` | — |
+| `audit/BASELINE-ghl.md` | `6489825b81e21f96907755c1c4124e0836989952` | — |
+| `audit/HALLAZGO-B6-password.md` | `6489825b81e21f96907755c1c4124e0836989952` | — |
+| `.gitattributes` | `cbd6c7cbd576b0946ce368270375b24ddd81779c` | — |
+
+### Historial de cada uno
+
+    audit/ghl.js.baseline           6489825  (sin modificaciones posteriores)
+    audit/ghl-baseline.diff         6489825  (sin modificaciones posteriores)
+    audit/BASELINE-ghl.md           6489825 → cbd6c7c → (este commit)
+    audit/HALLAZGO-B6-password.md   6489825 → (este commit)
+    .gitattributes                  cbd6c7c
+
+**El blob del baseline no cambió nunca.** `cbd6c7c` reindexó el archivo con
+`git rm --cached` + `git add` para aplicarle el atributo `-text`, pero el
+contenido almacenado es idéntico y git no lo registra como modificación:
+
+    $ git rev-parse 6489825:audit/ghl.js.baseline
+    3f8116fe7d7292008eb78c95fa939b2a589becfd
+    $ git rev-parse HEAD:audit/ghl.js.baseline
+    3f8116fe7d7292008eb78c95fa939b2a589becfd
+
+Los documentos `.md` sí cambiaron: `cbd6c7c` documentó el arreglo de EOL, y el
+commit actual cierra los cinco puntos de esta ronda. El baseline y su diff son
+inmutables desde `6489825`.
+
+### Cadena completa
+
+    d70be1a  ← padre; webhooks/ghl.js en HEAD (blob d48f4bc)
+    0d47ffc  ← CONGELADO: harness, 26 archivos, 285 tests
+    5f72478  ← acta de entrega (ENTREGA.md, manifiesto, patch, salida de tests)
+    6489825  ← baseline externo + hallazgo B-6
+    cbd6c7c  ← .gitattributes: fija el baseline como binario
+    (HEAD)   ← esta ronda: custodia, evidencia PowerShell, adenda LINEA_TAG, B-6 v2
+
+---
+
 ## 1. Copia exacta
 
 `audit/ghl.js.baseline` — 899 líneas, 46.331 bytes.
@@ -38,13 +83,65 @@ saber cuál se está hasheando o los números no cuadran.
 
 `core.autocrlf = true` en este repo. Git guarda LF y entrega CRLF al working
 tree, así que los dos archivos son **byte-distintos** aunque su contenido sea
-idéntico. Verificado, no asumido:
+idéntico.
 
-    $ diff <(tr -d '\r' < audit/ghl.js.baseline) <(tr -d '\r' < webhooks/ghl.js)
-    (sin salida)
+### Evidencia — comando principal, multiplataforma
 
-    $ tr -cd '\r' < audit/ghl.js.baseline | wc -c   →   0
-    $ tr -cd '\r' < webhooks/ghl.js       | wc -c   →   899   (899 líneas, todas)
+Este es el que vale como evidencia. No depende del shell: solo necesita git, que
+ya hace falta para todo lo demás.
+
+    git diff --no-index --ignore-cr-at-eol --exit-code audit/ghl.js.baseline webhooks/ghl.js
+
+**Ejecutado: `exit=0` y sin salida.** Cero diferencias una vez ignorado el CR de
+fin de línea. Si hubiera una sola diferencia real de contenido, `--exit-code`
+devolvería 1 y el diff la imprimiría.
+
+### Evidencia — PowerShell, por hash
+
+Más fuerte que comparar cadenas: normaliza las dos formas y compara SHA-256.
+Corre en PowerShell, que es el shell de este entorno.
+
+    Set-Location 'C:\Users\sanch\GHL-NHCK'
+    function NormHash([string]$p) {
+      $t = [IO.File]::ReadAllText($p) -replace "`r", ''
+      $s = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($t))
+      (Get-FileHash -InputStream $s -Algorithm SHA256).Hash.ToLower()
+    }
+    $a = NormHash 'audit\ghl.js.baseline'
+    $b = NormHash 'webhooks\ghl.js'
+    "baseline normalizado : $a"
+    "ghl.js  normalizado  : $b"
+    "coinciden            : $($a -eq $b)"
+
+Salida real:
+
+    baseline normalizado : b7635304b2911fdfe6b7f4d055543a653334e2da924cf2c8e9f3e58c58eaa892
+    ghl.js  normalizado  : b7635304b2911fdfe6b7f4d055543a653334e2da924cf2c8e9f3e58c58eaa892
+    coinciden            : True
+
+El hash normalizado de `webhooks/ghl.js` coincide con el SHA-256 del baseline LF
+de la tabla de arriba, que es lo esperado: normalizar la copia CRLF la convierte
+exactamente en el baseline.
+
+### Conteo de CR en PowerShell
+
+    $lf   = [IO.File]::ReadAllText('audit\ghl.js.baseline')
+    $crlf = [IO.File]::ReadAllText('webhooks\ghl.js')
+    "CR en baseline : $(($lf.ToCharArray()   | Where-Object {$_ -eq [char]13}).Count)"
+    "CR en ghl.js   : $(($crlf.ToCharArray() | Where-Object {$_ -eq [char]13}).Count)"
+
+Salida real: `0` y `899` — 899 líneas, todas.
+
+### Nota sobre la evidencia anterior
+
+Una versión previa de este documento usaba sustitución de procesos de Bash:
+
+    diff <(tr -d '\r' < audit/ghl.js.baseline) <(tr -d '\r' < webhooks/ghl.js)
+
+El resultado era correcto, pero la sintaxis `<(...)` **no existe en PowerShell**,
+que es el shell primario de este entorno. Quedaba como evidencia no reproducible
+por quien audita. Sustituida por los dos comandos de arriba; se deja anotada para
+que la trazabilidad del documento sea completa.
 
 La única diferencia son los 899 CR. Numeración de líneas y contenido de cada
 línea: idénticos. **Para auditar contenido, cualquiera de los dos sirve; los
