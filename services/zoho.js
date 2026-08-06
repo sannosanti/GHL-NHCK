@@ -313,28 +313,23 @@ async function crearCitasCalendario({ movil, email, fechaISO, horaInicio, contac
   const pad = n => String(n).padStart(2, '0');
   const fmt = (h, m) => `${dd}-${mmm}-${yyyy} ${pad(h)}:${pad(m)}:00`;
   const diaStr = `${dd}-${mmm}-${yyyy}`;
-  const fin1H = mIni + 30 >= 60 ? hIni + 1 : hIni; const fin1M = (mIni + 30) % 60;
-  const ini2H = fin1H; const ini2M = fin1M;
-  const fin2H = ini2M + 60 >= 60 ? ini2H + 1 : ini2H; const fin2M = (ini2M + 60) % 60;
-  const base = {
-    Tipo: 'Presencial', Contacto: contactoID || '', Email: email || '',
-    Estado: 'Programada', Observaciones: 'NHC Kids - Agendado por Carolina IA', Dia: diaStr, Nombre: nombreNino || '',
-  };
-  const res1 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
-    method: 'POST', headers, body: JSON.stringify({ data: { ...base,
-      Inicio: fmt(hIni, mIni), Fin: fmt(fin1H, fin1M), Duraci_n: '30 minutos',
-      Consultor: constants.ID_CONSULTOR_JUAN_ESTEBAN, Espacio: '3572150000004826074',
-    }}),
-  });
-  const data1 = await res1.json(); console.log('CITA 1 PRE:', JSON.stringify(data1));
-  const res2 = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
-    method: 'POST', headers, body: JSON.stringify({ data: { ...base,
-      Inicio: fmt(ini2H, ini2M), Fin: fmt(fin2H, fin2M), Duraci_n: '1 hora',
+  // La evaluación previa de 30 minutos dejó de existir: el paciente la completa
+  // por su cuenta en el módulo nuevo. Agendar sólo crea el neuromapeo, y el
+  // horario ofrecido ES el del neuromapeo — antes empezaba media hora después
+  // porque adelante iba la evaluación.
+  const finH = mIni + 60 >= 60 ? hIni + 1 : hIni; const finM = (mIni + 60) % 60;
+  const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/calendario/form/Citas', {
+    method: 'POST', headers, body: JSON.stringify({ data: {
+      Tipo: 'Presencial', Contacto: contactoID || '', Email: email || '',
+      Estado: 'Programada', Observaciones: 'NHC Kids - Agendado por Carolina IA',
+      Dia: diaStr, Nombre: nombreNino || '',
+      Inicio: fmt(hIni, mIni), Fin: fmt(finH, finM), Duraci_n: '1 hora',
       Consultor: constants.ID_CONSULTOR_MAPEOS, Espacio: constants.ID_ESPACIO_MAPEOS,
     }}),
   });
-  const data2 = await res2.json(); console.log('CITA 2 NEUROMAPEO:', JSON.stringify(data2));
-  return { cita1: data1, cita2: data2 };
+  const data = await res.json();
+  console.log('CITA NEUROMAPEO:', JSON.stringify(data));
+  return { cita: data };
 }
 
 async function getContactoPorId(contactoID) {
@@ -457,7 +452,13 @@ function calcularSlotsLibres(citas, fechaISO) {
   const dia = fecha.getDay();
   const horarios = constants.HORARIOS_NHCK[dia];
   if (!horarios) return [];
-  const ocupadosJE = [], ocupadosMapeos = [];
+  // El único recurso que condiciona la agenda es Mapeos. La evaluación previa de
+  // 30 minutos con Juan Esteban se eliminó — el paciente la hace por su cuenta en
+  // el módulo nuevo — así que exigirlo libre sólo servía para apagar la
+  // captación cada vez que él se ausentaba: entre el 10 y el 20 de agosto de 2026
+  // un bloqueo suyo de jornada completa dejó la disponibilidad en cero durante
+  // once días, con Mapeos libre casi todo ese tiempo.
+  const ocupadosMapeos = [];
   citas.forEach(c => {
     const cID = c.Consultor?.ID || '';
     const tIni = new Date((c.Inicio || '').replace(/-/g, ' '));
@@ -465,27 +466,21 @@ function calcularSlotsLibres(citas, fechaISO) {
     if (isNaN(tIni)) return;
     const hIni = tIni.getHours() + tIni.getMinutes() / 60;
     const hFin = isNaN(tFin) ? hIni + 0.5 : tFin.getHours() + tFin.getMinutes() / 60;
-    // A 'Bloqueo' with no Consultor assigned is a clinic-wide block (e.g. the
-    // 24-Jul-2026 07:00-12:00 entry from Dec 2023) — matching only on the two
-    // hardcoded consultant IDs made it invisible to availability, so Carolina
-    // offered a slot the clinic had actually blocked (confirmed live
-    // 2026-07-23, Jacob Luna Torres had to be manually moved 8:30am -> 9:00am
-    // with a different professional). Block both resources for it instead of
-    // requiring it to name a consultant.
-    if (c.Tipo === 'Bloqueo' && !cID) {
-      ocupadosJE.push({ ini: hIni, fin: hFin });
+    // Un 'Bloqueo' sin Consultor es un cierre de toda la clínica (por ejemplo la
+    // entrada del 24-Jul-2026 07:00-12:00): ocupa tiempo real aunque no nombre a
+    // nadie. Antes de contemplarlo, Carolina ofrecía horarios que la clínica
+    // tenía cerrados — confirmado el 2026-07-23, cuando hubo que mover a Jacob
+    // Luna Torres de 8:30 a 9:00 a mano y con otro profesional.
+    if ((c.Tipo === 'Bloqueo' && !cID) || cID === constants.ID_CONSULTOR_MAPEOS) {
       ocupadosMapeos.push({ ini: hIni, fin: hFin });
-      return;
     }
-    if (cID === constants.ID_CONSULTOR_JUAN_ESTEBAN) ocupadosJE.push({ ini: hIni, fin: hFin });
-    if (cID === constants.ID_CONSULTOR_MAPEOS) ocupadosMapeos.push({ ini: hIni, fin: hFin });
   });
   const slots = [];
   for (const { ini, fin } of horarios) {
-    for (let h = ini; h + 1.5 <= fin; h += 0.5) {
-      const jeLibre = !ocupadosJE.some(o => o.ini < h + 0.5 && o.fin > h);
-      const mapeosLibre = !ocupadosMapeos.some(o => o.ini < h + 1.5 && o.fin > h + 0.5);
-      if (jeLibre && mapeosLibre) {
+    // El neuromapeo dura una hora y empieza en el horario que se ofrece.
+    for (let h = ini; h + 1 <= fin; h += 0.5) {
+      const mapeosLibre = !ocupadosMapeos.some(o => o.ini < h + 1 && o.fin > h);
+      if (mapeosLibre) {
         const hh = Math.floor(h); const mm = (h % 1) * 60;
         const hh12 = hh > 12 ? hh - 12 : hh === 0 ? 12 : hh;
         slots.push({ label: `${hh12}:${mm === 0 ? '00' : '30'}${hh < 12 ? 'am' : 'pm'}`, horaISO: `${String(hh).padStart(2, '0')}:${mm === 0 ? '00' : '30'}` });
