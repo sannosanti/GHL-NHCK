@@ -83,6 +83,7 @@ async function eventosDe(calendarId, desde, hasta) {
   // basura visible antes que esconder una cita real.
   const respaldado = new Set();
   const ocupado = new Set();
+  const pacientes = new Set();   // todo nombre de paciente que Zoho conoce en el rango
   for (let t = desde; t <= hasta; t += 86400000) {
     for (const c of await zoho.getDisponibilidad(new Date(t).toISOString().slice(0, 10))) {
       const destino = CALENDARIOS[c.Consultor?.ID || ''];
@@ -97,6 +98,7 @@ async function eventosDe(calendarId, desde, hasta) {
       if (!contacto) continue;
       ocupado.add(`${c.Inicio}|${destino[0]}`);
       respaldado.add(`${norm(contacto)}|${c.Inicio}|${destino[0]}`);
+      pacientes.add(norm(contacto));
     }
   }
   console.error(`citas de Zoho con calendario asignado: ${respaldado.size} (franjas ocupadas: ${ocupado.size})`);
@@ -122,9 +124,20 @@ async function eventosDe(calendarId, desde, hasta) {
         }
         continue;
       }
-      if (ocupado.has(`${inicio}|${calId}`)) {
-        // El nombre no coincide pero el profesional sí tiene algo a esa hora. Es
-        // ambiguo, así que no se toca: se lista aparte para que lo mire alguien.
+      // La red existe para no perder eventos MAL TITULADOS -- los que una versión
+      // vieja del sync marcó con un contacto genérico como "NHC Kids" en vez del
+      // paciente. Sólo tiene sentido cuando el nombre del título no es un
+      // paciente real: si Zoho conoce a esa persona, el título no está mal
+      // escrito y el evento simplemente está en el calendario equivocado.
+      //
+      // Sin esta distinción la red tapaba justo lo que la clínica reportaba: la
+      // cita de Daniela Lozano en el calendario de Juliana quedaba protegida
+      // porque Juliana tenía a Raquel a esa misma hora.
+      const nombreDelTitulo = clave.split('|')[0];
+      const tituloEsGenerico = nombreDelTitulo && !pacientes.has(nombreDelTitulo);
+      if (tituloEsGenerico && ocupado.has(`${inicio}|${calId}`)) {
+        // Título genérico y el profesional ocupado a esa hora: probablemente es
+        // esa cita, sólo que mal titulada. No se toca; lo mira alguien.
         for (const e of ordenados) {
           aRevisar.push({ eventId: e.id, title: e.title, startTime: e.startTime, calendario: nombre, motivo: 'el nombre no coincide pero Zoho tiene cita a esa hora' });
         }
