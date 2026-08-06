@@ -354,7 +354,50 @@ async function crearBloqueoEnCalendario({ calendarId, startISO, endISO, title })
   return verificarRespuestaGHL(res, data, 'crearBloqueoEnCalendario', { calendarId, startISO });
 }
 
+// Una reprogramación hecha en Zoho tiene que mover el evento que ya existe, no
+// crear otro. citas_sync guarda el id del evento espejado, así que acá sólo hace
+// falta pisarlo con el horario nuevo.
+//
+// El PUT reemplaza en vez de parchear: si no se reenvían title y
+// appointmentStatus, se borran. Por eso se leen antes y se devuelven tal cual —
+// una reprogramación cambia la hora, no el paciente ni el estado.
+async function getCitaEnCalendario(eventId) {
+  const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/calendars/events/appointments/${eventId}`, {
+    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' },
+  });
+  if (!res.ok) throw new Error(`getCitaEnCalendario falló con HTTP ${res.status}`);
+  return data?.appointment || data?.event || data;
+}
+
+async function actualizarCitaEnCalendario({ eventId, calendarId, startISO, endISO, title, appointmentStatus }) {
+  const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/calendars/events/appointments/${eventId}`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      calendarId, startTime: startISO, endTime: endISO, title,
+      appointmentStatus: appointmentStatus || 'confirmed',
+      // Verificado en producción sobre una cita real: con esto en false el
+      // paciente no recibe ningún mensaje por el cambio.
+      toNotify: false,
+      ignoreFreeSlotValidation: true, ignoreDateRange: true,
+    }),
+  });
+  return verificarRespuestaGHL(res, data, 'actualizarCitaEnCalendario', { calendarId, startISO });
+}
+
+async function actualizarBloqueoEnCalendario({ eventId, calendarId, startISO, endISO, title }) {
+  const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/calendars/events/block-slots/${eventId}`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ calendarId, startTime: startISO, endTime: endISO, title }),
+  });
+  return verificarRespuestaGHL(res, data, 'actualizarBloqueoEnCalendario', { calendarId, startISO });
+}
+
 module.exports = {
+  getCitaEnCalendario,
+  actualizarCitaEnCalendario,
+  actualizarBloqueoEnCalendario,
   mapearSintoma,
   mapearGenero,
   mapearOcupacionNino,

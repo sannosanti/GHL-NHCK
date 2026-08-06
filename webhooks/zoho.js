@@ -82,6 +82,64 @@ function parseZohoDateTime(str) {
 }
 
 /**
+ * Un disparo sobre un registro ya espejado. La mayoría son reenvíos idénticos
+ * del workflow de Creator y no hay que hacer nada, pero algunos son una
+ * reprogramación real: el horario o el profesional cambiaron en Zoho.
+ *
+ * La comparación es contra citas_sync, no contra GHL, para no gastar una llamada
+ * por cada reenvío — que son mayoría. Sólo cuando algo cambió se toca GHL.
+ *
+ * Se propagan horario y calendario, no el título. Una reprogramación mueve la
+ * cita, no cambia de paciente, y reconstruir el título de una cita exigiría
+ * volver a resolver el contacto en Zoho para nada.
+ */
+async function propagarCambios({ zohoCitaID, calendarId, startISO, endISO, inicioZoho, finZoho, esBloqueo, tituloBloqueo }) {
+  const previo = await db.getCitaSync(zohoCitaID);
+  if (!previo?.ghl_event_id) {
+    // Reservado pero todavía sin evento: hay otro disparo del mismo registro en
+    // vuelo. El que está creando va a confirmar; este no tiene qué actualizar.
+    console.log(`ZOHO-CITA: ${zohoCitaID} reservada sin evento aún — se ignora este disparo`);
+    return;
+  }
+
+  const cambios = [];
+  if (previo.inicio && previo.inicio !== inicioZoho) cambios.push(`inicio ${previo.inicio} -> ${inicioZoho}`);
+  if (previo.fin && previo.fin !== finZoho) cambios.push(`fin ${previo.fin} -> ${finZoho}`);
+  if (previo.calendar_id && previo.calendar_id !== calendarId) cambios.push(`calendario ${previo.calendar_id} -> ${calendarId}`);
+
+  if (!cambios.length) {
+    console.log(`ZOHO-CITA: ${zohoCitaID} sin cambios — disparo repetido, se ignora`);
+    return;
+  }
+
+  // Las filas anteriores a esta función no tienen inicio ni fin guardados, así
+  // que no hay con qué comparar. Se completan ahora sin tocar GHL: la próxima
+  // edición ya va a poder detectarse.
+  if (!previo.inicio || !previo.fin) {
+    await db.confirmarCitaZoho(zohoCitaID, previo.ghl_event_id, previo.calendar_id || calendarId, inicioZoho, finZoho);
+    console.log(`ZOHO-CITA: ${zohoCitaID} sin horario previo registrado — se completa sin tocar GHL`);
+    return;
+  }
+
+  if (esBloqueo) {
+    await ghl.actualizarBloqueoEnCalendario({
+      eventId: previo.ghl_event_id, calendarId, startISO, endISO, title: tituloBloqueo,
+    });
+  } else {
+    // El PUT reemplaza en vez de parchear, así que el título y el estado se leen
+    // y se devuelven tal cual; omitirlos los borraría.
+    const actual = await ghl.getCitaEnCalendario(previo.ghl_event_id);
+    await ghl.actualizarCitaEnCalendario({
+      eventId: previo.ghl_event_id, calendarId, startISO, endISO,
+      title: actual?.title, appointmentStatus: actual?.appointmentStatus,
+    });
+  }
+
+  await db.confirmarCitaZoho(zohoCitaID, previo.ghl_event_id, calendarId, inicioZoho, finZoho);
+  console.log(`ZOHO-CITA: ${zohoCitaID} reprogramada en GHL — ${cambios.join('; ')}`);
+}
+
+/**
  * POST /webhook/zoho-cita
  * Fired by a Zoho Creator workflow webhook when a new "Citas" record is added.
  * Mirrors that entry into the GHL calendar for its Consultor. Entries with a
@@ -155,14 +213,19 @@ async function zohoCitaWebhookHandler(req, res) {
     // la cita sería peor que arriesgar un duplicado, que ya sabemos detectar.
     zohoCitaID = registro?.ID || '';
     if (!(await db.reclamarCitaZoho(zohoCitaID, contactoRef ? 'cita' : 'bloqueo'))) {
-      console.log(`ZOHO-CITA: la cita ${zohoCitaID} ya estaba sincronizada — disparo repetido, se ignora`);
+      await propagarCambios({
+        zohoCitaID, calendarId, startISO, endISO,
+        inicioZoho: b.Inicio, finZoho: b.Fin,
+        esBloqueo: !contactoRef,
+        tituloBloqueo: tituloGHL([tipo, obs], tipo || 'Bloqueo'),
+      });
       return;
     }
 
     if (!contactoRef) {
       const title = tituloGHL([tipo, obs], tipo || 'Bloqueo');
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title });
-      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId);
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin);
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
@@ -173,7 +236,7 @@ async function zohoCitaWebhookHandler(req, res) {
         ? `ZOHO-CITA: contacto ${contactoRef} existe pero no tiene Movil — creando como bloqueo`
         : `ZOHO-CITA: no se encontró el contacto Zoho ${contactoRef} — creando como bloqueo`);
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
-      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId);
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin);
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
@@ -182,14 +245,14 @@ async function zohoCitaWebhookHandler(req, res) {
     if (!ghlContactId) {
       console.error('ZOHO-CITA: no se pudo resolver contacto GHL para', contacto.Movil, '— creando como bloqueo');
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
-      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId);
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin);
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
 
     const title = tituloGHL([tipo, contacto.Nombre_Completo || 'NHC'], 'Cita');
     const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title });
-    await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId);
+    await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId, b.Inicio, b.Fin);
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));
   } catch (err) {
     // Nothing retries a cita: the 200 went out before any of this ran, so Zoho

@@ -170,6 +170,13 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
+  // Guardar además el horario espejado permite detectar una reprogramación
+  // comparando contra la base, sin una llamada a GHL por cada disparo repetido
+  // -- que son la mayoría. CREATE TABLE IF NOT EXISTS no agrega columnas a una
+  // tabla que ya existe, de ahí los ALTER.
+  await pool.query(`ALTER TABLE citas_sync ADD COLUMN IF NOT EXISTS inicio TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE citas_sync ADD COLUMN IF NOT EXISTS fin TEXT`).catch(() => {});
+  await pool.query(`ALTER TABLE citas_sync ADD COLUMN IF NOT EXISTS actualizado_at TIMESTAMP`).catch(() => {});
   console.log('Base de datos inicializada ✓');
 }
 
@@ -199,15 +206,30 @@ async function reclamarCitaZoho(zohoCitaId, clase) {
   }
 }
 
-async function confirmarCitaZoho(zohoCitaId, ghlEventId, calendarId) {
+async function confirmarCitaZoho(zohoCitaId, ghlEventId, calendarId, inicio, fin) {
   if (!zohoCitaId) return;
   try {
     await pool.query(
-      `UPDATE citas_sync SET ghl_event_id = $2, calendar_id = $3 WHERE zoho_cita_id = $1`,
-      [zohoCitaId, ghlEventId || null, calendarId || null]
+      `UPDATE citas_sync
+          SET ghl_event_id = $2, calendar_id = $3, inicio = $4, fin = $5, actualizado_at = NOW()
+        WHERE zoho_cita_id = $1`,
+      [zohoCitaId, ghlEventId || null, calendarId || null, inicio || null, fin || null]
     );
   } catch (err) {
     console.error('[citas_sync] no se pudo confirmar', zohoCitaId, '—', err.message);
+  }
+}
+
+// Lo ya espejado para este registro: contra esto se compara un disparo repetido
+// para saber si es un reenvío igual o una reprogramación real.
+async function getCitaSync(zohoCitaId) {
+  if (!zohoCitaId) return null;
+  try {
+    const { rows } = await pool.query(`SELECT * FROM citas_sync WHERE zoho_cita_id = $1`, [zohoCitaId]);
+    return rows[0] || null;
+  } catch (err) {
+    console.error('[citas_sync] no se pudo leer', zohoCitaId, '—', err.message);
+    return null;
   }
 }
 
@@ -781,4 +803,5 @@ module.exports = {
   reclamarCitaZoho,
   confirmarCitaZoho,
   liberarCitaZoho,
+  getCitaSync,
 };

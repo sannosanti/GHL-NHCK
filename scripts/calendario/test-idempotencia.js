@@ -43,6 +43,28 @@ function chequear(desc, real, esperado) {
   // Sin ID de Zoho no hay deduplicación posible: nunca debe bloquear el sync.
   chequear('sin ID no bloquea',                 await db.reclamarCitaZoho('', 'cita'), true);
 
+  // Detección de reprogramación: el horario espejado queda guardado, así que un
+  // disparo posterior puede compararse contra la base sin llamar a GHL.
+  const ID4 = ID + '-REPROGRAMA';
+  await db.reclamarCitaZoho(ID4, 'cita');
+  await db.confirmarCitaZoho(ID4, 'evt-1', 'cal-A', '11-Aug-2026 17:00:00', '11-Aug-2026 18:00:00');
+  const guardado = await db.getCitaSync(ID4);
+  chequear('guarda el evento espejado',         guardado?.ghl_event_id, 'evt-1');
+  chequear('guarda el inicio',                  guardado?.inicio, '11-Aug-2026 17:00:00');
+  chequear('guarda el fin',                     guardado?.fin, '11-Aug-2026 18:00:00');
+  chequear('mismo horario = sin cambios',       guardado.inicio === '11-Aug-2026 17:00:00', true);
+  chequear('otro horario = hay cambio',         guardado.inicio !== '11-Aug-2026 19:00:00', true);
+
+  // Tras propagar la reprogramación, la base refleja el horario nuevo y el
+  // evento sigue siendo el mismo — se movió, no se duplicó.
+  await db.confirmarCitaZoho(ID4, 'evt-1', 'cal-B', '11-Aug-2026 19:00:00', '11-Aug-2026 20:00:00');
+  const tras = await db.getCitaSync(ID4);
+  chequear('tras reprogramar, inicio nuevo',    tras?.inicio, '11-Aug-2026 19:00:00');
+  chequear('tras reprogramar, calendario nuevo', tras?.calendar_id, 'cal-B');
+  chequear('tras reprogramar, mismo evento',    tras?.ghl_event_id, 'evt-1');
+
+  chequear('ID inexistente devuelve null',      await db.getCitaSync('NO-EXISTE-' + Date.now()), null);
+
   const { rows } = await pool.query(`DELETE FROM citas_sync WHERE zoho_cita_id LIKE 'TEST-IDEMPOTENCIA-%' RETURNING zoho_cita_id`);
   console.log(`\nlimpieza: ${rows.length} filas de prueba borradas`);
   await pool.end();
