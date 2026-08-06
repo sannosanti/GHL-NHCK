@@ -2,6 +2,7 @@
 
 const zoho = require('../services/zoho');
 const ghl = require('../services/ghl');
+const db = require('../db');
 
 // Dedicated GHL calendars for the Zoho -> GHL sync, one per real Zoho
 // Consultor/resource — see engram ghl-nhck/sync-zoho-ghl-calendario. Kept
@@ -87,6 +88,9 @@ function parseZohoDateTime(str) {
 async function zohoCitaWebhookHandler(req, res) {
   res.json({ success: true, received: true });
 
+  // Fuera del try para que el catch pueda soltar la reserva si la creación falló.
+  let zohoCitaID = '';
+
   try {
     const b = req.body || {};
 
@@ -137,9 +141,24 @@ async function zohoCitaWebhookHandler(req, res) {
     const tipo = b.Tipo || registro?.Tipo || 'Cita';
     const obs = b.Observaciones || registro?.Observaciones || '';
 
+    // El workflow de Creator dispara varias veces por el mismo registro, y cada
+    // disparo creaba otro evento: la auditoría del 2026-08-06 encontró 104 grupos
+    // de eventos idénticos en julio-octubre, ninguno del backfill. Reservar el ID
+    // antes de crear cierra también la carrera entre dos disparos simultáneos,
+    // porque el INSERT es atómico y sólo uno se lleva la reserva.
+    //
+    // Sin registro en Citas_Report no hay ID que reservar. Se sigue igual: perder
+    // la cita sería peor que arriesgar un duplicado, que ya sabemos detectar.
+    zohoCitaID = registro?.ID || '';
+    if (!(await db.reclamarCitaZoho(zohoCitaID, contactoRef ? 'cita' : 'bloqueo'))) {
+      console.log(`ZOHO-CITA: la cita ${zohoCitaID} ya estaba sincronizada — disparo repetido, se ignora`);
+      return;
+    }
+
     if (!contactoRef) {
       const title = tituloGHL([tipo, obs], tipo || 'Bloqueo');
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title });
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId);
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
@@ -150,6 +169,7 @@ async function zohoCitaWebhookHandler(req, res) {
         ? `ZOHO-CITA: contacto ${contactoRef} existe pero no tiene Movil — creando como bloqueo`
         : `ZOHO-CITA: no se encontró el contacto Zoho ${contactoRef} — creando como bloqueo`);
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId);
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
@@ -158,18 +178,24 @@ async function zohoCitaWebhookHandler(req, res) {
     if (!ghlContactId) {
       console.error('ZOHO-CITA: no se pudo resolver contacto GHL para', contacto.Movil, '— creando como bloqueo');
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId);
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
 
     const title = tituloGHL([tipo, contacto.Nombre_Completo || 'NHC'], 'Cita');
     const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title });
+    await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId);
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));
   } catch (err) {
     // Nothing retries a cita: the 200 went out before any of this ran, so Zoho
     // considers it delivered. This line is the only trace the clinic gets that
     // an entry never reached GHL — it has to name the loss, not just the error.
     console.error('ZOHO-CITA: la entrada NO se sincronizó a GHL —', err.message);
+    // Suelta la reserva para que un reenvío pueda reintentar. Sólo borra si no
+    // llegó a asociarse un evento, así un fallo posterior a la creación no
+    // reabre la puerta al duplicado que la reserva vino a evitar.
+    await db.liberarCitaZoho(zohoCitaID);
   }
 }
 

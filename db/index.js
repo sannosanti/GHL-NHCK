@@ -157,8 +157,69 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW(),
       last_attempt_at TIMESTAMP
     );
+    -- Un registro de Citas ya espejado en GHL. La clave primaria es lo que
+    -- vuelve idempotente al webhook: el workflow de Creator lo dispara varias
+    -- veces por el mismo registro, y sin esto cada disparo creaba otro evento.
+    -- Auditado 2026-08-06 sobre julio-octubre: 104 grupos de eventos idénticos,
+    -- ninguno del backfill, todos de disparos repetidos.
+    CREATE TABLE IF NOT EXISTS citas_sync (
+      zoho_cita_id TEXT PRIMARY KEY,
+      ghl_event_id TEXT,
+      calendar_id TEXT,
+      clase TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
   console.log('Base de datos inicializada ✓');
+}
+
+// ─── IDEMPOTENCIA DEL SYNC DE CITAS ──────────────────────────────────────────
+// Tres pasos, en este orden: reclamar antes de crear en GHL, confirmar con el id
+// que devolvió, o liberar si falló.
+//
+// Reclamar primero y no después es lo que sostiene la garantía: el INSERT es
+// atómico, así que entre dos disparos simultáneos del mismo registro sólo uno
+// gana y el otro se va sin tocar GHL. Si se creara primero y se anotara después,
+// ambos verían la tabla vacía y ambos crearían.
+async function reclamarCitaZoho(zohoCitaId, clase) {
+  if (!zohoCitaId) return true;   // sin ID no hay nada que deduplicar; no bloquear el sync
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO citas_sync (zoho_cita_id, clase) VALUES ($1, $2)
+       ON CONFLICT (zoho_cita_id) DO NOTHING
+       RETURNING zoho_cita_id`,
+      [zohoCitaId, clase || null]
+    );
+    return rows.length > 0;
+  } catch (err) {
+    // Un problema de base no puede costar una cita: se sigue de largo aceptando
+    // el riesgo de un duplicado, que es recuperable, en vez de perder la cita.
+    console.error('[citas_sync] no se pudo reclamar', zohoCitaId, '—', err.message);
+    return true;
+  }
+}
+
+async function confirmarCitaZoho(zohoCitaId, ghlEventId, calendarId) {
+  if (!zohoCitaId) return;
+  try {
+    await pool.query(
+      `UPDATE citas_sync SET ghl_event_id = $2, calendar_id = $3 WHERE zoho_cita_id = $1`,
+      [zohoCitaId, ghlEventId || null, calendarId || null]
+    );
+  } catch (err) {
+    console.error('[citas_sync] no se pudo confirmar', zohoCitaId, '—', err.message);
+  }
+}
+
+// Sólo suelta la reserva si todavía no tiene evento asociado, para que un fallo
+// tardío nunca borre la marca de una cita que sí llegó a crearse.
+async function liberarCitaZoho(zohoCitaId) {
+  if (!zohoCitaId) return;
+  try {
+    await pool.query(`DELETE FROM citas_sync WHERE zoho_cita_id = $1 AND ghl_event_id IS NULL`, [zohoCitaId]);
+  } catch (err) {
+    console.error('[citas_sync] no se pudo liberar', zohoCitaId, '—', err.message);
+  }
 }
 
 async function getConversationData(conversationId) {
@@ -717,4 +778,7 @@ module.exports = {
   getPendingWebhooks,
   bumpPendingWebhookAttempt,
   deletePendingWebhook,
+  reclamarCitaZoho,
+  confirmarCitaZoho,
+  liberarCitaZoho,
 };
