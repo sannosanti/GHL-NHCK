@@ -164,4 +164,21 @@ async function eventosDe(calendarId, desde, hasta) {
       console.log(`  ${r.inicio}  ${r.contacto}   -> ${r.esperado}`);
     }
   }
+
+  // Las mal ruteadas se persisten para que corregir-ruteo.js mueva exactamente
+  // lo que se revisó acá, en vez de recalcular sobre la marcha.
+  const aCorregir = resultados.malRuteada.map(r => {
+    const encontrados = indice.get(`${normalizar(r.contacto)}|${r.inicio}`) || [];
+    const destino = Object.values(CALENDARIOS).find(([, n]) => n === r.esperado);
+    return {
+      contacto: r.contacto, inicio: r.inicio, zohoID: r.zohoID,
+      esperado: r.esperado, calendarDestino: destino ? destino[0] : null,
+      eventos: encontrados.map(e => ({ id: e.id, title: e.title, calendarId: e.calendarId, calendario: NOMBRE_CAL[e.calendarId] || e.calendarId })),
+    };
+  }).filter(x => x.calendarDestino);
+  require('fs').writeFileSync(
+    require('path').join(__dirname, 'plan-ruteo.json'),
+    JSON.stringify({ generado: new Date().toISOString(), desdeISO, hastaISO, aCorregir }, null, 2)
+  );
+  console.log(`\nplan-ruteo.json escrito (${aCorregir.length} a corregir). NADA fue modificado.`);
 })().catch(e => { console.error('ERROR:', e.message); process.exit(1); });

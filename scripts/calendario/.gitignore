@@ -4,3 +4,5 @@ resultados.ndjson
 resultados-bloqueos.ndjson
 plan-faltantes.json
 creados.ndjson
+plan-ruteo.json
+ruteo-corregido.ndjson
