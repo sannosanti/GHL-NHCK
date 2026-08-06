@@ -2,3 +2,5 @@ plan.json
 plan-bloqueos.json
 resultados.ndjson
 resultados-bloqueos.ndjson
+plan-faltantes.json
+creados.ndjson
