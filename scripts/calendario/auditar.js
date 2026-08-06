@@ -75,6 +75,24 @@ async function eventosDe(calendarId, desde, hasta) {
     }
   }
 
+  // getDisponibilidad se traga cualquier error de Zoho y devuelve []. Sin este
+  // control, un token rechazado o un rate limit hacen que el informe salga con
+  // todo en cero y se lea como "está todo bien" — que es exactamente lo que pasó
+  // el 2026-08-06 tras saturar el endpoint de OAuth. Falla ruidosa antes que
+  // silenciosa: si Zoho no contesta, no hay auditoría que valga.
+  await zoho.getZohoAccessToken();
+  const sondeo = await zoho.getDisponibilidad(desdeISO);
+  if (!sondeo.length) {
+    const otro = await zoho.getDisponibilidad(new Date(desde + 24 * 3600 * 1000).toISOString().slice(0, 10));
+    if (!otro.length) {
+      console.error('\nABORTADO: Zoho no devolvió ninguna cita en los dos primeros días del rango.');
+      console.error('Puede ser un rango realmente vacío, pero es mucho más probable que Zoho');
+      console.error('esté rechazando el token (rate limit del endpoint de OAuth). Revisá el log');
+      console.error('de arriba: si dice "Error disponibilidad", esperá unos minutos y reintentá.');
+      process.exit(1);
+    }
+  }
+
   const resultados = { ok: [], falta: [], malRuteada: [], sinConsultor: [] };
   // Lo que Zoho respalda, para poder preguntar también al revés: qué hay en GHL
   // que Zoho no justifica.

@@ -69,6 +69,17 @@ async function traer(endpoint, calendarId, desde, hasta) {
     console.error(`  ${nombre.padEnd(24)} citas=${ev.length} bloqueos=${bl.length}`);
   }
 
+  // Mismo resguardo que auditar.js: si Zoho está rechazando el token,
+  // getDisponibilidad devuelve [] sin avisar y el plan saldría vacío. Peor
+  // todavía sería el caso inverso — un plan a medias que luego se ejecuta.
+  await zoho.getZohoAccessToken();
+  if (!(await zoho.getDisponibilidad(desdeISO)).length &&
+      !(await zoho.getDisponibilidad(new Date(desde + 24 * 3600 * 1000).toISOString().slice(0, 10))).length) {
+    console.error('\nABORTADO: Zoho no devolvió citas en los dos primeros días del rango.');
+    console.error('Casi seguro es rate limit del endpoint de OAuth. Esperá unos minutos y reintentá.');
+    process.exit(1);
+  }
+
   const crearCitas = [], crearBloqueos = [], sinTelefono = [], sinConsultor = [];
   for (let t = desde; t <= hasta; t += 24 * 3600 * 1000) {
     const dia = new Date(t).toISOString().slice(0, 10);
