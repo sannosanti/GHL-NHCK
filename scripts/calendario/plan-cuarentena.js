@@ -87,9 +87,16 @@ async function eventosDe(calendarId, desde, hasta) {
     for (const c of await zoho.getDisponibilidad(new Date(t).toISOString().slice(0, 10))) {
       const destino = CALENDARIOS[c.Consultor?.ID || ''];
       if (!destino) continue;
-      ocupado.add(`${c.Inicio}|${destino[0]}`);
       const contacto = c.Contacto?.display_value;
-      if (contacto) respaldado.add(`${norm(contacto)}|${c.Inicio}|${destino[0]}`);
+      // La red sólo cubre citas con paciente. Un evento de GHL titulado con el
+      // nombre de alguien no puede corresponder a un Bloqueo, una Salida ni un
+      // Festivo: si Zoho sólo tiene eso a esa hora, el evento está de más y
+      // protegerlo era esconder el error en vez de corregirlo. Es lo que la
+      // clínica reportó el 2026-08-06 como "citas trocadas" en el calendario de
+      // Juan Esteban.
+      if (!contacto) continue;
+      ocupado.add(`${c.Inicio}|${destino[0]}`);
+      respaldado.add(`${norm(contacto)}|${c.Inicio}|${destino[0]}`);
     }
   }
   console.error(`citas de Zoho con calendario asignado: ${respaldado.size} (franjas ocupadas: ${ocupado.size})`);
