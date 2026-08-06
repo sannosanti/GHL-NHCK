@@ -81,6 +81,65 @@ function parseZohoDateTime(str) {
   return new Date(Date.UTC(+yyyy, mes, +dd, +hh + 5, +min, +ss)).toISOString();
 }
 
+// Los botones de la app de Citas -- Cancelada, No asistió, Ejecutada -- cambian
+// el estado en Zoho y hasta ahora GHL no se enteraba: una cita cancelada abajo
+// seguía figurando confirmada arriba. Citas_Report no expone el campo Estado, así
+// que el estado no se puede deducir; tiene que venir en el aviso.
+//
+// Cada botón manda su acción y acá se traduce al vocabulario de GHL. Reprogramar
+// no está en el mapa porque no es un cambio de estado: llega como un disparo
+// normal y lo resuelve propagarCambios moviendo el evento.
+const ESTADOS_GHL = {
+  'cancelada': 'cancelled',
+  'no asistio': 'noshow',
+  'no asistió': 'noshow',
+  'ejecutada': 'showed',
+};
+
+/**
+ * Aplica en GHL un cambio de estado hecho desde los botones de Zoho.
+ * Devuelve true si el disparo era un cambio de estado (haya podido aplicarse o
+ * no), para que el handler no siga y lo trate como una cita nueva.
+ */
+async function aplicarEstado(accionCruda, zohoCitaID) {
+  const accion = String(accionCruda || '').trim().toLowerCase();
+  if (!accion) return false;
+
+  const estado = ESTADOS_GHL[accion];
+  if (!estado) {
+    console.error(`ZOHO-CITA: acción desconocida "${accionCruda}" — no se aplicó ningún estado`);
+    return true;
+  }
+  if (!zohoCitaID) {
+    console.error(`ZOHO-CITA: acción "${accion}" sin ID de registro — no hay cita que actualizar`);
+    return true;
+  }
+
+  const previo = await db.getCitaSync(zohoCitaID);
+  if (!previo?.ghl_event_id) {
+    // La cita nunca se espejó, así que no hay nada en GHL que cancelar. Se avisa
+    // en vez de callar: significa que el "Replicar" de esa cita no se apretó.
+    console.error(`ZOHO-CITA: "${accion}" sobre ${zohoCitaID}, que no está espejada en GHL — nada que actualizar`);
+    return true;
+  }
+  if (previo.clase === 'bloqueo') {
+    console.log(`ZOHO-CITA: "${accion}" sobre un bloqueo (${zohoCitaID}) — los bloqueos no tienen estado`);
+    return true;
+  }
+
+  // El PUT reemplaza en vez de parchear: horario y título se reenvían tal cual o
+  // se pierden. Lo único que cambia es el estado.
+  const actual = await ghl.getCitaEnCalendario(previo.ghl_event_id);
+  await ghl.actualizarCitaEnCalendario({
+    eventId: previo.ghl_event_id,
+    calendarId: previo.calendar_id || actual?.calendarId,
+    startISO: actual?.startTime, endISO: actual?.endTime, title: actual?.title,
+    appointmentStatus: estado,
+  });
+  console.log(`ZOHO-CITA: ${zohoCitaID} marcada "${estado}" en GHL por acción "${accion}"`);
+  return true;
+}
+
 /**
  * Un disparo sobre un registro ya espejado. La mayoría son reenvíos idénticos
  * del workflow de Creator y no hay que hacer nada, pero algunos son una
@@ -172,6 +231,11 @@ async function zohoCitaWebhookHandler(req, res) {
       Fin: b.Fin,
       ID: b.ID,
     }));
+
+    // Los botones de estado avisan con Accion y el ID del registro. Se resuelve
+    // antes de cualquier otra cosa: no es una cita que espejar, es un cambio
+    // sobre una que ya existe, y no necesita ni horario ni consultor.
+    if (await aplicarEstado(b.Accion || b.accion, refZoho(b.ID) || refZoho(b.Cita))) return;
 
     const startISO = parseZohoDateTime(b.Inicio);
     const endISO = parseZohoDateTime(b.Fin);
@@ -266,4 +330,4 @@ async function zohoCitaWebhookHandler(req, res) {
   }
 }
 
-module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho, tituloGHL };
+module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho, tituloGHL, ESTADOS_GHL };
