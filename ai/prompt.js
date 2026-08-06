@@ -103,8 +103,9 @@ ${conocimientoActivo}`;
 
 PRÓXIMO CONTACTO (horario exacto a usar cuando escalás — ver regla de [ESCALAR] arriba): ${proximoContacto}
 
-DISPONIBILIDAD (próximos 14 días — usa SOLO estos horarios, NUNCA inventes):
-${disponibilidadTexto}`;
+DISPONIBILIDAD (usa SOLO estos horarios, NUNCA inventes):
+${disponibilidadTexto}
+Si el bloque dice que no hay cupo en los próximos 14 días, ofrecé igual las fechas que sí aparecen: son las más próximas reales. Una agenda ocupada nunca es motivo para despedir a alguien sin darle una fecha concreta.`;
 
   if (estado === 'nuevo') {
     dynamicPrompt += `

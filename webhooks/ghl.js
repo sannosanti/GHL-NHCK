@@ -26,6 +26,17 @@ const textQueues = {};
 /** Random human-like delay between 3 and 6 seconds. */
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
+// Which WhatsApp line this deployment answers on. Deliberately separate from
+// the brand tags (`cliente-nhck`, `nhc-adultos`, ...): those say who the
+// patient IS, this says which number the thread lives on. They diverge for
+// patients who arrive through Kids and turn out to be adults — they get
+// `nhc-adultos` but keep answering on Carolina's number, because switching
+// numbers mid-thread needs a Meta-approved template (see ai/prompt.js).
+// Outbound automations must pick their "from" number by this tag: a reminder
+// sent on the other line lands the patient's reply in a conversation whose
+// bot has the wrong persona and knowledge base.
+const LINEA_TAG = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
+
 // Moved to ai/tags.js so every sender of model output shares one cleaner —
 // the recoveryJob was sending raw output and leaked a literal referral tag to
 // a patient (confirmed live 2026-07-29).
@@ -97,20 +108,44 @@ async function flushTextQueue(conversationId) {
       const hoy = new Date();
       const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
       const diasN = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-      for (let offset = 1; offset <= 14; offset++) {
+      const diaConCupo = async (offset) => {
         const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
         const ds = f.getDay();
-        if (constants.HORARIOS_NHCK[ds]) {
-          const fISO = f.toISOString().split('T')[0];
-          let citas = await db.getCachedDisponibilidad(fISO);
-          if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
-          const slots = zoho.calcularSlotsLibres(citas, fISO);
-          if (slots.length > 0) {
-            disponibilidadTexto += `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
-          }
+        if (!constants.HORARIOS_NHCK[ds]) return null;
+        const fISO = f.toISOString().split('T')[0];
+        let citas = await db.getCachedDisponibilidad(fISO);
+        if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
+        const slots = zoho.calcularSlotsLibres(citas, fISO);
+        if (!slots.length) return null;
+        return `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
+      };
+
+      for (let offset = 1; offset <= 14; offset++) {
+        const linea = await diaConCupo(offset);
+        if (linea) disponibilidadTexto += linea;
+      }
+
+      // Quedarse en catorce días cuando la ventana sale vacía es lo que costó la
+      // consulta del 2026-08-06: el prompt le prohíbe inventar horarios, así que
+      // sin datos el bot dice "no hay disponibilidad" y cierra la conversación --
+      // aunque haya cupo el día quince. Una agenda llena es motivo para ofrecer
+      // la fecha siguiente, no para despedir a un paciente.
+      //
+      // Se sigue buscando hasta dos meses y alcanza con las tres primeras fechas
+      // con cupo: son las que un paciente va a considerar, y cada día extra
+      // cuesta una consulta a Zoho la primera vez que se mira.
+      if (!disponibilidadTexto) {
+        let encontrados = 0;
+        for (let offset = 15; offset <= 60 && encontrados < 3; offset++) {
+          const linea = await diaConCupo(offset);
+          if (linea) { disponibilidadTexto += linea; encontrados++; }
+        }
+        if (disponibilidadTexto) {
+          disponibilidadTexto = `No hay cupo en los próximos 14 días. Las fechas disponibles más próximas son:\n${disponibilidadTexto}`;
         }
       }
-      if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad próximos 14 días.';
+
+      if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad en los próximos 2 meses.';
     } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
 
     const derivadoA = convData?.derivado_a || null;
@@ -506,6 +541,14 @@ async function ghlWebhookHandler(req, res) {
       console.error('[ghlWebhookHandler] DB_ERROR getConversationData, aborting message processing:', conversationId, err.message);
       return;
     }
+
+    // Tag the line on the first inbound message only. GHL treats re-adding an
+    // existing tag as a no-op, but doing it per message would spend an API
+    // call on every turn for no gain.
+    if (!convData) {
+      ghl.addTag(contactId, LINEA_TAG).catch(() => {});
+    }
+
     if (convData?.recovery_status) {
       db.pool.query('UPDATE conversations SET recovery_status=NULL WHERE conversation_id=$1 AND agent=$2', [conversationId, env.agentName]).catch(() => {});
     }
