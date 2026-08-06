@@ -10,7 +10,7 @@ const GENERAL = 'lzwahRhkogIG1Ct9BX7p';
 const SALIDA = require('path').join(__dirname, 'plan.json');
 
 const CALENDARIOS = {
-  '3572150000004930155': ['MvnOMgGMs69y6Ewix22r', 'Pre-evaluación NHC'],
+  '3572150000004930155': ['MvnOMgGMs69y6Ewix22r', 'Juan Esteban Tamayo'],
   '3572150000005140253': ['iTdbaauOdCrcNHwsIe2h', 'Neuromapeo NHC'],
   '3572150000004871148': ['M1fNQqz0yn8LH1op8I4s', 'Neurotecnologías'],
   '3572150000009238003': ['pLhcRJMTzeTjhrv8dqDY', 'Katerine Bolivar Uribe'],

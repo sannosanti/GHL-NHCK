@@ -6,7 +6,7 @@ const H = { Authorization: `Bearer ${key}`, Version: '2021-04-15' };
 
 const CALS = {
   'lzwahRhkogIG1Ct9BX7p': 'General',
-  'MvnOMgGMs69y6Ewix22r': 'Pre-evaluación NHC',
+  'MvnOMgGMs69y6Ewix22r': 'Juan Esteban Tamayo',
   'iTdbaauOdCrcNHwsIe2h': 'Neuromapeo NHC',
   'M1fNQqz0yn8LH1op8I4s': 'Neurotecnologías',
   'pLhcRJMTzeTjhrv8dqDY': 'Katerine Bolivar Uribe',

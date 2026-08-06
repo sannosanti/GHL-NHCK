@@ -9,13 +9,17 @@ const db = require('../db');
 // deliberately separate from the personal calendars already in GHL. Both
 // Carolina (NHCK) and Luisa (NHC) share this same Zoho calendar and GHL
 // location, so this single webhook covers both brands.
-// Zoho Consultor ID -> GHL calendar ID. Both sides audited live on 2026-08-04
-// against the location's 19 calendars, so the comment names the GHL calendar the
-// entry actually lands in — not the consultant it came from. They diverge: Juan
-// Esteban Tamayo's citas go to "Pre-evaluación NHC" and the "Mapeos" resource to
-// "Neuromapeo NHC", which read as mismatches until you know they are deliberate.
+// Zoho Consultor ID -> GHL calendar ID. Ambos lados auditados en vivo el
+// 2026-08-04 contra los 19 calendarios de la location, así que el comentario
+// nombra el calendario de GHL donde la entrada realmente cae, no el consultor
+// del que viene.
+//
+// El calendario de Juan Esteban Tamayo se llamaba "Pre-evaluación NHC" y se
+// renombró el 2026-08-06 porque el cliente lo buscaba por su nombre y no lo
+// encontraba. Quedan dos que siguen divergiendo, y a propósito: "Mapeos" y
+// "Neurotecnologías" son recursos de Zoho, no personas.
 const CALENDARIOS = {
-  '3572150000004930155': 'MvnOMgGMs69y6Ewix22r', // Juan Esteban Tamayo -> Pre-evaluación NHC
+  '3572150000004930155': 'MvnOMgGMs69y6Ewix22r', // Juan Esteban Tamayo
   '3572150000005140253': 'iTdbaauOdCrcNHwsIe2h', // Mapeos -> Neuromapeo NHC
   '3572150000004871148': 'M1fNQqz0yn8LH1op8I4s', // Neurotecnologías
   '3572150000009238003': 'pLhcRJMTzeTjhrv8dqDY', // Katerine Bolivar Uribe

@@ -18,6 +18,11 @@ que sí expone `Consultor`, `Tipo` y `Observaciones`
 (`buscarCitaPorInicio` en `services/zoho.js`). Estos scripts aplican esa misma
 resolución sobre lo que ya estaba mal ruteado.
 
+El calendario de Juan Esteban Tamayo se llamaba "Pre-evaluación NHC" hasta el
+2026-08-06. Se renombró porque el cliente lo buscaba por el nombre del
+profesional y no lo encontraba. "Neuromapeo NHC" y "Neurotecnologías" siguen
+nombrados por el servicio, y está bien: en Zoho son recursos, no personas.
+
 Resultado de la corrida de agosto 2026: **197 citas** y **271 bloqueos** movidos
 de General a su terapeuta.
 
