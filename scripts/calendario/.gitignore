@@ -8,3 +8,5 @@ plan-ruteo.json
 ruteo-corregido.ndjson
 plan-cuarentena.json
 cuarentena.ndjson
+plan-cuarentena-bloqueos.json
+cuarentena-bloqueos.ndjson
