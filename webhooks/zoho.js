@@ -96,6 +96,12 @@ const ESTADOS_GHL = {
   'ejecutada': 'showed',
 };
 
+// El aviso de modificación manda el Estado del registro, y la enorme mayoría de
+// las ediciones lo dejan en "Programada" — la cita sigue en pie, lo que cambió
+// fue el horario. Esos avisos tienen que seguir de largo hasta propagarCambios,
+// que es quien detecta la reprogramación.
+const ESTADOS_SIN_CAMBIO = new Set(['programada', 'reprogramar', 'reprogramada', 'confirmada']);
+
 /**
  * Aplica en GHL un cambio de estado hecho desde los botones de Zoho.
  * Devuelve true si el disparo era un cambio de estado (haya podido aplicarse o
@@ -104,11 +110,17 @@ const ESTADOS_GHL = {
 async function aplicarEstado(accionCruda, zohoCitaID) {
   const accion = String(accionCruda || '').trim().toLowerCase();
   if (!accion) return false;
+  if (ESTADOS_SIN_CAMBIO.has(accion)) return false;
 
   const estado = ESTADOS_GHL[accion];
   if (!estado) {
-    console.error(`ZOHO-CITA: acción desconocida "${accionCruda}" — no se aplicó ningún estado`);
-    return true;
+    // Cortar acá dejaba la edición sin procesar: con Estado "Programada" -- que
+    // es lo que manda casi toda edición -- la reprogramación nunca llegaba a
+    // GHL. Ante un estado que no se reconoce conviene seguir de largo y tratarlo
+    // como una edición común: perder un cambio de horario cuesta más que aplicar
+    // de más una comparación que probablemente no encuentre diferencias.
+    console.error(`ZOHO-CITA: estado "${accionCruda}" no reconocido — se procesa como edición normal`);
+    return false;
   }
   if (!zohoCitaID) {
     console.error(`ZOHO-CITA: acción "${accion}" sin ID de registro — no hay cita que actualizar`);
