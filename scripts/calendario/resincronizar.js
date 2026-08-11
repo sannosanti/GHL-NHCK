@@ -63,12 +63,20 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
   const espejado = new Map(rows.map(r => [r.zoho_cita_id, r]));
   console.error(`espejadas conocidas: ${espejado.size}`);
 
-  const cambios = [], sinEspejar = [];
+  const cambios = [], sinEspejar = [], vistos = new Set();
   let revisadas = 0;
   for (let t = desde; t <= hasta; t += 86400000) {
     for (const c of await zoho.getDisponibilidad(new Date(t).toISOString().slice(0, 10))) {
+      vistos.add(c.ID);
       const prev = espejado.get(c.ID);
-      if (!prev) { if (c.Contacto?.display_value) sinEspejar.push({ zohoID: c.ID, inicio: c.Inicio, contacto: c.Contacto.display_value }); continue; }
+      if (!prev) {
+        if (c.Contacto?.display_value) sinEspejar.push({
+          zohoID: c.ID, inicio: c.Inicio, fin: c.Fin, estado: c.Estado,
+          contacto: c.Contacto.display_value,
+          consultor: c.Consultor?.display_value || '(sin consultor)',
+        });
+        continue;
+      }
       revisadas++;
 
       const calDestino = CALENDARIOS[c.Consultor?.ID || ''] || CALENDAR_GENERAL;
@@ -94,14 +102,60 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
     }
   }
 
+  // La otra mitad del barrido. El reporte de Zoho no trae el campo Estado: una
+  // cita cancelada simplemente deja de aparecer. Así que un registro que está en
+  // citas_sync con fecha dentro del rango pero que Zoho ya no lista quedó vivo
+  // en GHL sin respaldo. No se borra nada acá: sólo se reportan para revisar,
+  // porque también caen en esta bolsa las reprogramadas fuera del rango.
+  const huerfanas = [];
+  let sinFechaRegistrada = 0;
+  for (const r of rows) {
+    if (vistos.has(r.zoho_cita_id)) continue;
+    if (!r.inicio) { sinFechaRegistrada++; continue; }
+    const iso = parseZohoDateTime(r.inicio);
+    const ms = iso ? Date.parse(iso) : NaN;
+    if (!Number.isFinite(ms) || ms < desde || ms > hasta) continue;
+    huerfanas.push(r);
+  }
+
   console.log(`\nRANGO ${desdeISO} .. ${hastaISO}\n`);
   console.log(`  revisadas contra Zoho     : ${revisadas}`);
   console.log(`  DESACTUALIZADAS en GHL    : ${cambios.length}`);
   console.log(`  citas de Zoho sin espejar : ${sinEspejar.length}   (se crean con crear-faltantes.js)`);
+  console.log(`  espejadas que Zoho ya no lista: ${huerfanas.length}   (canceladas o movidas fuera del rango — revisar a mano)`);
+  if (sinFechaRegistrada) console.log(`  (${sinFechaRegistrada} filas de citas_sync sin fecha registrada, no ubicables)`);
   for (const c of cambios.slice(0, 40)) {
     console.log(`      ${c.contacto.slice(0, 32).padEnd(34)} ${c.diffs.join(' | ')}${c.sinHorarioPrevio ? '   [sin horario previo: se confirma contra GHL antes de mover]' : ''}`);
   }
   if (cambios.length > 40) console.log(`      ... y ${cambios.length - 40} más`);
+  if (huerfanas.length) {
+    console.log('\n  Espejadas que Zoho ya no lista (primeras 40):');
+    for (const h of huerfanas.slice(0, 40)) {
+      // Se resuelve el evento en GHL para que la lista diga de quién es y en qué
+      // estado quedó. Un id suelto no le sirve a nadie para decidir.
+      let detalle = '';
+      try {
+        if (h.clase === 'bloqueo') {
+          const b = await bloqueoOriginal(h.ghl_event_id, h.calendar_id, parseZohoDateTime(h.inicio));
+          detalle = `"${b.title}"`;
+        } else {
+          const a = await ghl.getCitaEnCalendario(h.ghl_event_id);
+          detalle = `"${a?.title}"  [${a?.appointmentStatus}]`;
+        }
+      } catch (err) {
+        detalle = `<ya no está en GHL: ${err.message}>`;
+      }
+      console.log(`      ${String(h.inicio).padEnd(22)} ${String(h.clase).padEnd(8)} ${detalle}`);
+      await dormir(PAUSA);
+    }
+    if (huerfanas.length > 40) console.log(`      ... y ${huerfanas.length - 40} más`);
+  }
+  if (sinEspejar.length) {
+    console.log('\n  Sin espejar en GHL:');
+    for (const s of sinEspejar) {
+      console.log(`      ${s.inicio}  ${String(s.estado).padEnd(12)} ${s.contacto.slice(0, 30).padEnd(32)} ${s.consultor}`);
+    }
+  }
 
   if (!aplicar) {
     console.log('\nDRY RUN — nada se modificó. Volvé a correr con --aplicar.');
