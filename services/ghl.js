@@ -326,13 +326,18 @@ function verificarRespuestaGHL(res, data, accion, { calendarId, startISO }) {
   );
 }
 
-async function crearCitaEnCalendario({ contactId, calendarId, startISO, endISO, title }) {
+// GHL guarda `description` en el campo que su interfaz muestra como
+// "Appointment description" -- y lo espeja en `notes`. Ahí van las Observaciones
+// de Zoho completas: el título tiene un tope de 100 caracteres, pero la nota
+// clínica no debería llegar recortada a quien atiende.
+async function crearCitaEnCalendario({ contactId, calendarId, startISO, endISO, title, description }) {
   const { res, data } = await fetchGHL('https://services.leadconnectorhq.com/calendars/events/appointments', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({
       calendarId, locationId: env.ghlLocationId, contactId,
       startTime: startISO, endTime: endISO, title: title || 'Cita NHC Kids',
+      description: description || '',
       ignoreFreeSlotValidation: true, ignoreDateRange: true, toNotify: false,
     }),
   });
@@ -369,13 +374,15 @@ async function getCitaEnCalendario(eventId) {
   return data?.appointment || data?.event || data;
 }
 
-async function actualizarCitaEnCalendario({ eventId, calendarId, startISO, endISO, title, appointmentStatus }) {
+async function actualizarCitaEnCalendario({ eventId, calendarId, startISO, endISO, title, appointmentStatus, description }) {
   const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/calendars/events/appointments/${eventId}`, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({
       calendarId, startTime: startISO, endTime: endISO, title,
       appointmentStatus: appointmentStatus || 'confirmed',
+      // El PUT reemplaza: si no se reenvía, la descripción se borra.
+      description: description || '',
       // Verificado en producción sobre una cita real: con esto en false el
       // paciente no recibe ningún mensaje por el cambio.
       toNotify: false,

@@ -147,6 +147,7 @@ async function aplicarEstado(accionCruda, zohoCitaID) {
     calendarId: previo.calendar_id || actual?.calendarId,
     startISO: actual?.startTime, endISO: actual?.endTime, title: actual?.title,
     appointmentStatus: estado,
+    description: actual?.description,
   });
   console.log(`ZOHO-CITA: ${zohoCitaID} marcada "${estado}" en GHL por acción "${accion}"`);
   return true;
@@ -203,6 +204,7 @@ async function propagarCambios({ zohoCitaID, calendarId, startISO, endISO, inici
     await ghl.actualizarCitaEnCalendario({
       eventId: previo.ghl_event_id, calendarId, startISO, endISO,
       title: actual?.title, appointmentStatus: actual?.appointmentStatus,
+      description: actual?.description,
     });
   }
 
@@ -327,7 +329,7 @@ async function zohoCitaWebhookHandler(req, res) {
     }
 
     const title = tituloGHL([tipo, contacto.Nombre_Completo || 'NHC'], 'Cita');
-    const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title });
+    const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title, description: obs });
     await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId, b.Inicio, b.Fin);
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));
   } catch (err) {
