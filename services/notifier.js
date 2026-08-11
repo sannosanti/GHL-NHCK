@@ -40,25 +40,40 @@ async function getMailAccount(token) {
   return mailAccount;
 }
 
-async function notify(text) {
+/**
+ * @param {string} text  First line becomes the subject.
+ * @param {string} [to]  One address, or several separated by commas.
+ *   Defaults to the dev address used by alerts.
+ */
+async function notify(text, to = NOTIFY_EMAIL) {
   try {
     const token = await getMailToken();
     const acc = await getMailAccount(token);
     const subject = text.split('\n')[0].replace(/[*_🧠🚨✅]/g, '').trim().slice(0, 80);
-    const res = await fetch(`https://mail.zoho.com/api/accounts/${acc.id}/messages`, {
-      method: 'POST',
-      headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fromAddress: acc.email,
-        toAddress: NOTIFY_EMAIL,
-        subject: subject || 'Notificación Carolina',
-        content: text.replace(/[*_]/g, ''),
-        mailFormat: 'plaintext',
-      }),
-    });
-    const result = await res.json();
-    if (!res.ok) console.error('[notifier] Mail error:', res.status, JSON.stringify(result));
-    else console.log('[notifier] Email enviado a', NOTIFY_EMAIL);
+    const content = text.replace(/[*_]/g, '');
+
+    // Zoho documents toAddress as a single recipient and makes no promise about
+    // parsing a comma-separated list, so each address gets its own request
+    // rather than betting on undocumented behaviour. One recipient failing must
+    // not stop the others, hence the per-address error handling.
+    const recipients = String(to || NOTIFY_EMAIL).split(',').map(s => s.trim()).filter(Boolean);
+
+    for (const recipient of recipients) {
+      const res = await fetch(`https://mail.zoho.com/api/accounts/${acc.id}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromAddress: acc.email,
+          toAddress: recipient,
+          subject: subject || 'Notificación Carolina',
+          content,
+          mailFormat: 'plaintext',
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) console.error('[notifier] Mail error:', recipient, res.status, JSON.stringify(result));
+      else console.log('[notifier] Email enviado a', recipient);
+    }
   } catch (err) {
     console.error('[notifier] Error enviando email:', err.message);
   }

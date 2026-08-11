@@ -552,6 +552,21 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
       }
       if (!anamnesisCreada) console.warn('[/anamnesis-clinica-infantil] Registro Anamnesis_nna2 NO se creó:', JSON.stringify(anamnesisError));
 
+      // Sent after anamnesisCreada is resolved, so the notice reports what
+      // actually landed in Zoho rather than just that the request arrived — a
+      // "se envió" that hides a rejected record is worse than no notice.
+      // Fire-and-forget: a mail outage must never turn a saved anamnesis into
+      // an error for the person who pressed Enviar.
+      notify(
+        `Anamnesis infantil enviada — ${d.nombreConsultante}\n` +
+        `Móvil: ${d.movilConsultante}\n` +
+        `Email: ${d.emailConsultante || '—'}\n` +
+        `Edad: ${d.edadConsultante || '—'}\n` +
+        `Registro en Zoho: ${anamnesisCreada ? 'creado correctamente' : 'NO se creó — revisar'}\n` +
+        new Date().toLocaleString('es-CO'),
+        env.anamnesisNotifyEmail
+      ).catch(() => {});
+
       return res.json({ ok: true, id: crData.data?.ID, contactoID, anamnesisCreada, anamnesisError });
     }
     if (crData.code === 3100) {

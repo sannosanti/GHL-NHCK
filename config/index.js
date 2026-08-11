@@ -13,6 +13,11 @@ const env = {
   wompiPrivateKey: process.env.WOMPI_PRIVATE_KEY,
   databaseUrl: process.env.DATABASE_URL,
   agentName: process.env.AGENT_NAME || 'carolina',
+  // Where anamnesis submission notices go. Kept separate from the notifier's
+  // default recipient: error alerts belong to the dev team, a submitted
+  // anamnesis belongs to whoever handles the patient. Unset falls back to the
+  // dev address so nothing is silently dropped.
+  anamnesisNotifyEmail: process.env.ANAMNESIS_NOTIFY_EMAIL,
   port: process.env.PORT || 3000,
 };
 
