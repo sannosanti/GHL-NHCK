@@ -3,6 +3,32 @@
 const zoho = require('../services/zoho');
 const ghl = require('../services/ghl');
 const db = require('../db');
+const { notify } = require('../services/notifier');
+
+// Una cita que no puede resolver contacto se espeja como bloqueo. El bloqueo
+// ocupa el horario, que es lo importante para la agenda, pero no lleva
+// contactId: GHL no tiene a quién notificar, así que ese paciente nunca va a
+// recibir el recordatorio de su cita.
+//
+// Hasta ahora eso sólo dejaba un console.error. El 2026-08-12 el cliente
+// encontró a mano varias citas convertidas en bloqueo — nadie estaba leyendo los
+// logs, y no hay razón para que lo hagan. El aviso convierte un dato roto en
+// Zoho (casi siempre un contacto sin Movil) en algo que alguien puede arreglar.
+async function avisarDegradacion(motivo, { zohoCitaID, calendarId, inicio, fin, tipo }) {
+  console.error(`ZOHO-CITA: ${motivo} — creando como bloqueo`);
+  await notify(
+    `Cita espejada como bloqueo — sin recordatorio\n` +
+    `Motivo: ${motivo}\n` +
+    `Cita Zoho: ${zohoCitaID || 'sin ID'}\n` +
+    `Horario: ${inicio || '?'} a ${fin || '?'}\n` +
+    `Tipo: ${tipo || '?'}\n` +
+    `Calendario GHL: ${calendarId}\n\n` +
+    `El horario queda ocupado en la agenda, pero el evento no tiene contacto ` +
+    `asociado: esa persona no va a recibir recordatorio. Suele resolverse ` +
+    `cargando el Movil del contacto en Zoho y reprogramando la cita.\n` +
+    new Date().toLocaleString('es-CO')
+  ).catch(() => {});
+}
 
 // Dedicated GHL calendars for the Zoho -> GHL sync, one per real Zoho
 // Consultor/resource — see engram ghl-nhck/sync-zoho-ghl-calendario. Kept
@@ -300,37 +326,47 @@ async function zohoCitaWebhookHandler(req, res) {
       return;
     }
 
+    // Sin Contacto no hay degradación que avisar: es un bloqueo de verdad
+    // (Salida, Almuerzo, Festivo), que es exactamente lo que se quiere espejar.
     if (!contactoRef) {
       const title = tituloGHL([tipo, obs], tipo || 'Bloqueo');
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title });
-      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin);
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin, 'bloqueo');
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
 
+    // De acá para abajo el registro SÍ traía Contacto, así que cualquier bloqueo
+    // es una cita degradada: alguien esperaba un recordatorio y no lo va a tener.
     const contacto = await zoho.getContactoPorId(contactoRef);
     if (!contacto?.Movil) {
-      console.error(contacto
-        ? `ZOHO-CITA: contacto ${contactoRef} existe pero no tiene Movil — creando como bloqueo`
-        : `ZOHO-CITA: no se encontró el contacto Zoho ${contactoRef} — creando como bloqueo`);
+      await avisarDegradacion(
+        contacto
+          ? `el contacto ${contactoRef} existe en Zoho pero no tiene Movil`
+          : `no se encontró el contacto Zoho ${contactoRef}`,
+        { zohoCitaID, calendarId, inicio: b.Inicio, fin: b.Fin, tipo }
+      );
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
-      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin);
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin, 'bloqueo');
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
 
     const ghlContactId = await ghl.buscarOCrearContactoPorTelefono(contacto.Movil, contacto.Nombre_Completo);
     if (!ghlContactId) {
-      console.error('ZOHO-CITA: no se pudo resolver contacto GHL para', contacto.Movil, '— creando como bloqueo');
+      await avisarDegradacion(
+        `no se pudo resolver el contacto GHL para el Movil ${contacto.Movil}`,
+        { zohoCitaID, calendarId, inicio: b.Inicio, fin: b.Fin, tipo }
+      );
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });
-      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin);
+      await db.confirmarCitaZoho(zohoCitaID, bloqueo?.id, calendarId, b.Inicio, b.Fin, 'bloqueo');
       console.log('ZOHO-CITA: bloqueo creado en GHL:', JSON.stringify(bloqueo));
       return;
     }
 
     const title = tituloGHL([tipo, contacto.Nombre_Completo || 'NHC'], 'Cita');
     const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title, description: obs });
-    await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId, b.Inicio, b.Fin);
+    await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId, b.Inicio, b.Fin, 'cita');
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));
   } catch (err) {
     // Nothing retries a cita: the 200 went out before any of this ran, so Zoho

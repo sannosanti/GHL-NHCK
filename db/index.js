@@ -206,14 +206,21 @@ async function reclamarCitaZoho(zohoCitaId, clase) {
   }
 }
 
-async function confirmarCitaZoho(zohoCitaId, ghlEventId, calendarId, inicio, fin) {
+// `clase` se vuelve a escribir acá, y no sólo al reclamar, porque la reserva la
+// decide antes de saber qué se pudo crear: reclama 'cita' con sólo ver que el
+// registro trae Contacto, y recién después se descubre que el contacto no tiene
+// Movil y hay que degradar a bloqueo. Sin esta corrección la tabla decía 'cita'
+// mientras GHL tenía un bloqueo, y esa mentira tapaba justo el caso que deja al
+// paciente sin recordatorio. COALESCE para no pisar la clase cuando no se pasa.
+async function confirmarCitaZoho(zohoCitaId, ghlEventId, calendarId, inicio, fin, clase) {
   if (!zohoCitaId) return;
   try {
     await pool.query(
       `UPDATE citas_sync
-          SET ghl_event_id = $2, calendar_id = $3, inicio = $4, fin = $5, actualizado_at = NOW()
+          SET ghl_event_id = $2, calendar_id = $3, inicio = $4, fin = $5,
+              clase = COALESCE($6, clase), actualizado_at = NOW()
         WHERE zoho_cita_id = $1`,
-      [zohoCitaId, ghlEventId || null, calendarId || null, inicio || null, fin || null]
+      [zohoCitaId, ghlEventId || null, calendarId || null, inicio || null, fin || null, clase || null]
     );
   } catch (err) {
     console.error('[citas_sync] no se pudo confirmar', zohoCitaId, '—', err.message);
