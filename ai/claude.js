@@ -4,7 +4,13 @@ const fetch = require('node-fetch');
 const { env } = require('../config');
 const db = require('../db');
 
-const MODEL_ID = 'claude-sonnet-5';
+// Sobreescribible por entorno A PROPOSITO. El cambio a Sonnet 5 se desplego SIN
+// haber probado el id contra la API (no habia clave disponible fuera de Railway).
+// Si el id resultara invalido, la API devuelve 404 y fallan TODOS los mensajes de
+// los dos bots a la vez. Con esta variable, la vuelta atras es poner
+// CLAUDE_MODEL_ID=claude-sonnet-4-5 en Railway y reiniciar: segundos, sin tocar
+// codigo ni esperar un despliegue.
+const MODEL_ID = process.env.CLAUDE_MODEL_ID || 'claude-sonnet-5';
 
 // $/MTok, from platform.claude.com/docs/en/about-claude/pricing (checked 2026-07-16).
 // cacheWrite here is the 1-hour-TTL rate (2x base input), not the 5-minute
@@ -63,6 +69,14 @@ function sanitizeHistory(messages) {
   // The API requires the first message to use the user role.
   while (cleaned.length && cleaned[0].role !== 'user') cleaned.shift();
   return cleaned;
+}
+
+// Aviso al arrancar: un modelo fuera de PRICING no rompe nada, pero registra
+// cada llamada con costo cero y el panel muestra $0 hasta que llega la factura.
+if (!PRICING[MODEL_ID]) {
+  console.warn(`⚠️ MODEL_ID '${MODEL_ID}' no esta en PRICING: el costo se va a registrar como $0.`);
+} else {
+  console.log(`Modelo activo: ${MODEL_ID}`);
 }
 
 function calcCostUsd(model, usage) {
