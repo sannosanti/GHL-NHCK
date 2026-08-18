@@ -26,6 +26,46 @@ const textQueues = {};
 /** Random human-like delay between 3 and 6 seconds. */
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
+/**
+ * ¿Este contacto ya es paciente, aunque nuestro estado diga 'nuevo'?
+ *
+ * Dos senales, en orden de costo:
+ *   1. La etiqueta 'activo nhck', que pone el equipo a mano. Gratis.
+ *   2. Existir en el modulo de Contactos de Zoho: haber pasado por la anamnesis.
+ *      Cuesta una consulta HTTP, asi que solo se pregunta si la etiqueta falto.
+ *
+ * SI ZOHO FALLA, DEVUELVE false — o sea, sigue el flujo normal de captacion.
+ *
+ * Es al reves del criterio del cierre por inactividad, donde ante la duda NO
+ * cerramos. Aca la asimetria se invierte: si Zoho se cae y devolvieramos true,
+ * escalariamos A TODOS los leads nuevos y la captacion se apagaria entera
+ * mientras Zoho este mal. Tratar a un paciente como lead es malo y recuperable;
+ * escalar a todo el mundo es una caida total.
+ *
+ * Por eso el fallo se registra fuerte: es invisible en el chat.
+ */
+async function esPacienteEstablecido(contact, tags) {
+  if ((tags || []).includes('activo nhck')) return true;
+
+  const movil = contact?.phone || '';
+  const email = contact?.email || '';
+  if (!movil && !email) return false;
+
+  try {
+    const zohoID = await zoho.buscarContactoAnamnesis(movil, email);
+    if (zohoID) {
+      console.log('PACIENTE ESTABLECIDO: encontrado en Zoho sin etiqueta `activo nhck` —', zohoID);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('⚠️ No se pudo consultar Zoho para saber si es paciente establecido. ' +
+      'Se sigue con el flujo normal: escalar a todos ante un fallo de Zoho apagaria la captacion. ' +
+      'Detalle:', err.message);
+    return false;
+  }
+}
+
 // No cerrar por inactividad cuando la conversación está esperando un pago.
 // Una consignación bancaria tarda más que los diez minutos del temporizador, así
 // que el cierre llegaba antes que el comprobante y la imagen caía en un chat ya
@@ -622,14 +662,25 @@ async function ghlWebhookHandler(req, res) {
     const tags = contact.tags || [];
     const estado = convData?.estado || 'nuevo';
 
-    // 'activo nhck' is applied externally (Zoho enrollment / ops team) to mark
-    // an established patient already in treatment — it never comes from our
-    // own code. If our own state machine ever lost track of their progress
-    // (e.g. reactivated to 'nuevo' after a long-inactivity close because this
-    // contact's relationship was handled manually and never reached a
-    // preservable estado), never show the onboarding script to them again —
-    // route straight to a human instead.
-    if (estado === 'nuevo' && tags.includes('activo nhck') && !tags.includes('escalado nhck')) {
+    // PACIENTE YA ESTABLECIDO — nunca mostrarle el guion de captacion.
+    //
+    // La senal era solo la etiqueta 'activo nhck', que pone una persona a mano.
+    // El 2026-08-18 el bot le hablo como venta nueva a la mama de un paciente
+    // que tenia cita ESE DIA: no tenia la etiqueta. Depender de que alguien se
+    // acuerde de etiquetar no es una proteccion.
+    //
+    // Se agrega una segunda senal que no depende de nadie: estar en el modulo
+    // de Contactos de Zoho significa haber pasado por la anamnesis, o sea ser
+    // paciente real. Confirmado que ese modulo tiene SOLO pacientes, no leads.
+    //
+    // Por que NO se uso 'cliente-nhck': esa etiqueta la pone nuestro propio bot
+    // a todo el que escribe por primera vez (mas abajo, junto a crearOportunidad).
+    // Usarla habria escalado cada conversacion desde el segundo mensaje.
+    //
+    // La consulta a Zoho solo corre si la etiqueta NO esta y el estado es
+    // 'nuevo': es como mucho una vez por conversacion nueva, no por mensaje.
+    if (estado === 'nuevo' && !tags.includes('escalado nhck')
+        && await esPacienteEstablecido(contact, tags)) {
       await ghl.addTag(contactId, 'escalado nhck');
       await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', messageId, contact.phone || '');
       triggerAnalysis(conversationId, contactId, 'activo_reinicio_evitado');
