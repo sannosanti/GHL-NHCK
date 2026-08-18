@@ -37,6 +37,20 @@ const constants = {
   STAGE_LINK_PAGO: '87c45501-386f-418e-95e7-6975b20559a6',
   STAGE_PAGO_PARCIAL: '18571c0c-5c8f-40f1-9440-e865670ac108',
 
+  // Días HÁBILES completos que deben pasar entre el pago y la cita.
+  //
+  // Existe porque entre la venta y la cita hay un paso MANUAL: un asesor le
+  // manda al paciente el link de la anamnesis, y el paciente necesita ~45 min
+  // para llenarla. Sin ese margen, una venta del viernes a la tarde se agendaba
+  // para el lunes y llegaba sin la anamnesis: la cita se reprogramaba (casos del
+  // 2026-08-18).
+  //
+  // Es una constante a propósito. Dos días es una estimación, no una medición:
+  // si los datos muestran que el asesor manda el link en horas, bajarlo a 1 es
+  // cambiar este número. El verdadero cuello de botella es cuánto tarda ese
+  // envío, no cuántos días esperemos.
+  MIN_DIAS_HABILES_ANTICIPACION: 2,
+
   HORARIOS_NHCK: {
     1: [{ ini: 14, fin: 15.5 }],
     2: [{ ini: 8.5, fin: 10.5 }, { ini: 13, fin: 16.5 }],

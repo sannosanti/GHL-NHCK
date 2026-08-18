@@ -447,6 +447,43 @@ async function getDisponibilidad(fechaISO) {
   } catch (err) { console.error('Error disponibilidad:', err.message); return []; }
 }
 
+/**
+ * ¿La clínica está CERRADA todo el día? (festivo, jornada bloqueada)
+ *
+ * No es lo mismo que "no hay cupo": un día lleno de citas es un día hábil, la
+ * clínica trabaja. Por eso mira solo los bloqueos SIN consultor asignado, que es
+ * como se marca un cierre de toda la clínica — el mismo criterio que usa
+ * calcularSlotsLibres para no ofrecer horarios cerrados.
+ *
+ * Se usa para contar la anticipación mínima en días hábiles. Deliberadamente NO
+ * se mantiene una lista de festivos colombianos: habría que actualizarla cada
+ * año, la Ley Emiliani mueve la mitad al lunes, y el día que alguien se olvide
+ * el conteo saldría mal en silencio. La agenda ya sabe qué días abre.
+ */
+function esCierreTotal(citas, fechaISO) {
+  const fecha = new Date(fechaISO + 'T00:00:00');
+  const horarios = constants.HORARIOS_NHCK[fecha.getDay()];
+  if (!horarios) return true;                 // la clínica no abre ese día de la semana
+  if (!Array.isArray(citas)) return false;    // sin datos: se asume abierto (ver el fallback en ghl.js)
+
+  const bloqueos = [];
+  citas.forEach(c => {
+    if (c.Tipo !== 'Bloqueo' || (c.Consultor?.ID || '')) return;  // solo cierres de clínica
+    const tIni = new Date((c.Inicio || '').replace(/-/g, ' '));
+    const tFin = new Date((c.Fin || '').replace(/-/g, ' '));
+    if (isNaN(tIni)) return;
+    const hIni = tIni.getHours() + tIni.getMinutes() / 60;
+    const hFin = isNaN(tFin) ? hIni + 0.5 : tFin.getHours() + tFin.getMinutes() / 60;
+    bloqueos.push({ ini: hIni, fin: hFin });
+  });
+  if (!bloqueos.length) return false;
+
+  // Cerrado solo si los bloqueos tapan TODAS las franjas de atención. Un bloqueo
+  // parcial (el de 07:00-12:00 del 24-Jul-2026) no convierte el día en no hábil.
+  return horarios.every(({ ini, fin }) =>
+    bloqueos.some(b => b.ini <= ini && b.fin >= fin));
+}
+
 function calcularSlotsLibres(citas, fechaISO) {
   const fecha = new Date(fechaISO + 'T00:00:00');
   const dia = fecha.getDay();
@@ -594,4 +631,5 @@ module.exports = {
   buscarCitaPorInicio,
   getDisponibilidad,
   calcularSlotsLibres,
+  esCierreTotal,
 };

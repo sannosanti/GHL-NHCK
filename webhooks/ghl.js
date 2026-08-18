@@ -128,6 +128,11 @@ async function flushTextQueue(conversationId) {
       const hoy = new Date();
       const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
       const diasN = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+      // Dias habiles ya transcurridos, contados desde manana. Un dia cuenta como
+      // habil si la clinica abre ese dia de la semana y Zoho no tiene un cierre
+      // de jornada completa (festivo). Ver constants.MIN_DIAS_HABILES_ANTICIPACION.
+      let habilesPrevios = 0;
+
       const diaConCupo = async (offset) => {
         const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
         const ds = f.getDay();
@@ -135,6 +140,18 @@ async function flushTextQueue(conversationId) {
         const fISO = f.toISOString().split('T')[0];
         let citas = await db.getCachedDisponibilidad(fISO);
         if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
+
+        // Un festivo no cuenta como dia habil, pero tampoco frena el barrido:
+        // se salta y se sigue buscando.
+        if (zoho.esCierreTotal(citas, fISO)) return null;
+
+        // ANTICIPACION MINIMA. El dia es habil, asi que suma — pero solo se puede
+        // OFRECER si ya pasaron los dias habiles requeridos. El incremento va
+        // despues de la comprobacion: el propio dia de la cita no cuenta como
+        // margen para mandar la anamnesis.
+        const alcanzaAnticipacion = habilesPrevios >= constants.MIN_DIAS_HABILES_ANTICIPACION;
+        habilesPrevios++;
+        if (!alcanzaAnticipacion) return null;
         const slots = zoho.calcularSlotsLibres(citas, fISO);
         if (!slots.length) return null;
         return `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
