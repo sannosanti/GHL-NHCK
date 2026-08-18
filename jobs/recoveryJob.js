@@ -78,10 +78,49 @@ REGLAS:
 - Máximo 2 oraciones
 - Solo español`;
 
-async function generateRecoveryMessage(messages, attempt) {
-  const systemPrompt = attempt === 1 ? SYSTEM_PROMPT_ATTEMPT_1
+/**
+ * Ficha de datos VERIFICADOS que se le antepone al historial.
+ *
+ * Sin esto, el modelo recibia solo los ultimos 6 mensajes. Cuando el nombre del
+ * paciente se habia dicho antes de esa ventana, quedaba fuera y el modelo lo
+ * COMPLETABA: a Natalia Carmona le escribio "como va todo con Samuel" dos veces
+ * y despues "como va todo con Valentina" (2026-08-18, 11:30 a 12:00). No se
+ * equivoco de contacto: no tenia el dato y lo invento.
+ *
+ * El triaje ya venia en la consulta SQL de este mismo archivo y no se usaba.
+ *
+ * Se declara explicitamente lo que NO se sabe. Un campo ausente en silencio
+ * invita a rellenarlo; uno que dice "desconocido" con la instruccion de no
+ * inventar, no.
+ */
+function fichaDeDatos({ nombreContacto, triaje }) {
+  const t = triaje || {};
+  const nino = t.nombre_nino || t.nombreNino || null;
+  const lineas = [
+    'DATOS VERIFICADOS DE ESTA CONVERSACION — son los UNICOS que podes usar:',
+    `- Quien escribe: ${nombreContacto || 'DESCONOCIDO'}`,
+    `- Nombre del paciente: ${nino || 'DESCONOCIDO'}`,
+    `- Dificultad: ${t.triaje1 || 'DESCONOCIDA'}`,
+    `- Tiempo con la dificultad: ${t.triaje2 || 'DESCONOCIDO'}`,
+    `- Que han intentado: ${t.triaje3 || 'DESCONOCIDO'}`,
+    '',
+    'REGLA ABSOLUTA SOBRE NOMBRES Y DATOS:',
+    '- Usa SOLO los datos de arriba. Si alguno dice DESCONOCIDO, NO lo inventes.',
+    '- Si no sabes el nombre del paciente, escribi sin nombrarlo ("tu hijo/a", "ustedes").',
+    '- NUNCA deduzcas un nombre del historial ni elijas uno que suene probable.',
+    '- Inventar un nombre de paciente es peor que no nombrarlo: destruye la confianza.',
+  ];
+  return lineas.join('\n');
+}
+
+async function generateRecoveryMessage(messages, attempt, datos = {}) {
+  const base = attempt === 1 ? SYSTEM_PROMPT_ATTEMPT_1
     : attempt === 2 ? SYSTEM_PROMPT_ATTEMPT_2
     : SYSTEM_PROMPT_ATTEMPT_3;
+
+  // La ficha va al FINAL: es lo ultimo que lee el modelo antes de escribir, y
+  // pesa mas que el conocimiento general de arriba.
+  const systemPrompt = `${base}\n\n${fichaDeDatos(datos)}`;
 
   // Build a short history summary for Claude to draw context from. Messages
   // whose only text is blank are dropped first: a media webhook that arrived
@@ -150,7 +189,7 @@ async function runRecoveryJob() {
   console.log(`[recoveryJob] Checking ${rows.length} eligible conversation(s)`);
 
   for (const row of rows) {
-    const { conversation_id, contact_id, messages, recovery_status, updated_at } = row;
+    const { conversation_id, contact_id, messages, triaje, recovery_status, updated_at } = row;
     const updatedAt = new Date(updated_at);
 
     try {
@@ -176,7 +215,10 @@ async function runRecoveryJob() {
 
       // 1. Generate recovery message via Claude
       const parsedMessages = Array.isArray(messages) ? messages : [];
-      const rawRecovery = await generateRecoveryMessage(parsedMessages, attempt);
+      const rawRecovery = await generateRecoveryMessage(parsedMessages, attempt, {
+        nombreContacto: contact?.firstName || null,
+        triaje,
+      });
 
       // The history handed to Claude is full of internal tags, so the model
       // imitates them: the adults bot shipped a literal "[NHC_MENOR]" to a
