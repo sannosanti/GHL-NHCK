@@ -11,7 +11,20 @@ function limpiarTimers(conversationId) {
   }
 }
 
-function iniciarTimersInactividad(conversationId, contactId, sendMessage, onCierre) {
+/**
+ * `puedeCerrar` — comprobación opcional que corre JUSTO ANTES de despedirse.
+ *
+ * Existe porque el cierre por inactividad y la espera de un pago son
+ * incompatibles: al pedir una consignación bancaria le dábamos diez minutos al
+ * paciente y le cerrábamos el chat. Una transferencia no se hace en diez
+ * minutos, así que la conversación se cerraba SIEMPRE, y el comprobante llegaba
+ * a un chat ya cerrado (caso Maribel, 2026-08-18 14:00 — el bot pidió el
+ * comprobante 13:52, cerró 14:00, ella lo mandó 14:02 y se descartó).
+ *
+ * La comprobación va antes del mensaje de despedida, no después: cerrar el
+ * estado sin despedirse confunde menos que despedirse y quedar abierto.
+ */
+function iniciarTimersInactividad(conversationId, contactId, sendMessage, onCierre, puedeCerrar) {
   limpiarTimers(conversationId);
   inactivityTimers[conversationId] = {
     timer5: setTimeout(async () => {

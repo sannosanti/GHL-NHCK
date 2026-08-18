@@ -26,6 +26,26 @@ const textQueues = {};
 /** Random human-like delay between 3 and 6 seconds. */
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
+// No cerrar por inactividad cuando la conversación está esperando un pago.
+// Una consignación bancaria tarda más que los diez minutos del temporizador, así
+// que el cierre llegaba antes que el comprobante y la imagen caía en un chat ya
+// cerrado. Se consulta el estado en el momento del cierre, no el que había
+// cuando se armó el temporizador: entre medio el paciente pudo avanzar.
+async function noCerrarSiEsperaPago(convId) {
+  try {
+    const d = await db.getConversationData(convId);
+    if (d?.estado === 'esperando_pago') return false;
+    // También si ya hay un pago pendiente registrado: el comprobante puede estar
+    // en camino aunque el estado haya cambiado por otra vía.
+    return true;
+  } catch (err) {
+    // Ante duda, NO cerrar. Un chat abierto de más cuesta menos que un
+    // comprobante perdido.
+    console.error('noCerrarSiEsperaPago: no se pudo leer el estado, no se cierra:', err.message);
+    return false;
+  }
+}
+
 // Which WhatsApp line this deployment answers on. Deliberately separate from
 // the brand tags (`cliente-nhck`, `nhc-adultos`, ...): those say who the
 // patient IS, this says which number the thread lives on. They diverge for
@@ -287,7 +307,7 @@ async function flushTextQueue(conversationId) {
       timers.iniciarTimersInactividad(conversationId, contactId, sendIfNoEscalado, async (convId, ctId) => {
         await db.marcarCerrado(convId);
         triggerAnalysis(convId, ctId || contactId, 'inactividad');
-      });
+      }, noCerrarSiEsperaPago);
       return;
     }
 
@@ -447,7 +467,7 @@ async function flushTextQueue(conversationId) {
     timers.iniciarTimersInactividad(conversationId, contactId, sendIfNoEscalado, async (convId, ctId) => {
       await db.marcarCerrado(convId);
       triggerAnalysis(convId, ctId || contactId, 'inactividad');
-    });
+    }, noCerrarSiEsperaPago);
     console.log('RESPUESTA OK:', { reply: reply?.substring(0, 60), estado: nuevoEstado });
 
   } catch (err) {
@@ -688,16 +708,33 @@ async function ghlWebhookHandler(req, res) {
       lastMsgId = fetched.id;
     }
 
-    // IMAGE IN esperando_pago
-    if (isImage && estado === 'esperando_pago') {
-      console.log('IMAGEN RECIBIDA en esperando_pago — procesando comprobante');
+    // IMAGEN DE COMPROBANTE
+    //
+    // La condición ya no es sólo `estado === 'esperando_pago'`. Ese estado se
+    // pierde por dos vías, y en las dos la imagen se descartaba en silencio:
+    //
+    //   · el cierre por inactividad pasa el estado a 'cerrado' (caso Maribel,
+    //     2026-08-18: cerró 14:00, ella mandó el comprobante 14:02);
+    //   · el paciente escribe algo entre medio y el flujo avanza a otro estado.
+    //
+    // Se acepta también cuando hay un pago pendiente registrado para el contacto.
+    // Ese registro es la señal fuerte: significa que le pedimos plata y todavía no
+    // la confirmamos. Una foto en ese contexto es un comprobante, venga en el
+    // estado que venga.
+    const pagoPendiente = isImage ? await db.getPendingPaymentsByContact(contactId).catch(() => null) : null;
+    const esperabaComprobante = estado === 'esperando_pago'
+      || convData?.estado_antes_cierre === 'esperando_pago'
+      || !!pagoPendiente;
+
+    if (isImage && esperabaComprobante) {
+      console.log('IMAGEN RECIBIDA — procesando comprobante', { estado, antesCierre: convData?.estado_antes_cierre, hayPagoPendiente: !!pagoPendiente });
       await humanDelay();
       const nombre = contact.firstName || '';
       const triaje = convData?.triaje || {};
       const history = convData?.messages || [];
       const phone = contact.phone || '';
 
-      const pago = await db.getPendingPaymentsByContact(contactId);
+      const pago = pagoPendiente;
 
       if (pago) {
         const mesesN = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -751,8 +788,19 @@ async function ghlWebhookHandler(req, res) {
       return;
     }
 
-    // Ignore image in other states
-    if (isImage) return;
+    // Imagen en cualquier otro estado. Ya no se descarta en silencio: si el
+    // paciente se tomó el trabajo de mandar una foto, alguien tiene que verla.
+    // Se etiqueta para revisión humana y se le responde, en vez de dejarlo
+    // hablando solo — que es lo que pasaba antes.
+    if (isImage) {
+      console.log('IMAGEN en estado no esperado — escalando para revisión:', estado);
+      await db.logEvent(contactId, conversationId, 'imagen_fuera_de_flujo', { estado });
+      await ghl.addTag(contactId, 'escalado nhck').catch(() => {});
+      await ghl.sendMessage(conversationId,
+        'Recibí tu imagen 📸 Un asesor la revisa y te confirma en un momento 🙌',
+        contactId).catch(() => {});
+      return;
+    }
     if (!lastMsg) return;
 
     const nombre = contact.firstName || '';
