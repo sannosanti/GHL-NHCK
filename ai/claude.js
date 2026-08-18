@@ -4,14 +4,28 @@ const fetch = require('node-fetch');
 const { env } = require('../config');
 const db = require('../db');
 
-const MODEL_ID = 'claude-sonnet-4-5';
+const MODEL_ID = 'claude-sonnet-5';
 
 // $/MTok, from platform.claude.com/docs/en/about-claude/pricing (checked 2026-07-16).
 // cacheWrite here is the 1-hour-TTL rate (2x base input), not the 5-minute
 // rate (1.25x) — buildSystemPrompt's conversational callers run at ~15
 // calls/hour per brand, frequent enough that the 1h TTL (set below via
 // cache_control.ttl) avoids paying constant cache-write churn on the 5m TTL.
+// La tabla se indexa por MODEL_ID y calcCostUsd devuelve 0 si el modelo no está
+// acá. Cambiar MODEL_ID sin agregar su fila NO rompe nada: registra cada llamada
+// con costo cero, el panel muestra $0 y nadie se entera hasta la factura. Si
+// mañana se cambia de modelo otra vez, agregá la fila ANTES.
+//
+// Sonnet 5 se factura igual que Sonnet 4.5 en tarifa normal ($3/$15). Hay un
+// precio de lanzamiento de $2/$10 vigente hasta el 2026-08-31; NO se usa acá a
+// propósito: cuando venza, la tabla quedaría subestimando el gasto en silencio,
+// que es el mismo modo de falla que el comentario de arriba describe. Preferimos
+// que el costo registrado sea igual o mayor al real, nunca menor.
+//
+// Se conserva la fila de sonnet-4-5 para que los registros históricos sigan
+// calculando bien si alguna vez se reprocesan.
 const PRICING = {
+  'claude-sonnet-5':   { input: 3, output: 15, cacheWrite: 6, cacheRead: 0.30 },
   'claude-sonnet-4-5': { input: 3, output: 15, cacheWrite: 6, cacheRead: 0.30 },
 };
 
