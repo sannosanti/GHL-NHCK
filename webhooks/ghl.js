@@ -186,7 +186,7 @@ async function flushTextQueue(conversationId) {
     } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
 
     const derivadoA = convData?.derivado_a || null;
-    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA });
+    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA, desdeFormulario: tags.includes('lead-formulario') });
     const rawReply = await callClaude(systemPrompt, history);
 
     // The Claude call above can take several seconds — an advisor may have
@@ -635,6 +635,27 @@ async function ghlWebhookHandler(req, res) {
       triggerAnalysis(conversationId, contactId, 'activo_reinicio_evitado');
       await humanDelay();
       await ghl.sendMessage(conversationId, 'Hola de nuevo 😊 Ya te conectamos con nuestro equipo para darte seguimiento personalizado.', contactId, channel);
+      return;
+    }
+
+    // FORMULARIO DE META — la persona toco "Ahora No"
+    //
+    // El clic de un boton de plantilla llega como un mensaje entrante igual que
+    // un texto escrito: el bot no los distingue. Sin esto, alguien que acaba de
+    // decir que NO recibia el saludo de bienvenida y el arranque del triaje.
+    //
+    // Ademas de ser una mala experiencia, es lo que mas rapido baja la
+    // calificacion del numero en Meta: gente que dijo que no y sigue recibiendo
+    // mensajes es gente que reporta.
+    //
+    // Se responde una vez, corto, y se cierra. No se escala: no hay nada que un
+    // asesor tenga que hacer con alguien que pidio no ser contactado ahora.
+    if (estado === 'nuevo' && tags.includes('formulario-declinado')) {
+      await db.saveConversationData(conversationId, contactId, convData?.messages || [], {}, 'cerrado', messageId, contact.phone || '');
+      await humanDelay();
+      await ghl.sendMessage(conversationId,
+        'Con gusto 😊 Quedamos atentos por si mas adelante querés retomar. Escribinos cuando quieras.',
+        contactId, channel);
       return;
     }
 

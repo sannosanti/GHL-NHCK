@@ -31,7 +31,7 @@ async function refreshLearnedRules() {
  */
 async function buildSystemPrompt(estado, ctx) {
   await refreshLearnedRules();
-  const { nombre = '', triaje = {}, disponibilidadTexto = '', derivadoA = null } = ctx;
+  const { nombre = '', triaje = {}, disponibilidadTexto = '', derivadoA = null, desdeFormulario = false } = ctx;
 
   // derivadoA === 'luisa' means: this conversation started with Carolina, but
   // the patient turned out to be an adult. We keep answering on Carolina's
@@ -107,7 +107,26 @@ DISPONIBILIDAD (usa SOLO estos horarios, NUNCA inventes):
 ${disponibilidadTexto}
 Si el bloque dice que no hay cupo en los próximos 14 días, ofrecé igual las fechas que sí aparecen: son las más próximas reales. Una agenda ocupada nunca es motivo para despedir a alguien sin darle una fecha concreta.`;
 
-  if (estado === 'nuevo') {
+  if (estado === 'nuevo' && desdeFormulario) {
+    // Viene de un formulario de Meta: NOSOTROS le escribimos primero y ya
+    // respondió. Preguntarle el nombre acá es pedirle un dato que el formulario
+    // ya trajo, y arranca la conversación como si no supiéramos quién es —
+    // exactamente lo que pasó con el chat del 2026-08-18 donde la paciente
+    // respondió "es que me apareció este mensaje" y el bot preguntó "¿qué
+    // mensaje te apareció?".
+    dynamicPrompt += `
+
+TU TAREA (respondió a nuestro mensaje de bienvenida):
+Esta persona dejó sus datos en un formulario y NOSOTROS le escribimos primero.
+Ya sabés quién es${nombre ? `: se llama ${nombre}` : ''}. NO le preguntes el nombre.
+
+1. Saludá${nombre ? ` a ${nombre}` : ''} y presentate como ${nombreAsesora} de ${marca}
+2. Mencioná brevemente que al continuar aceptan las políticas de privacidad: https://neurohackingcenter.co/politicas-de-privacidad/
+3. Preguntá directamente por el motivo de consulta
+
+Si ya te dice el motivo → seguí con el triaje normalmente.
+Si pide llamada o hablar con alguien → [ESCALAR]`;
+  } else if (estado === 'nuevo') {
     dynamicPrompt += `
 
 TU TAREA (primera interacción):
