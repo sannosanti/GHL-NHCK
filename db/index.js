@@ -177,6 +177,28 @@ async function initDB() {
   await pool.query(`ALTER TABLE citas_sync ADD COLUMN IF NOT EXISTS inicio TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE citas_sync ADD COLUMN IF NOT EXISTS fin TEXT`).catch(() => {});
   await pool.query(`ALTER TABLE citas_sync ADD COLUMN IF NOT EXISTS actualizado_at TIMESTAMP`).catch(() => {});
+
+  // A submission Zoho refused is parked here so the answers survive the
+  // rejection instead of being dropped. `etapa` records which of the two
+  // Creator writes failed (historia-clinica or anamnesis), because the second
+  // only runs when the first succeeds and the distinction decides what has to
+  // be re-keyed by hand. `recuperado_at` stays NULL until someone loads it.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS anamnesis_fallidas (
+      id SERIAL PRIMARY KEY,
+      agent TEXT NOT NULL,
+      formulario TEXT NOT NULL,
+      nombre TEXT,
+      movil TEXT,
+      email TEXT,
+      etapa TEXT NOT NULL,
+      error JSONB,
+      payload JSONB NOT NULL,
+      recuperado_at TIMESTAMP,
+      creado_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
   console.log('Base de datos inicializada ✓');
 }
 
@@ -764,6 +786,50 @@ async function getInsightsDaily(days = 30) {
   return res.rows;
 }
 
+
+// Parks a submission Zoho refused so the answers survive the rejection. The
+// anamnesis endpoints used to drop the payload on the floor when Creator said
+// no, which meant a patient who had just spent twenty minutes on a clinical
+// history had to be asked to do it again — if anyone noticed at all. Nobody
+// did: the notice was sent inside the success branch. Stores the raw body,
+// not a summary, because whoever re-keys it needs every answer.
+// Returns the row id so the alert can name what to recover, or null if even
+// this failed, in which case the caller must not promise a recovery.
+async function guardarAnamnesisFallida({ formulario, nombre, movil, email, etapa, error, payload }) {
+  try {
+    const res = await pool.query(`
+      INSERT INTO anamnesis_fallidas (agent, formulario, nombre, movil, email, etapa, error, payload)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING id
+    `, [env.agentName, formulario, nombre || null, movil || null, email || null, etapa,
+        JSON.stringify(error ?? null), JSON.stringify(payload || {})]);
+    return res.rows[0]?.id || null;
+  } catch (err) {
+    console.error('Error guardando anamnesis fallida:', err.message);
+    return null;
+  }
+}
+
+async function getAnamnesisFallidas() {
+  try {
+    const res = await pool.query(
+      'SELECT * FROM anamnesis_fallidas WHERE recuperado_at IS NULL ORDER BY creado_at DESC LIMIT 100'
+    );
+    return res.rows;
+  } catch (err) {
+    console.error('Error leyendo anamnesis fallidas:', err.message);
+    return [];
+  }
+}
+
+async function marcarAnamnesisRecuperada(id) {
+  try {
+    await pool.query('UPDATE anamnesis_fallidas SET recuperado_at = NOW() WHERE id = $1', [id]);
+  } catch (err) {
+    console.error('Error marcando anamnesis recuperada:', err.message);
+  }
+}
+
 module.exports = {
   pool,
   initDB,
@@ -807,6 +873,9 @@ module.exports = {
   getPendingWebhooks,
   bumpPendingWebhookAttempt,
   deletePendingWebhook,
+  guardarAnamnesisFallida,
+  getAnamnesisFallidas,
+  marcarAnamnesisRecuperada,
   reclamarCitaZoho,
   confirmarCitaZoho,
   liberarCitaZoho,

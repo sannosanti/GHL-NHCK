@@ -686,7 +686,11 @@ async function submitToCreator(data) {
       return true;
     }
     console.warn('[Creator] Error al guardar:', result.error, '| Stage:', result.stage);
-    return false;
+    // The server parks a rejected submission before answering, so a failure
+    // that carries a rescateId is not a lost form: the answers are stored and
+    // the centre has been alerted. Telling the patient nothing was saved would
+    // send her to fill in twenty minutes of clinical history for no reason.
+    return result.rescateId ? 'rescatado' : false;
   } catch (err) {
     console.warn('[Creator] No se pudo enviar a Zoho Creator:', err.message);
     return false;
@@ -742,7 +746,16 @@ function showSuccess(pdfOk, saved) {
   const title = document.getElementById('successTitle');
   const note  = document.getElementById('pdfNote');
 
-  if (!saved) {
+  if (saved === 'rescatado') {
+    // Zoho refused the record but the answers are stored server-side, so this
+    // is neither a clean success nor a loss. Say so plainly instead of picking
+    // whichever of the two existing messages is less wrong.
+    icon.textContent  = '✓';
+    icon.style.background = '#fef3c7';
+    title.textContent = 'Recibimos su información';
+    note.innerHTML = 'Sus respuestas quedaron guardadas y el equipo del centro ya fue avisado para registrarlas.<br>No necesita volver a llenar el formulario.'
+      + (pdfOk ? '<br>El PDF también se descargó.' : '');
+  } else if (!saved) {
     // Do not claim a record exists when Zoho rejected it. The PDF is the
     // patient's only copy in this case, so point them at it.
     icon.textContent  = '!';

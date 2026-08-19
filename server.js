@@ -532,17 +532,16 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
     // clinical answers themselves, since these logs are not a PHI store.
     logOffendingCreatorFields('/anamnesis-clinica-infantil', crData, creatorPayload);
 
-    if (crData.code === 3000 || crData.data?.ID) {
-      // ── 6. Also create the record in the KIDS psychologist-review module ──
-      // "Anamnesis_nna2" — NOT "Anamnesis" (that module is for adults, see
-      // crearAnamnesisNinos in services/zoho.js for the full field map).
-      // Historia Clínica alone never fed the psychologist's review module.
-      // Reuses contactoID already resolved above. Passes `d` and contactoID
-      // directly — almost every field has its own real Zoho key now, so the
-      // old cherry-picked/combined subset used for crearAnamnesisPsicologo
-      // (adults' Anamnesis) is not needed here.
-      let anamnesisCreada = false;
-      let anamnesisError = null;
+    const hcOk = crData.code === 3000 || !!crData.data?.ID;
+
+    let anamnesisCreada = false;
+    let anamnesisError = null;
+    if (hcOk) {
+      // Reuses the contactoID already resolved above and passes `d` directly:
+      // almost every field has its own real Zoho key now, so the old
+      // cherry-picked/combined subset is no longer needed. See crearAnamnesisNinos in
+      // services/zoho.js for the full map. Historia Clínica alone never fed
+      // the psychologist's review module, which is why this second write exists.
       try {
         const anamnesisResult = await crearAnamnesisNinos(d, contactoID);
         anamnesisCreada = anamnesisResult?.code === 3000 || !!anamnesisResult?.data?.ID;
@@ -551,28 +550,60 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
         anamnesisError = err.message;
       }
       if (!anamnesisCreada) console.warn('[/anamnesis-clinica-infantil] Registro Anamnesis_nna2 NO se creó:', JSON.stringify(anamnesisError));
-
-      // Sent after anamnesisCreada is resolved, so the notice reports what
-      // actually landed in Zoho rather than just that the request arrived — a
-      // "se envió" that hides a rejected record is worse than no notice.
-      // Fire-and-forget: a mail outage must never turn a saved anamnesis into
-      // an error for the person who pressed Enviar.
-      notify(
-        `Anamnesis infantil enviada — ${d.nombreConsultante}\n` +
-        `Móvil: ${d.movilConsultante}\n` +
-        `Email: ${d.emailConsultante || '—'}\n` +
-        `Edad: ${d.edadConsultante || '—'}\n` +
-        `Registro en Zoho: ${anamnesisCreada ? 'creado correctamente' : 'NO se creó — revisar'}\n` +
-        new Date().toLocaleString('es-CO'),
-        env.anamnesisNotifyEmail
-      ).catch(() => {});
-
-      return res.json({ ok: true, id: crData.data?.ID, contactoID, anamnesisCreada, anamnesisError });
     }
-    if (crData.code === 3100) {
-      return res.status(401).json({ ok: false, stage: 'auth', error: 'Token Zoho inválido o expirado — reintentá en unos segundos' });
+
+    // Everything below used to sit inside the success branch, so the one
+    // outcome worth reporting — a record Zoho refused — was the only one that
+    // told nobody and kept nothing. Confirmed 2026-08-18: a patient's Contacto
+    // was created, HISTORIAS_CLINICAS rejected her record, and her answers were
+    // already gone by the time she asked what had happened. Park the raw
+    // submission first, because the alert can only promise a recovery once
+    // there is something to recover from.
+    let rescateId = null;
+    if (!hcOk || !anamnesisCreada) {
+      rescateId = await db.guardarAnamnesisFallida({
+        formulario: 'infantil',
+        nombre: d.nombreConsultante,
+        movil:  d.movilConsultante,
+        email:  d.emailConsultante,
+        etapa:  hcOk ? 'anamnesis' : 'historia-clinica',
+        error:  hcOk ? anamnesisError : crData,
+        payload: d,
+      });
     }
-    return res.status(422).json({ ok: false, stage: 'creator', error: crData.message || JSON.stringify(crData), details: crData });
+
+    // Fire-and-forget: a mail outage must never turn a saved anamnesis into
+    // an error for the person who pressed Enviar.
+    const todoOk = hcOk && anamnesisCreada;
+    notify(
+      `${todoOk ? 'Anamnesis infantil enviada' : 'FALLÓ la anamnesis infantil'} — ${d.nombreConsultante}\n` +
+      `Móvil: ${d.movilConsultante}\n` +
+      `Email: ${d.emailConsultante || '—'}\n` +
+      `Edad: ${d.edadConsultante || '—'}\n` +
+      `Historia clínica: ${hcOk ? 'creada' : 'RECHAZADA por Zoho'}\n` +
+      `Registro Anamnesis_nna2: ${anamnesisCreada ? 'creado correctamente' : 'NO se creó — revisar'}\n` +
+      (todoOk ? '' :
+        (rescateId
+          ? `Respuestas guardadas para recuperar: tabla anamnesis_fallidas, id ${rescateId}. NO hay que pedirle que llene el formulario de nuevo.\n`
+          : 'Las respuestas NO se pudieron guardar. Hay que contactarla y pedirle que lo llene de nuevo.\n') +
+        `Detalle: ${JSON.stringify(hcOk ? anamnesisError : crData).slice(0, 400)}\n`) +
+      new Date().toLocaleString('es-CO'),
+      env.anamnesisNotifyEmail
+    ).catch(() => {});
+
+    if (hcOk) {
+      return res.json({ ok: true, id: crData.data?.ID, contactoID, anamnesisCreada, anamnesisError, rescateId });
+    }
+
+    // An expired token is HTTP 401 with code 1030 — verified live 2026-08-19
+    // against Creator with a deliberately invalid token. `3100` means "No
+    // records found for the given criteria", and mapping it here to an expired
+    // token reported every rejected form as an auth problem, so the real cause
+    // was never looked for.
+    if (crData.code === 1030) {
+      return res.status(401).json({ ok: false, stage: 'auth', error: 'No pudimos conectarnos con Zoho. Reintentá en unos segundos.' });
+    }
+    return res.status(422).json({ ok: false, stage: 'creator', rescateId, error: crData.message || JSON.stringify(crData), details: crData });
   } catch (err) {
     res.status(500).json({ ok: false, stage: 'creator', error: err.message });
   }
