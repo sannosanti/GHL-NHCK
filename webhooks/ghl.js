@@ -51,8 +51,22 @@ async function esPacienteEstablecido(contact, tags) {
   const email = contact?.email || '';
   if (!movil && !email) return false;
 
+  // TIMEOUT DURO. Sin esto, `fetch` a Zoho no tiene limite: si Zoho no responde,
+  // este `await` no resuelve nunca y el manejador del webhook queda colgado. El
+  // paciente no recibe NADA — ni respuesta, ni escalamiento, ni un error en los
+  // logs. Es la peor falla posible: silenciosa e invisible.
+  //
+  // 4 segundos es mas de lo que Zoho tarda normalmente y menos de lo que una
+  // persona espera una respuesta. Si se pasa, seguimos sin el dato.
+  const LIMITE_MS = 4000;
+  const t0 = Date.now();
   try {
-    const zohoID = await zoho.buscarContactoAnamnesis(movil, email);
+    const zohoID = await Promise.race([
+      zoho.buscarContactoAnamnesis(movil, email),
+      new Promise((_, rechazar) => setTimeout(() => rechazar(new Error(`Zoho no respondio en ${LIMITE_MS}ms`)), LIMITE_MS)),
+    ]);
+    const ms = Date.now() - t0;
+    if (ms > 1500) console.warn(`⚠️ Zoho tardo ${ms}ms en responder (limite ${LIMITE_MS}ms).`);
     if (zohoID) {
       console.log('PACIENTE ESTABLECIDO: encontrado en Zoho sin etiqueta `activo nhck` —', zohoID);
       return true;
