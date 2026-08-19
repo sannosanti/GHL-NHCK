@@ -38,7 +38,7 @@ async function buscarContactoAnamnesis(movil, email) {
     if (!movilLimpio.startsWith('57') && movilLimpio.length === 10) variantes.push('57' + movilLimpio);
     for (const tel of variantes) {
       const res = await fetch(
-        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Movil%3D%22${tel}%22&max_records=1`,
+        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=Movil%3D%22${tel}%22&max_records=1`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const data = await res.json();
@@ -46,7 +46,7 @@ async function buscarContactoAnamnesis(movil, email) {
     }
     if (email) {
       const res = await fetch(
-        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=Email%3D%22${encodeURIComponent(email)}%22&max_records=1`,
+        `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=Email%3D%22${encodeURIComponent(email)}%22&max_records=1`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const data = await res.json();
@@ -533,7 +533,7 @@ async function buscarContactoPorNombre(nombre) {
     const token = await getZohoAccessToken();
     const criteria = encodeURIComponent(`Nombre_Completo="${nombre}"`);
     const res = await fetch(
-      `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Contactos_Report?criteria=${criteria}&max_records=1`,
+      `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=${criteria}&max_records=1`,
       { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
     );
     const data = await res.json();
