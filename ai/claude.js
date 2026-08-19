@@ -139,7 +139,29 @@ async function callClaude(systemPrompt, history, maxTokens = 600) {
   // The system prompt forbids asterisks/bold, but the model doesn't always
   // comply — WhatsApp doesn't render ** as bold anyway, it shows the literal
   // characters, so this must be enforced in code, not just instructed.
-  return data.content[0].text.replace(/\*/g, '');
+  // Sonnet 5 puede devolver bloques de razonamiento ANTES del texto:
+  //   content: [{ type: 'thinking', ... }, { type: 'text', text: '...' }]
+  //
+  // El codigo leia content[0].text a secas. Con un bloque de razonamiento
+  // primero, eso es undefined y `.replace()` reventaba con
+  // "Cannot read properties of undefined (reading 'replace')". El modelo
+  // respondia bien y el bot moria justo antes de enviar: el paciente no recibia
+  // NADA. Fallaba solo cuando el modelo razonaba, asi que contestaba a unos si
+  // y a otros no (produccion, 2026-08-19).
+  //
+  // Se toman TODOS los bloques de texto y se unen: nunca mas un indice fijo.
+  const texto = (data.content || [])
+    .filter(b => b && b.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text)
+    .join('\n')
+    .trim();
+
+  if (!texto) {
+    const tipos = (data.content || []).map(b => b?.type).join(', ') || 'sin content';
+    throw new Error(`La respuesta del modelo no trae ningun bloque de texto (bloques: ${tipos})`);
+  }
+
+  return texto.replace(/\*/g, '');
 }
 
 module.exports = { callClaude };
