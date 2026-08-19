@@ -100,7 +100,17 @@ function calcCostUsd(model, usage) {
  * @param {Array} history - Array of message objects (role/content)
  * @returns {Promise<string>} raw reply text
  */
-async function callClaude(systemPrompt, history, maxTokens = 600) {
+// 600 alcanzaba con Sonnet 4.5, que no razonaba. Sonnet 5 razona por defecto y
+// esos tokens cuentan contra el MISMO limite: en produccion se vio una respuesta
+// con thinking_tokens=600 de max_tokens=600 y stop_reason='max_tokens' — todo el
+// presupuesto en pensar y cero para escribir. El paciente no recibio nada.
+//
+// 2000 deja lugar para el razonamiento y para una respuesta de 1-3 oraciones,
+// que es lo que este bot escribe. No cuesta de mas cuando no se usa: se cobra
+// por token generado, no por el limite.
+const MAX_TOKENS_DEFECTO = 2000;
+
+async function callClaude(systemPrompt, history, maxTokens = MAX_TOKENS_DEFECTO, reintento = false) {
   const messages = sanitizeHistory(history);
   if (messages.length === 0) {
     throw new Error('Claude API error: historial vacío tras descartar bloques de texto vacíos');
@@ -158,7 +168,18 @@ async function callClaude(systemPrompt, history, maxTokens = 600) {
 
   if (!texto) {
     const tipos = (data.content || []).map(b => b?.type).join(', ') || 'sin content';
-    throw new Error(`La respuesta del modelo no trae ningun bloque de texto (bloques: ${tipos})`);
+
+    // Se trunco razonando y nunca llego a escribir. Un solo reintento con el
+    // doble de presupuesto: es preferible pagar una llamada de mas a dejar a un
+    // paciente sin respuesta. El flag corta la recursion.
+    if (data.stop_reason === 'max_tokens' && !reintento) {
+      console.warn(`⚠️ El modelo agoto ${maxTokens} tokens razonando sin escribir respuesta. ` +
+        `Reintentando con ${maxTokens * 2}.`);
+      return callClaude(systemPrompt, history, maxTokens * 2, true);
+    }
+
+    throw new Error(`La respuesta del modelo no trae ningun bloque de texto ` +
+      `(bloques: ${tipos}, stop_reason: ${data.stop_reason}, reintento: ${reintento})`);
   }
 
   return texto.replace(/\*/g, '');
