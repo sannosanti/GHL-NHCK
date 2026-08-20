@@ -63,10 +63,25 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
   const espejado = new Map(rows.map(r => [r.zoho_cita_id, r]));
   console.error(`espejadas conocidas: ${espejado.size}`);
 
-  const cambios = [], sinEspejar = [], vistos = new Set();
+  const cambios = [], sinEspejar = [], vistos = new Set(), diasIlegibles = [];
   let revisadas = 0;
+
+  // Un fallo suelto no puede matar un recorrido de 184 días, pero tampoco se
+  // puede ignorar: si un día no se pudo leer, no se sabe qué había en él.
+  const citasDelDia = async (dia) => {
+    for (let intento = 1; intento <= 3; intento++) {
+      try { return await zoho.getDisponibilidad(dia); }
+      catch (err) {
+        if (intento === 3) { diasIlegibles.push(`${dia}: ${err.message}`); return null; }
+        await dormir(2000);
+      }
+    }
+  };
+
   for (let t = desde; t <= hasta; t += 86400000) {
-    for (const c of await zoho.getDisponibilidad(new Date(t).toISOString().slice(0, 10))) {
+    const delDia = await citasDelDia(new Date(t).toISOString().slice(0, 10));
+    if (delDia === null) continue;
+    for (const c of delDia) {
       vistos.add(c.ID);
       const prev = espejado.get(c.ID);
       if (!prev) {
@@ -107,9 +122,12 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
   // citas_sync con fecha dentro del rango pero que Zoho ya no lista quedó vivo
   // en GHL sin respaldo. No se borra nada acá: sólo se reportan para revisar,
   // porque también caen en esta bolsa las reprogramadas fuera del rango.
+  // REGLA DURA: con un solo día sin leer no se puede afirmar que algo "ya no
+  // está en Zoho" — pudo estar justo en ese día. Decidir con datos incompletos
+  // acá significa mandar a cuarentena la cita de un paciente que sí existe.
   const huerfanas = [];
   let sinFechaRegistrada = 0;
-  for (const r of rows) {
+  for (const r of diasIlegibles.length ? [] : rows) {
     if (vistos.has(r.zoho_cita_id)) continue;
     if (!r.inicio) { sinFechaRegistrada++; continue; }
     const iso = parseZohoDateTime(r.inicio);
@@ -122,6 +140,13 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
   console.log(`  revisadas contra Zoho     : ${revisadas}`);
   console.log(`  DESACTUALIZADAS en GHL    : ${cambios.length}`);
   console.log(`  citas de Zoho sin espejar : ${sinEspejar.length}   (se crean con crear-faltantes.js)`);
+  if (diasIlegibles.length) {
+    console.log('');
+    console.log(`  ATENCIÓN: ${diasIlegibles.length} día(s) no se pudieron leer de Zoho.`);
+    for (const d of diasIlegibles) console.log(`      ${d}`);
+    console.log('  NO se calculan huérfanas: con días sin leer, "no está en Zoho" no se puede afirmar.');
+    console.log('');
+  }
   console.log(`  espejadas que Zoho ya no lista: ${huerfanas.length}   (canceladas o movidas fuera del rango — revisar a mano)`);
   if (sinFechaRegistrada) console.log(`  (${sinFechaRegistrada} filas de citas_sync sin fecha registrada, no ubicables)`);
   for (const c of cambios.slice(0, 40)) {

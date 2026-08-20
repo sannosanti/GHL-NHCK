@@ -351,8 +351,9 @@ async function getContactoPorId(contactoID) {
       `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=(ID%3D${contactoID})&max_records=1`,
       { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
     );
-    if (!res.ok) throw new Error(`Zoho contacto ${contactoID}: HTTP ${res.status}`);
-    return leerReporteZoho(await res.json(), `contacto ${contactoID}`)[0] || null;
+    const data = await res.json().catch(() => null);
+    if (!data) throw new Error(`Zoho contacto ${contactoID}: HTTP ${res.status} sin cuerpo legible`);
+    return leerReporteZoho(data, `contacto ${contactoID}`)[0] || null;
   } catch (err) {
     // Se propaga a propósito. Devolver null hacía que un fallo de Zoho se leyera
     // como "este contacto no existe", y la cita terminaba archivada como bloqueo
@@ -407,8 +408,9 @@ async function buscarCitaPorInicio(inicioZoho, contactoID, finZoho) {
     // so far is 72, so that is a latent limit rather than a live bug.
     const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=200`;
     const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-    if (!res.ok) throw new Error(`Zoho Citas_Report: HTTP ${res.status}`);
-    const registros = leerReporteZoho(await res.json(), `Citas_Report ${inicioZoho}`);
+    const cuerpo = await res.json().catch(() => null);
+    if (!cuerpo) throw new Error(`Zoho Citas_Report: HTTP ${res.status} sin cuerpo legible`);
+    const registros = leerReporteZoho(cuerpo, `Citas_Report ${inicioZoho}`);
 
     let candidatos = registros.filter(c => c.Inicio === inicioZoho);
     if (candidatos.length === 1) return candidatos[0];
@@ -472,6 +474,12 @@ async function buscarCitaPorInicio(inicioZoho, contactoID, finZoho) {
  *
  * Vacío legítimo y fallo son cosas distintas y deben viajar distinto: lo vacío
  * se devuelve, lo roto se lanza.
+ *
+ * OJO con el código HTTP: Creator responde **404 con `code 3100`** cuando la
+ * consulta no encontró registros. Un domingo sin citas llega como 404. Por eso
+ * el cuerpo se lee SIEMPRE y manda sobre el estado HTTP; comprobar `res.ok`
+ * primero convertía cada día vacío en un error (y dejaba al bot diciendo "no
+ * consultada" los domingos).
  */
 function leerReporteZoho(data, contexto) {
   if (Array.isArray(data?.data)) return data.data;
@@ -492,8 +500,9 @@ async function getDisponibilidad(fechaISO) {
   const criteria = `(Inicio >= "${fechaISO} 00:00:00" && Inicio <= "${fechaISO} 23:59:59")`;
   const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=50`;
   const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-  if (!res.ok) throw new Error(`Zoho disponibilidad ${fechaISO}: HTTP ${res.status}`);
-  return leerReporteZoho(await res.json(), `disponibilidad ${fechaISO}`);
+  const data = await res.json().catch(() => null);
+  if (!data) throw new Error(`Zoho disponibilidad ${fechaISO}: HTTP ${res.status} sin cuerpo legible`);
+  return leerReporteZoho(data, `disponibilidad ${fechaISO}`);
 }
 
 /**
