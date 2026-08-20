@@ -169,17 +169,25 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
     try {
       if (!c.startISO || !c.endISO) throw new Error(`horario ilegible en Zoho: "${c.inicio}" -> "${c.fin}"`);
 
-      // El evento vivo se lee siempre: para las citas porque el PUT reemplaza y
-      // hay que reenviar título, estado y descripción tal cual; para los
-      // bloqueos porque su título no está en ningún otro lado.
-      const actual = c.clase === 'bloqueo'
-        ? await bloqueoOriginal(c.eventId, c.calendarPrevio, c.inicioPrevioISO || c.startISO)
-        : await ghl.getCitaEnCalendario(c.eventId);
+      // El evento vivo se lee siempre: el PUT reemplaza, así que título, estado y
+      // descripción hay que reenviarlos tal cual o se pierden.
+      const actual = await ghl.getCitaEnCalendario(c.eventId);
       await dormir(PAUSA);
+
+      // La clase se decide por lo que GHL devuelve, NO por lo que dice
+      // citas_sync. Un bloqueo no trae contactId ni appointmentStatus, y hay
+      // filas marcadas como "cita" que en realidad apuntan a un bloqueo:
+      // mandarles el PUT de cita da 400 "Appointment ContactId must be
+      // provided". El evento es la verdad; la etiqueta guardada puede mentir.
+      const esBloqueo = !actual?.contactId;
 
       // Sin horario previo la diferencia contra citas_sync no prueba nada: la
       // fila puede ser vieja y GHL estar bien. Lo que sí prueba algo es el
       // evento en vivo, así que se compara contra él antes de mover nada.
+      if (esBloqueo !== (c.clase === 'bloqueo')) {
+        console.warn(`${prefijo} AVISO ${c.contacto} — citas_sync dice "${c.clase}" pero GHL dice "${esBloqueo ? 'bloqueo' : 'cita'}"; manda GHL`);
+      }
+
       if (c.sinHorarioPrevio &&
           Date.parse(actual.startTime) === Date.parse(c.startISO) &&
           Date.parse(actual.endTime) === Date.parse(c.endISO) &&
@@ -190,7 +198,7 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
         continue;
       }
 
-      if (c.clase === 'bloqueo') {
+      if (esBloqueo) {
         await ghl.actualizarBloqueoEnCalendario({
           eventId: c.eventId, calendarId: c.calendarId, startISO: c.startISO, endISO: c.endISO,
           title: actual.title,

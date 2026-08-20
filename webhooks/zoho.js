@@ -228,11 +228,19 @@ async function propagarCambios({ zohoCitaID, calendarId, startISO, endISO, inici
     // El PUT reemplaza en vez de parchear, así que el título y el estado se leen
     // y se devuelven tal cual; omitirlos los borraría.
     const actual = await ghl.getCitaEnCalendario(previo.ghl_event_id);
-    await ghl.actualizarCitaEnCalendario({
-      eventId: previo.ghl_event_id, calendarId, startISO, endISO,
-      title: actual?.title, appointmentStatus: actual?.appointmentStatus,
-      description: actual?.description, contactId: actual?.contactId,
-    });
+    // Un bloqueo no trae contactId. Si la fila quedó marcada como cita pero el
+    // evento es un bloqueo, el PUT de cita responde 400: manda lo que dice GHL.
+    if (!actual?.contactId) {
+      await ghl.actualizarBloqueoEnCalendario({
+        eventId: previo.ghl_event_id, calendarId, startISO, endISO, title: actual?.title,
+      });
+    } else {
+      await ghl.actualizarCitaEnCalendario({
+        eventId: previo.ghl_event_id, calendarId, startISO, endISO,
+        title: actual?.title, appointmentStatus: actual?.appointmentStatus,
+        description: actual?.description, contactId: actual?.contactId,
+      });
+    }
   }
 
   await db.confirmarCitaZoho(zohoCitaID, previo.ghl_event_id, calendarId, inicioZoho, finZoho);
