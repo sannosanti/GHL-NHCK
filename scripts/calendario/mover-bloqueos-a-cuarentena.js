@@ -7,6 +7,11 @@
 // seguro y una llamada por jornada en vez de una por bloqueo.
 //
 //   node scripts/calendario/mover-bloqueos-a-cuarentena.js <calendarIdCuarentena> [--limite 1]
+//   node scripts/calendario/mover-bloqueos-a-cuarentena.js <cal> --plan plan-cuarentena-general.json
+//
+// --plan permite reusar este movedor con otros planes del mismo formato. Cada
+// plan lleva su propio registro de movidos, derivado del nombre del archivo:
+// mezclarlos haría que un plan saltee entradas de otro.
 const fs = require('fs');
 const path = require('path');
 
@@ -14,11 +19,16 @@ const key = process.env.GHL_API_KEY;
 const locationId = process.env.GHL_LOCATION_ID;
 const H = { Authorization: `Bearer ${key}`, Version: '2021-04-15', 'Content-Type': 'application/json' };
 const BASE = __dirname;
-const plan = require(path.join(BASE, 'plan-cuarentena-bloqueos.json'));
-const registro = path.join(BASE, 'cuarentena-bloqueos.ndjson');
-
 const args = process.argv.slice(2);
-const CUARENTENA = args.find(a => !a.startsWith('--'));
+const archivoPlan = args.includes('--plan')
+  ? args[args.indexOf('--plan') + 1]
+  : 'plan-cuarentena-bloqueos.json';
+const plan = require(path.join(BASE, archivoPlan));
+const registro = path.join(BASE, archivoPlan.replace(/^plan-/, '').replace(/\.json$/, '.ndjson'));
+
+// El id de cuarentena puede venir en el plan; si no, por argumento.
+const CUARENTENA = args.filter(a => !a.startsWith('--'))
+  .find(a => a !== archivoPlan) || plan.cuarentenaId;
 const limite = args.includes('--limite') ? Number(args[args.indexOf('--limite') + 1]) : Infinity;
 const PAUSA = 350;
 const CORTE_FALLOS = 5;
