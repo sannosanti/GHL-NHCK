@@ -3,85 +3,70 @@
 const fetch = require('node-fetch');
 const { env } = require('../config');
 
-const NOTIFY_EMAIL = 'desarrollo@te-m.co';
+/**
+ * Avisos por Zoho Cliq.
+ *
+ * Antes esto salía por Zoho Mail usando el MISMO refresh token que Zoho
+ * Creator, y ahí había dos fallas encima:
+ *
+ * 1. Ese token nunca tuvo permisos de correo, así que Zoho respondía
+ *    INVALID_OAUTHSCOPE y NINGÚN aviso salía. Silencioso, porque el error se
+ *    tragaba en el catch.
+ * 2. Aunque hubiera funcionado, el canal compartía la falla con lo que vigila.
+ *    El 2026-08-20 Creator agotó su cuota diaria; cada cita que caía mal
+ *    disparaba su alerta, y todas las alertas viajaban por Zoho. El sistema sí
+ *    avisó — el aviso era lo que estaba roto. Nadie se enteró en cuatro horas.
+ *
+ * Un webhook entrante de Cliq no usa el token OAuth: lleva su propia clave en
+ * la URL. Así que no le afecta ni el permiso que faltaba ni la cuota de
+ * Creator, que son justo las dos cosas que rompieron ese día.
+ *
+ * Configuración (variables de entorno):
+ *   CLIQ_WEBHOOK_URL        canal del equipo técnico — errores y alertas
+ *   CLIQ_WEBHOOK_ANAMNESIS  canal de quien atiende pacientes (opcional)
+ */
 
-let mailToken = null;
-let mailTokenExpiry = 0;
-let mailAccount = null;
-
-async function getMailToken() {
-  if (mailToken && Date.now() < mailTokenExpiry) return mailToken;
-  const res = await fetch('https://accounts.zoho.com/oauth/v2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: env.zohoClientId,
-      client_secret: env.zohoClientSecret,
-      refresh_token: env.zohoRefreshToken,
-    }),
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error('No mail token: ' + JSON.stringify(data));
-  mailToken = data.access_token;
-  mailTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  return mailToken;
-}
-
-async function getMailAccount(token) {
-  if (mailAccount) return mailAccount;
-  const res = await fetch('https://mail.zoho.com/api/accounts', {
-    headers: { 'Authorization': `Zoho-oauthtoken ${token}` },
-  });
-  const data = await res.json();
-  const acc = data?.data?.[0];
-  if (!acc?.accountId) throw new Error('No mail account: ' + JSON.stringify(data));
-  mailAccount = { id: acc.accountId, email: acc.sendMailDetails?.[0]?.fromAddress || acc.emailAddress };
-  return mailAccount;
-}
+const LIMITE_CLIQ = 12000;   // Cliq rechaza mensajes muy largos.
 
 /**
- * @param {string} text  First line becomes the subject.
- * @param {string} [to]  One address, or several separated by commas.
- *   Defaults to the dev address used by alerts.
+ * @param {string} text     Texto del aviso.
+ * @param {string} [destino] URL de webhook alterna. Por defecto, el canal técnico.
  */
-async function notify(text, to = NOTIFY_EMAIL) {
+async function notify(text, destino) {
+  const url = destino || env.cliqWebhookUrl;
+  if (!url) {
+    // Sin canal configurado el aviso se pierde, y perder avisos en silencio es
+    // exactamente lo que costó cuatro horas de operación. Que se vea.
+    console.error('[notifier] SIN CANAL: falta CLIQ_WEBHOOK_URL. Aviso NO enviado:', String(text).split('\n')[0]);
+    return false;
+  }
+
+  const cuerpo = String(text || '').slice(0, LIMITE_CLIQ);
   try {
-    const token = await getMailToken();
-    const acc = await getMailAccount(token);
-    const subject = text.split('\n')[0].replace(/[*_🧠🚨✅]/g, '').trim().slice(0, 80);
-    const content = text.replace(/[*_]/g, '');
-
-    // Zoho documents toAddress as a single recipient and makes no promise about
-    // parsing a comma-separated list, so each address gets its own request
-    // rather than betting on undocumented behaviour. One recipient failing must
-    // not stop the others, hence the per-address error handling.
-    const recipients = String(to || NOTIFY_EMAIL).split(',').map(s => s.trim()).filter(Boolean);
-
-    for (const recipient of recipients) {
-      const res = await fetch(`https://mail.zoho.com/api/accounts/${acc.id}/messages`, {
-        method: 'POST',
-        headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fromAddress: acc.email,
-          toAddress: recipient,
-          subject: subject || 'Notificación Carolina',
-          content,
-          mailFormat: 'plaintext',
-        }),
-      });
-      const result = await res.json();
-      if (!res.ok) console.error('[notifier] Mail error:', recipient, res.status, JSON.stringify(result));
-      else console.log('[notifier] Email enviado a', recipient);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: cuerpo }),
+    });
+    const respuesta = await res.text();
+    if (!res.ok) {
+      console.error(`[notifier] Cliq rechazó el aviso: HTTP ${res.status} ${respuesta.slice(0, 200)}`);
+      return false;
     }
+    console.log('[notifier] Aviso enviado a Cliq:', cuerpo.split('\n')[0].slice(0, 80));
+    return true;
   } catch (err) {
-    console.error('[notifier] Error enviando email:', err.message);
+    console.error('[notifier] No se pudo enviar el aviso a Cliq:', err.message);
+    return false;
   }
 }
 
+// Un error del sistema SIEMPRE es del equipo técnico, así que a propósito no
+// recibe canal alterno: no tiene sentido mandarle una traza a quien atiende
+// pacientes. Para otros destinos, usar notify() directamente.
 async function notifyError(context, err) {
   const msg = err?.message || String(err);
-  await notify(`Error — ${context}\n${msg}\n${new Date().toLocaleString('es-CO')}`);
+  return notify(`🚨 Error — ${context}\n${msg}\n${new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })}`);
 }
 
 module.exports = { notify, notifyError };

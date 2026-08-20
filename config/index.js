@@ -13,11 +13,13 @@ const env = {
   wompiPrivateKey: process.env.WOMPI_PRIVATE_KEY,
   databaseUrl: process.env.DATABASE_URL,
   agentName: process.env.AGENT_NAME || 'carolina',
-  // Where anamnesis submission notices go. Kept separate from the notifier's
-  // default recipient: error alerts belong to the dev team, a submitted
-  // anamnesis belongs to whoever handles the patient. Unset falls back to the
-  // dev address so nothing is silently dropped.
-  anamnesisNotifyEmail: process.env.ANAMNESIS_NOTIFY_EMAIL,
+  // Canal de Cliq del equipo técnico: errores y alertas del sistema.
+  cliqWebhookUrl: process.env.CLIQ_WEBHOOK_URL,
+  // Canal para los avisos de anamnesis recibida. Se mantiene aparte del
+  // anterior a propósito: un error del sistema le importa al equipo técnico, una
+  // anamnesis enviada le importa a quien atiende al paciente. Sin configurar,
+  // cae en el canal técnico para que no se pierda en silencio.
+  cliqWebhookAnamnesis: process.env.CLIQ_WEBHOOK_ANAMNESIS,
   port: process.env.PORT || 3000,
 };
 

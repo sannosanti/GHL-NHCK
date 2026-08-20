@@ -588,7 +588,7 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
           : 'Las respuestas NO se pudieron guardar. Hay que contactarla y pedirle que lo llene de nuevo.\n') +
         `Detalle: ${JSON.stringify(hcOk ? anamnesisError : crData).slice(0, 400)}\n`) +
       new Date().toLocaleString('es-CO'),
-      env.anamnesisNotifyEmail
+      env.cliqWebhookAnamnesis
     ).catch(() => {});
 
     if (hcOk) {
