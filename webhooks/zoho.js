@@ -174,6 +174,7 @@ async function aplicarEstado(accionCruda, zohoCitaID) {
     startISO: actual?.startTime, endISO: actual?.endTime, title: actual?.title,
     appointmentStatus: estado,
     description: actual?.description,
+    contactId: actual?.contactId,
   });
   console.log(`ZOHO-CITA: ${zohoCitaID} marcada "${estado}" en GHL por acción "${accion}"`);
   return true;
@@ -230,7 +231,7 @@ async function propagarCambios({ zohoCitaID, calendarId, startISO, endISO, inici
     await ghl.actualizarCitaEnCalendario({
       eventId: previo.ghl_event_id, calendarId, startISO, endISO,
       title: actual?.title, appointmentStatus: actual?.appointmentStatus,
-      description: actual?.description,
+      description: actual?.description, contactId: actual?.contactId,
     });
   }
 

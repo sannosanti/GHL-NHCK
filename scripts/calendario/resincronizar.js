@@ -198,7 +198,8 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
       } else {
         await ghl.actualizarCitaEnCalendario({
           eventId: c.eventId, calendarId: c.calendarId, startISO: c.startISO, endISO: c.endISO,
-          title: actual?.title, appointmentStatus: actual?.appointmentStatus, description: actual?.description,
+          title: actual?.title, appointmentStatus: actual?.appointmentStatus,
+          description: actual?.description, contactId: actual?.contactId,
         });
       }
       await db.confirmarCitaZoho(c.zohoID, c.eventId, c.calendarId, c.inicio, c.fin);

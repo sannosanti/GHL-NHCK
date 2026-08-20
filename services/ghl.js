@@ -374,12 +374,15 @@ async function getCitaEnCalendario(eventId) {
   return data?.appointment || data?.event || data;
 }
 
-async function actualizarCitaEnCalendario({ eventId, calendarId, startISO, endISO, title, appointmentStatus, description }) {
+// `contactId` es obligatorio: el PUT reemplaza la cita entera y GHL responde
+// 400 "Appointment ContactId must be provided" si no viaja. Sale del GET previo
+// del evento, igual que el título y la descripción.
+async function actualizarCitaEnCalendario({ eventId, calendarId, startISO, endISO, title, appointmentStatus, description, contactId }) {
   const { res, data } = await fetchGHL(`https://services.leadconnectorhq.com/calendars/events/appointments/${eventId}`, {
     method: 'PUT',
     headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      calendarId, startTime: startISO, endTime: endISO, title,
+      calendarId, contactId, startTime: startISO, endTime: endISO, title,
       appointmentStatus: appointmentStatus || 'confirmed',
       // El PUT reemplaza: si no se reenvía, la descripción se borra.
       description: description || '',
