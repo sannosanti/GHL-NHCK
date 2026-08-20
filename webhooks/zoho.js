@@ -287,14 +287,25 @@ async function zohoCitaWebhookHandler(req, res) {
     // Citas_Report to recover it — see buscarCitaPorInicio in services/zoho.js.
     // Tipo and Observaciones come from there too: without them every entry was
     // titled a bare "Cita", blocks included.
-    const registro = await zoho.buscarCitaPorInicio(b.Inicio, contactoRef, b.Fin);
+    // Si Zoho no contesta NO se pierde la cita: se crea igual en el general y se
+    // deja marcada. Pero se distingue de "no existe el registro", porque la
+    // reparación es distinta — esta hay que reubicarla cuando Zoho vuelva.
+    let registro = null, zohoIlegible = false;
+    try {
+      registro = await zoho.buscarCitaPorInicio(b.Inicio, contactoRef, b.Fin);
+    } catch (err) {
+      zohoIlegible = true;
+      console.error(`ZOHO-CITA: ZOHO ILEGIBLE al rutear (${err.message}) — se archiva en CALENDAR_GENERAL para reubicar`);
+    }
     const consultorID = refZoho(b.Consultor) || refZoho(registro?.Consultor);
     const calendarId = CALENDARIOS[consultorID] || CALENDAR_GENERAL;
 
     if (!consultorID) {
-      console.log(registro
-        ? `ZOHO-CITA: la cita ${registro.ID} no tiene Consultor — va a CALENDAR_GENERAL`
-        : 'ZOHO-CITA: no se encontró el registro en Citas_Report — va a CALENDAR_GENERAL');
+      console.log(zohoIlegible
+        ? 'ZOHO-CITA: ruteo sin confirmar por fallo de Zoho — va a CALENDAR_GENERAL'
+        : registro
+          ? `ZOHO-CITA: la cita ${registro.ID} no tiene Consultor — va a CALENDAR_GENERAL`
+          : 'ZOHO-CITA: no se encontró el registro en Citas_Report — va a CALENDAR_GENERAL');
     } else if (!CALENDARIOS[consultorID]) {
       console.error(
         'ZOHO-CITA: Consultor sin calendario mapeado, cae en CALENDAR_GENERAL —',
@@ -338,12 +349,20 @@ async function zohoCitaWebhookHandler(req, res) {
 
     // De acá para abajo el registro SÍ traía Contacto, así que cualquier bloqueo
     // es una cita degradada: alguien esperaba un recordatorio y no lo va a tener.
-    const contacto = await zoho.getContactoPorId(contactoRef);
+    let contacto = null, contactoIlegible = false;
+    try {
+      contacto = await zoho.getContactoPorId(contactoRef);
+    } catch (err) {
+      contactoIlegible = true;
+      console.error(`ZOHO-CITA: ZOHO ILEGIBLE al leer el contacto ${contactoRef} (${err.message})`);
+    }
     if (!contacto?.Movil) {
       await avisarDegradacion(
-        contacto
-          ? `el contacto ${contactoRef} existe en Zoho pero no tiene Movil`
-          : `no se encontró el contacto Zoho ${contactoRef}`,
+        contactoIlegible
+          ? `Zoho no respondió al consultar el contacto ${contactoRef} — la cita quedó como bloqueo y hay que rehacerla`
+          : contacto
+            ? `el contacto ${contactoRef} existe en Zoho pero no tiene Movil`
+            : `no se encontró el contacto Zoho ${contactoRef}`,
         { zohoCitaID, calendarId, inicio: b.Inicio, fin: b.Fin, tipo }
       );
       const bloqueo = await ghl.crearBloqueoEnCalendario({ calendarId, startISO, endISO, title: tituloGHL([tipo, obs], tipo || 'Bloqueo') });

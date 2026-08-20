@@ -339,9 +339,15 @@ async function getContactoPorId(contactoID) {
       `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=(ID%3D${contactoID})&max_records=1`,
       { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
     );
-    const data = await res.json();
-    return data?.data?.[0] || null;
-  } catch (err) { console.error('Error obteniendo contacto Zoho:', err.message); return null; }
+    if (!res.ok) throw new Error(`Zoho contacto ${contactoID}: HTTP ${res.status}`);
+    return leerReporteZoho(await res.json(), `contacto ${contactoID}`)[0] || null;
+  } catch (err) {
+    // Se propaga a propósito. Devolver null hacía que un fallo de Zoho se leyera
+    // como "este contacto no existe", y la cita terminaba archivada como bloqueo
+    // genérico sin teléfono ni recordatorio.
+    console.error('Error obteniendo contacto Zoho:', err.message);
+    throw err;
+  }
 }
 
 // ─── LOOKUP DE CITA (para recuperar el Consultor) ─────────────────────────────
@@ -389,9 +395,10 @@ async function buscarCitaPorInicio(inicioZoho, contactoID, finZoho) {
     // so far is 72, so that is a latent limit rather than a live bug.
     const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=200`;
     const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-    const data = await res.json();
+    if (!res.ok) throw new Error(`Zoho Citas_Report: HTTP ${res.status}`);
+    const registros = leerReporteZoho(await res.json(), `Citas_Report ${inicioZoho}`);
 
-    let candidatos = (data.data || []).filter(c => c.Inicio === inicioZoho);
+    let candidatos = registros.filter(c => c.Inicio === inicioZoho);
     if (candidatos.length === 1) return candidatos[0];
     if (!candidatos.length) return null;
 
@@ -430,21 +437,51 @@ async function buscarCitaPorInicio(inicioZoho, contactoID, finZoho) {
     );
     return elegida;
   } catch (err) {
+    // Se propaga: un fallo de Zoho NO es "esta cita no existe". Confundirlos
+    // mandaba al calendario general todo lo que entrara mientras Zoho estuviera
+    // caído, que es exactamente lo que pasó el 2026-08-20.
     console.error('Error buscando cita en Zoho:', err.message);
-    return null;
+    throw err;
   }
 }
 
+// ─── LECTURA DE REPORTES ──────────────────────────────────────────────────────
+
+/**
+ * Zoho Creator contesta HTTP 200 aunque haya fallado: el estado real viene en
+ * `code` dentro del cuerpo. Un `res.ok` no alcanza para detectarlo.
+ *
+ * El 2026-08-20 la cuenta agotó su límite diario de 4.000 llamadas y Creator
+ * empezó a devolver `{code:4000}` con HTTP 200. Como los lectores hacían
+ * `data.data || []`, el error se veía idéntico a una agenda vacía: durante
+ * horas cada cita nueva se archivó en el calendario general como bloqueo
+ * genérico y la disponibilidad ofreció horarios ya ocupados, sin una sola
+ * alarma. De ahí esta función.
+ *
+ * Vacío legítimo y fallo son cosas distintas y deben viajar distinto: lo vacío
+ * se devuelve, lo roto se lanza.
+ */
+function leerReporteZoho(data, contexto) {
+  if (Array.isArray(data?.data)) return data.data;
+  // 3100 es el "no encontré registros" de Creator: un día sin citas.
+  if (data?.code === 3100) return [];
+  const err = new Error(`Zoho ${contexto}: code ${data?.code ?? 'sin code'} — ${data?.message || 'sin mensaje'}`);
+  // Marca para que quien consulta pueda distinguir "la cuenta se quedó sin
+  // cuota" de cualquier otro fallo y no insista.
+  err.esLimiteAPI = data?.code === 4000;
+  throw err;
+}
+
 // ─── DISPONIBILIDAD ───────────────────────────────────────────────────────────
+// Lanza si Zoho falla. NO devuelve [] ante un error: quien consulta necesita
+// poder distinguir "ese día está libre" de "no pude preguntar".
 async function getDisponibilidad(fechaISO) {
-  try {
-    const token = await getZohoAccessToken();
-    const criteria = `(Inicio >= "${fechaISO} 00:00:00" && Inicio <= "${fechaISO} 23:59:59")`;
-    const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=50`;
-    const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
-    const data = await res.json();
-    return data.data || [];
-  } catch (err) { console.error('Error disponibilidad:', err.message); return []; }
+  const token = await getZohoAccessToken();
+  const criteria = `(Inicio >= "${fechaISO} 00:00:00" && Inicio <= "${fechaISO} 23:59:59")`;
+  const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report?criteria=${encodeURIComponent(criteria)}&max_records=50`;
+  const res = await fetch(url, { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } });
+  if (!res.ok) throw new Error(`Zoho disponibilidad ${fechaISO}: HTTP ${res.status}`);
+  return leerReporteZoho(await res.json(), `disponibilidad ${fechaISO}`);
 }
 
 /**

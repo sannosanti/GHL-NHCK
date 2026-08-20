@@ -211,10 +211,23 @@ async function flushTextQueue(conversationId) {
         return `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
       };
 
-      for (let offset = 1; offset <= 14; offset++) {
-        const linea = await diaConCupo(offset);
-        if (linea) disponibilidadTexto += linea;
-      }
+      // Un fallo de Zoho no es una agenda libre. Si no se pudo leer, se corta:
+      // seguir barriendo daría un panorama parcial que parece completo, y el
+      // bot ofrecería horarios que en realidad están ocupados.
+      let zohoFallo = null;
+      const barrer = async (desde, hasta, tope) => {
+        let encontrados = 0;
+        for (let offset = desde; offset <= hasta && !zohoFallo && (!tope || encontrados < tope); offset++) {
+          try {
+            const linea = await diaConCupo(offset);
+            if (linea) { disponibilidadTexto += linea; encontrados++; }
+          } catch (err) {
+            zohoFallo = err;
+          }
+        }
+      };
+
+      await barrer(1, 14, null);
 
       // Quedarse en catorce días cuando la ventana sale vacía es lo que costó la
       // consulta del 2026-08-06: el prompt le prohíbe inventar horarios, así que
@@ -225,19 +238,33 @@ async function flushTextQueue(conversationId) {
       // Se sigue buscando hasta dos meses y alcanza con las tres primeras fechas
       // con cupo: son las que un paciente va a considerar, y cada día extra
       // cuesta una consulta a Zoho la primera vez que se mira.
-      if (!disponibilidadTexto) {
-        let encontrados = 0;
-        for (let offset = 15; offset <= 60 && encontrados < 3; offset++) {
-          const linea = await diaConCupo(offset);
-          if (linea) { disponibilidadTexto += linea; encontrados++; }
-        }
+      //
+      // El respaldo NO corre si Zoho falló. El 2026-08-20 la cuenta agotó su
+      // cuota diaria, los catorce días salieron vacíos por error, y este barrido
+      // extra multiplicó por cuatro el consumo justo cuando ya no quedaba: una
+      // espiral que se alimenta sola. Sin datos no se busca más lejos, se avisa.
+      if (!disponibilidadTexto && !zohoFallo) {
+        await barrer(15, 60, 3);
         if (disponibilidadTexto) {
           disponibilidadTexto = `No hay cupo en los próximos 14 días. Las fechas disponibles más próximas son:\n${disponibilidadTexto}`;
         }
       }
 
+      // Con fechas ya encontradas, un fallo posterior no las invalida: se leyeron
+      // bien y el barrido va en orden, así que son las más cercanas que hay. Se
+      // ofrecen igual. Sólo si no quedó nada se admite que no se pudo consultar.
+      if (zohoFallo) {
+        if (!disponibilidadTexto) throw zohoFallo;
+        console.warn('DISPONIBILIDAD: se corta el barrido por un fallo de Zoho, se ofrece lo ya leído —', zohoFallo.message);
+      }
       if (!disponibilidadTexto) disponibilidadTexto = 'Sin disponibilidad en los próximos 2 meses.';
-    } catch (err) { disponibilidadTexto = 'No consultada. Intenta más tarde.'; }
+    } catch (err) {
+      // Se registra fuerte. Antes este catch se tragaba el error sin dejar
+      // rastro, y por eso la caída de Zoho del 2026-08-20 estuvo horas sin que
+      // saltara una sola alarma.
+      console.error('DISPONIBILIDAD: no se pudo consultar Zoho —', err.message);
+      disponibilidadTexto = 'No consultada. Intenta más tarde.';
+    }
 
     const derivadoA = convData?.derivado_a || null;
     const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA, desdeFormulario: tags.includes('lead-formulario') });
