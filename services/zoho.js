@@ -29,7 +29,51 @@ async function getZohoAccessToken() {
 }
 
 // ─── ZOHO ANAMNESIS ───────────────────────────────────────────────────────────
-async function buscarContactoAnamnesis(movil, email) {
+// ─── IDENTIDAD DE CONTACTO ────────────────────────────────────────────────────
+
+/**
+ * ¿El contacto encontrado es la MISMA persona que la que estamos registrando?
+ *
+ * Emparejar sólo por teléfono o email mezcla historias clínicas: en una clínica
+ * familiar, madre e hija comparten correo y un papá agenda para tres hijos con
+ * su celular. El 2026-08-20 el proceso de Beatriz Eugenia Pérez Pineda terminó
+ * colgado del historial de María Jesús Pineda Agudelo, porque el correo
+ * `perezpinbeatriz@gmail.com` estaba registrado bajo el familiar.
+ *
+ * Criterio: tiene que coincidir el NOMBRE DE PILA y además algún apellido. Sólo
+ * los apellidos no alcanzan — dos hermanos los comparten enteros.
+ *
+ * Ante la duda decimos que NO son la misma persona. Los costos no son
+ * simétricos: equivocarse hacia el "no" crea un contacto duplicado, que es
+ * visible y se fusiona en minutos; equivocarse hacia el "sí" mezcla la historia
+ * clínica de dos personas, que es invisible hasta que alguien lee un
+ * antecedente ajeno.
+ */
+const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'da', 'do']);
+
+function fragmentosNombre(nombre) {
+  return String(nombre || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !PARTICULAS.has(t));
+}
+
+function mismoNombre(unNombre, otroNombre) {
+  const a = fragmentosNombre(unNombre);
+  const b = fragmentosNombre(otroNombre);
+  if (!a.length || !b.length) return false;
+  // El nombre de pila tiene que coincidir: sin eso, dos hermanos con los mismos
+  // apellidos pasarían por la misma persona.
+  if (a[0] !== b[0]) return false;
+  return a.slice(1).some(t => b.slice(1).includes(t));
+}
+
+// `nombreEsperado` es opcional. Si viene, un candidato con nombre distinto se
+// DESCARTA y se sigue buscando: es preferible crear un contacto nuevo a colgarle
+// el proceso a un familiar. Sin nombre, se comporta como antes.
+async function buscarContactoAnamnesis(movil, email, nombreEsperado) {
   try {
     const token = await getZohoAccessToken();
     const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
@@ -42,7 +86,15 @@ async function buscarContactoAnamnesis(movil, email) {
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const encontrados = leerReporteZoho(await res.json(), `contacto por móvil ${tel}`);
-      if (encontrados.length) { console.log('Contacto existente:', encontrados[0].ID); return encontrados[0].ID; }
+      if (encontrados.length) {
+        const c = encontrados[0];
+        if (nombreEsperado && !mismoNombre(nombreEsperado, c.Nombre_Completo)) {
+          console.warn(`[contacto] El móvil ${tel} pertenece a "${c.Nombre_Completo}", no a "${nombreEsperado}" — se descarta y se creará uno nuevo`);
+        } else {
+          console.log('Contacto existente:', c.ID);
+          return c.ID;
+        }
+      }
     }
     if (email) {
       const res = await fetch(
@@ -50,7 +102,15 @@ async function buscarContactoAnamnesis(movil, email) {
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
       const encontrados = leerReporteZoho(await res.json(), 'contacto por email');
-      if (encontrados.length) { console.log('Contacto existente por email:', encontrados[0].ID); return encontrados[0].ID; }
+      if (encontrados.length) {
+        const c = encontrados[0];
+        if (nombreEsperado && !mismoNombre(nombreEsperado, c.Nombre_Completo)) {
+          console.warn(`[contacto] El email pertenece a "${c.Nombre_Completo}", no a "${nombreEsperado}" — se descarta y se creará uno nuevo`);
+        } else {
+          console.log('Contacto existente por email:', c.ID);
+          return c.ID;
+        }
+      }
     }
     return null;
   } catch (err) {
@@ -67,7 +127,7 @@ async function crearTriajeInfantil({ nombreNino, email, movil, contactIdGHL, eda
   const headers = { 'Authorization': `Zoho-oauthtoken ${token}`, 'Content-Type': 'application/json' };
   const movilLimpio = (movil || '').replace(/[\s+\(\)\-]/g, '');
   const ocupacion = mapearOcupacionNino(estudia);
-  let contactoID = await buscarContactoAnamnesis(movilLimpio, email);
+  let contactoID = await buscarContactoAnamnesis(movilLimpio, email, nombreNino);
   if (!contactoID) {
     const res = await fetch('https://creator.zoho.com/api/v2/visionintegralceo/v2/form/Contactos', {
       method: 'POST', headers,
@@ -678,6 +738,9 @@ async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad
 }
 
 module.exports = {
+  // Exportado para poder probarlo: es la regla que decide si dos registros son
+  // la misma persona, y equivocarse mezcla historias clínicas.
+  mismoNombre,
   getZohoAccessToken,
   buscarContactoAnamnesis,
   buscarOCrearContactoAnamnesisClinica,
