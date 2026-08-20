@@ -147,6 +147,14 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
     console.log('  NO se calculan huérfanas: con días sin leer, "no está en Zoho" no se puede afirmar.');
     console.log('');
   }
+  // El plan se guarda para que resolver-huerfanas.js no tenga que repetir el
+  // recorrido de Zoho: son ~184 llamadas de la cuota diaria de la cuenta.
+  if (huerfanas.length && !diasIlegibles.length) {
+    require('fs').writeFileSync(
+      require('path').join(__dirname, 'plan-huerfanas.json'),
+      JSON.stringify({ generado: new Date().toISOString(), desdeISO, hastaISO, huerfanas }, null, 2)
+    );
+  }
   console.log(`  espejadas que Zoho ya no lista: ${huerfanas.length}   (canceladas o movidas fuera del rango — revisar a mano)`);
   if (sinFechaRegistrada) console.log(`  (${sinFechaRegistrada} filas de citas_sync sin fecha registrada, no ubicables)`);
   for (const c of cambios.slice(0, 40)) {
@@ -155,7 +163,7 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
   if (cambios.length > 40) console.log(`      ... y ${cambios.length - 40} más`);
   if (huerfanas.length) {
     console.log('\n  Espejadas que Zoho ya no lista (primeras 40):');
-    for (const h of huerfanas.slice(0, 40)) {
+    for (const h of huerfanas) {
       // Se resuelve el evento en GHL para que la lista diga de quién es y en qué
       // estado quedó. Un id suelto no le sirve a nadie para decidir.
       let detalle = '';
@@ -173,7 +181,6 @@ async function bloqueoOriginal(eventId, calendarId, inicioISO) {
       console.log(`      ${String(h.inicio).padEnd(22)} ${String(h.clase).padEnd(8)} ${detalle}`);
       await dormir(PAUSA);
     }
-    if (huerfanas.length > 40) console.log(`      ... y ${huerfanas.length - 40} más`);
   }
   if (sinEspejar.length) {
     console.log('\n  Sin espejar en GHL:');
