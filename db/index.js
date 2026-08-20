@@ -393,11 +393,26 @@ async function deletePendingPayment(referencia) {
   catch (err) { console.error('Error borrando pago:', err.message); }
 }
 
+// Cuánto vale una lectura de agenda antes de volver a preguntarle a Zoho.
+//
+// Cada refresco barre ~12 días hábiles, o sea ~12 llamadas a Zoho. A 10 minutos
+// eso daba un piso de ~1.000 llamadas diarias sobre un límite de cuenta de
+// 4.000, y el 2026-08-20 la cuota se agotó a media tarde: las citas nuevas
+// terminaron en el calendario general y la disponibilidad dejó de reflejar la
+// ocupación real. A 30 minutos el piso baja a ~330.
+//
+// El techo lo pone el desfase aceptable, no el ahorro. Las citas que agenda el
+// bot invalidan la caché de esa fecha al confirmarse (webhooks/ghl.js y
+// webhooks/wompi.js), así que el desfase sólo afecta a lo que el personal
+// agenda directo en Zoho. Media hora es tolerable para eso; una hora ya empieza
+// a ofrecer horarios tomados.
+const TTL_DISPONIBILIDAD_MINUTOS = 30;
+
 async function getCachedDisponibilidad(fechaISO) {
   try {
     const res = await pool.query(
-      "SELECT citas FROM availability_cache WHERE fecha_iso=$1 AND cached_at > NOW() - INTERVAL '10 minutes'",
-      [fechaISO]
+      "SELECT citas FROM availability_cache WHERE fecha_iso=$1 AND cached_at > NOW() - INTERVAL '1 minute' * $2",
+      [fechaISO, TTL_DISPONIBILIDAD_MINUTOS]
     );
     return res.rows[0]?.citas || null;
   } catch { return null; }
@@ -813,7 +828,12 @@ async function guardarAnamnesisFallida({ formulario, nombre, movil, email, etapa
 async function getAnamnesisFallidas() {
   try {
     const res = await pool.query(
-      'SELECT * FROM anamnesis_fallidas WHERE recuperado_at IS NULL ORDER BY creado_at DESC LIMIT 100'
+      // creado_at es TIMESTAMP sin zona y guarda UTC. Formatearlo en Node lo
+      // leería como hora local y correría el reloj cinco horas, que es
+      // justamente la hora que alguien va a buscar en el formulario.
+      `SELECT *, to_char(creado_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota',
+                         'DD/MM/YYYY HH24:MI') AS hora_local
+       FROM anamnesis_fallidas WHERE recuperado_at IS NULL ORDER BY creado_at DESC LIMIT 100`
     );
     return res.rows;
   } catch (err) {

@@ -48,7 +48,7 @@ async function main() {
       return;
     }
     console.log(`#${fila.id} — ${fila.nombre} (${fila.formulario})`);
-    console.log(`Falló en: ${fila.etapa}   ${new Date(fila.creado_at).toLocaleString('es-CO')}`);
+    console.log(`Falló en: ${fila.etapa}   ${fila.hora_local} (hora de Medellín)`);
     console.log(`Error de Zoho: ${JSON.stringify(fila.error)}\n`);
     // Las respuestas completas, tal como las escribió la persona: es lo que
     // hay que volver a cargar, así que se imprimen sin recortar.
@@ -61,7 +61,7 @@ async function main() {
 
   console.log(`${pendientes.length} anamnesis pendiente(s) de recuperar:\n`);
   for (const f of pendientes) {
-    console.log(`  #${f.id}  ${new Date(f.creado_at).toLocaleString('es-CO')}  ${f.formulario.padEnd(8)} ${f.etapa.padEnd(17)} ${f.nombre || '(sin nombre)'}`);
+    console.log(`  #${f.id}  ${f.hora_local}  ${f.formulario.padEnd(8)} ${f.etapa.padEnd(17)} ${f.nombre || '(sin nombre)'}`);
     console.log(`        ${f.movil || 'sin móvil'}  ${f.email || 'sin email'}`);
   }
   console.log('\nVer una completa:  node scripts/anamnesis-fallidas.js --id <n>');
