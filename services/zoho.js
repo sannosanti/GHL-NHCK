@@ -41,19 +41,25 @@ async function buscarContactoAnamnesis(movil, email) {
         `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=Movil%3D%22${tel}%22&max_records=1`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
-      const data = await res.json();
-      if (data?.data?.length > 0) { console.log('Contacto existente:', data.data[0].ID); return data.data[0].ID; }
+      const encontrados = leerReporteZoho(await res.json(), `contacto por móvil ${tel}`);
+      if (encontrados.length) { console.log('Contacto existente:', encontrados[0].ID); return encontrados[0].ID; }
     }
     if (email) {
       const res = await fetch(
         `https://creator.zoho.com/api/v2/visionintegralceo/v2/report/Listado_de_contactos?criteria=Email%3D%22${encodeURIComponent(email)}%22&max_records=1`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}` } }
       );
-      const data = await res.json();
-      if (data?.data?.length > 0) { console.log('Contacto existente por email:', data.data[0].ID); return data.data[0].ID; }
+      const encontrados = leerReporteZoho(await res.json(), 'contacto por email');
+      if (encontrados.length) { console.log('Contacto existente por email:', encontrados[0].ID); return encontrados[0].ID; }
     }
     return null;
-  } catch (err) { console.error('Error buscando contacto:', err.message); return null; }
+  } catch (err) {
+    // Se propaga. Devolver null hacía que un fallo de Zoho se leyera como "este
+    // paciente no existe todavía", y el paso siguiente creaba un contacto
+    // duplicado encima del que ya estaba.
+    console.error('Error buscando contacto:', err.message);
+    throw err;
+  }
 }
 
 async function crearTriajeInfantil({ nombreNino, email, movil, contactIdGHL, edad, sintoma, genero, estudia }) {
@@ -86,6 +92,12 @@ async function crearTriajeInfantil({ nombreNino, email, movil, contactIdGHL, eda
   });
   const dataProceso = await resProceso.json();
   console.log('ZOHO PROCESO:', JSON.stringify(dataProceso));
+  // Sin esta comprobación, un Proceso rechazado pasaba inadvertido: el contacto
+  // quedaba creado, el Proceso no, y quien llama borraba la etiqueta y anotaba
+  // "✅ creado en Zoho Creator". Una migración a medias marcada como completa.
+  if (dataProceso?.code !== 3000 && !dataProceso?.data?.ID) {
+    throw new Error('Proceso no creado: ' + JSON.stringify(dataProceso));
+  }
   return { contactoID, dataProceso };
 }
 
