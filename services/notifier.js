@@ -21,9 +21,15 @@ const { env } = require('../config');
  * la URL. Así que no le afecta ni el permiso que faltaba ni la cuota de
  * Creator, que son justo las dos cosas que rompieron ese día.
  *
+ * Sirven las dos formas de URL que da Cliq, porque acá se usa un bot
+ * ("SIA NOTIFICATIONS") y no un canal suelto:
+ *
+ *   bot     https://cliq.zoho.com/api/v2/bots/{nombre}/incoming?zapikey=...
+ *   canal   https://cliq.zoho.com/api/v2/channelsbyname/{canal}/message?zapikey=...
+ *
  * Configuración (variables de entorno):
- *   CLIQ_WEBHOOK_URL        canal del equipo técnico — errores y alertas
- *   CLIQ_WEBHOOK_ANAMNESIS  canal de quien atiende pacientes (opcional)
+ *   CLIQ_WEBHOOK_URL        destino del equipo técnico — errores y alertas
+ *   CLIQ_WEBHOOK_ANAMNESIS  destino de quien atiende pacientes (opcional)
  */
 
 const LIMITE_CLIQ = 12000;   // Cliq rechaza mensajes muy largos.
@@ -42,11 +48,17 @@ async function notify(text, destino) {
   }
 
   const cuerpo = String(text || '').slice(0, LIMITE_CLIQ);
+  // Un bot entrega el mensaje a sus suscriptores y necesita `broadcast` para
+  // llegarles a todos; un canal no lo lleva. Se decide por la URL en vez de
+  // pedir otra variable de entorno que alguien tendría que acertar.
+  const carga = url.includes('/bots/')
+    ? { text: cuerpo, broadcast: true }
+    : { text: cuerpo };
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cuerpo }),
+      body: JSON.stringify(carga),
     });
     const respuesta = await res.text();
     if (!res.ok) {
