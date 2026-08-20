@@ -34,6 +34,11 @@ const { env } = require('../config');
 
 const LIMITE_CLIQ = 12000;   // Cliq rechaza mensajes muy largos.
 
+// Carolina (NHC Kids) y Luisa (NHC adultos) son despliegues distintos del mismo
+// código y avisan al mismo bot de Cliq. Sin decir quién habla, un error llega
+// sin dueño y hay que ir a adivinar a los logs de cuál de los dos servicios.
+const QUIEN = (require('../config').env.agentName || '').toLowerCase() === 'luisa' ? 'Luisa' : 'Carolina';
+
 /**
  * @param {string} text     Texto del aviso.
  * @param {string} [destino] URL de webhook alterna. Por defecto, el canal técnico.
@@ -47,7 +52,7 @@ async function notify(text, destino) {
     return false;
   }
 
-  const cuerpo = String(text || '').slice(0, LIMITE_CLIQ);
+  const cuerpo = `[${QUIEN}] ${String(text || '')}`.slice(0, LIMITE_CLIQ);
   // Un bot entrega el mensaje a sus suscriptores y necesita `broadcast` para
   // llegarles a todos; un canal no lo lleva. Se decide por la URL en vez de
   // pedir otra variable de entorno que alguien tendría que acertar.
