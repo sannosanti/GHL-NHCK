@@ -1,12 +1,8 @@
-plan.json
-plan-bloqueos.json
-resultados.ndjson
-resultados-bloqueos.ndjson
-plan-faltantes.json
-creados.ndjson
-plan-ruteo.json
-ruteo-corregido.ndjson
-plan-cuarentena.json
-cuarentena.ndjson
-plan-cuarentena-bloqueos.json
-cuarentena-bloqueos.ndjson
+# Planes y registros de estos scripts. Llevan nombres de pacientes y horarios de
+# consulta: NUNCA deben llegar al remoto.
+#
+# Antes esta lista nombraba cada archivo uno por uno, y el 2026-08-20 un plan
+# nuevo (plan-cuarentena-general.json) se coló al remoto porque nadie lo agregó.
+# Por patrón, un archivo nuevo queda cubierto desde que nace.
+plan*.json
+*.ndjson
