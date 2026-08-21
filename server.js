@@ -426,7 +426,33 @@ app.post('/anamnesis-clinica-infantil', async (req, res) => {
   const REQUIRED = ['fechaElaboracion', 'nombreConsultante', 'movilConsultante', 'emailConsultante', 'edadConsultante', 'motivoConsulta', 'expectativasProceso', 'comoSupo'];
   const missing = REQUIRED.filter(k => !d[k] || String(d[k]).trim() === '');
   if (missing.length) {
-    return res.status(400).json({ ok: false, stage: 'validation', missing, error: `Campos requeridos faltantes: ${missing.join(', ')}` });
+    // Se aparca ANTES de rechazar. Este `return` estaba antes de la red de
+    // rescate, así que un envío al que le faltaba un campo obligatorio se perdía
+    // entero y sin dejar rastro: ni registro en Zoho, ni fila para recuperar,
+    // ni aviso. La persona ya escribió todas sus respuestas — que falte un campo
+    // no es motivo para tirarlas.
+    const rescateId = await db.guardarAnamnesisFallida({
+      formulario: 'infantil',
+      nombre: d.nombreConsultante,
+      movil:  d.movilConsultante,
+      email:  d.emailConsultante,
+      etapa:  'validacion',
+      error:  { missing },
+      payload: d,
+    });
+    notify(
+      `Formulario de anamnesis rechazado por campos faltantes
+
+` +
+      `Nombre: ${d.nombreConsultante || '—'}
+` +
+      `Faltan: ${missing.join(', ')}
+` +
+      (rescateId
+        ? `Respuestas guardadas: tabla anamnesis_fallidas, id ${rescateId}. NO hay que pedirle que llene el formulario de nuevo.`
+        : 'Las respuestas NO se pudieron guardar.')
+    ).catch(() => {});
+    return res.status(400).json({ ok: false, stage: 'validation', missing, rescateId, error: `Campos requeridos faltantes: ${missing.join(', ')}` });
   }
 
   // ── 2. Zoho token ─────────────────────────────────────────────────────────
