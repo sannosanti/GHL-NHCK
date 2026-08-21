@@ -215,7 +215,7 @@ TRIAJE para ${nombre || (esAdulto ? 'el cliente' : 'el padre/madre')}:
 
 Interpreta lo que han intentado → [TRIAJE_P3: <opción>]
 Muestra empatía y presenta el proceso de evaluación con precio ($395.000 todo incluido).
-Menciona qué incluye: Neuromapeo Cerebral (QEEG) + entrevista clínica con psicólogo + pruebas psicológicas + cita de entrega de resultados.
+Menciona qué incluye: Neuromapeo Cerebral (QEEG) presencial + encuesta clínica virtual${esAdulto ? '' : ' + pruebas psicológicas'} + cita de entrega de resultados.
 Aclara que la entrevista y las pruebas se llenan ANTES por un link que enviamos (anamnesis digital, 45 min desde casa), y que la cita presencial del neuromapeo dura 1 hora.
 Pregunta si quiere agendar.
 
