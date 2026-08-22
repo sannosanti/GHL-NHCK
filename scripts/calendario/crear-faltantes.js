@@ -17,10 +17,14 @@ const ghl = require('../../services/ghl');
 const { parseZohoDateTime } = require('../../webhooks/zoho');
 
 const BASE = __dirname;
-const plan = require(path.join(BASE, 'plan-faltantes.json'));
 const registro = path.join(BASE, 'creados.ndjson');
 
 const args = process.argv.slice(2);
+// --plan permite usar un plan filtrado. plan-faltantes.js empareja por nombre y
+// sólo mira citas, así que marca como faltantes horarios que ya están ocupados
+// por el bloqueo de pago del mismo paciente: filtrar-faltantes.js los descarta.
+const archivoPlan = args.includes('--plan') ? args[args.indexOf('--plan') + 1] : 'plan-faltantes.json';
+const plan = require(path.join(BASE, archivoPlan));
 const limite = args.includes('--limite') ? Number(args[args.indexOf('--limite') + 1]) : Infinity;
 const soloBloqueos = args.includes('--solo-bloqueos');
 const soloCitas = args.includes('--solo-citas');
