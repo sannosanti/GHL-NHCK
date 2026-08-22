@@ -20,7 +20,9 @@
 const db = require('../db');
 
 const BASE = process.env.APP_URL || 'https://miraculous-solace-production-47dd.up.railway.app';
-const RUTAS = { infantil: '/anamnesis-clinica-infantil', adultos: '/anamnesis-clinica' };
+// Las rutas reales, verificadas contra server.js de cada repo. La de adultos
+// vive en el servidor de Luisa, no en este.
+const RUTAS = { infantil: '/anamnesis-clinica-infantil', adultos: '/anamnesis-clinica-adultos' };
 
 async function main() {
   const args = process.argv.slice(2);
