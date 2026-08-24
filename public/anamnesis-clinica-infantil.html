@@ -672,9 +672,15 @@ function generatePDF(data) {
 // missing. Never report success we cannot confirm.
 async function submitToCreator(data) {
   try {
-    const tokenRes = await fetch(`${SERVER_URL}/zoho-creator-token`);
-    if (!tokenRes.ok) throw new Error(`Token error ${tokenRes.status}`);
-    // token obtained — submit via server endpoint
+    // NO se pide un token antes de enviar. Esta función arrancaba con un
+    // fetch a /zoho-creator-token cuyo valor NUNCA se usaba —el POST va a
+    // nuestro propio servidor, que saca su token— pero si esa llamada fallaba
+    // lanzaba aquí mismo y la respuesta jamás salía del navegador: sin POST no
+    // hay fila de rescate, ni log, ni aviso. La paciente veía el formulario
+    // completo y sus respuestas se perdían enteras.
+    //
+    // Enviar directo hace que una caída de Zoho ya no impida el envío: el
+    // servidor recibe las respuestas, las aparca y avisa al canal.
     const submitRes = await fetch(`${SERVER_URL}/anamnesis-clinica-infantil`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
