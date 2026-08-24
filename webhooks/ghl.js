@@ -111,6 +111,37 @@ async function noCerrarSiEsperaPago(convId) {
 // bot has the wrong persona and knowledge base.
 const LINEA_TAG = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
 
+// ─── RUTEO POR MARCA ─────────────────────────────────────────────────────────
+//
+// La automatización de GHL etiqueta el lead según de qué formulario vino: las
+// etiquetas SIN sufijo son de NHC (Luisa) y las que terminan en " nhck" son de
+// NHC Kids (Carolina).
+//
+// Hasta ahora ningún bot miraba esto: contestaba todo lo que le llegara al
+// webhook, y quien decidía era GHL según a qué URL apuntaba la automatización.
+// Por eso un lead que recibió la bienvenida de Luisa terminaba respondido por
+// Carolina (reportado 2026-08-23, contacto Darcy Pacheco).
+//
+// El filtro está detrás de RUTEO_POR_ETIQUETA a propósito: mientras la
+// automatización de Kids no publique las etiquetas con sufijo, activarlo
+// dejaría a Carolina muda con todos sus leads. Se enciende cuando ambos lados
+// de la convención existen.
+const SUFIJO_MARCA = env.agentName === 'luisa' ? '' : ' nhck';
+const SUFIJO_AJENO = env.agentName === 'luisa' ? ' nhck' : '';
+const ETIQUETAS_FORMULARIO = ['lead-formulario', 'formulario-declinado', 'formulario-sin-respuesta', 'whatsapp-no-entregado'];
+const RUTEO_POR_ETIQUETA = process.env.RUTEO_POR_ETIQUETA === '1';
+
+/** ¿El contacto entró por un formulario de la OTRA marca? */
+function esDeOtraMarca(tags) {
+  const ajenas = ETIQUETAS_FORMULARIO.map(b => `${b}${SUFIJO_AJENO}`);
+  const propias = ETIQUETAS_FORMULARIO.map(b => `${b}${SUFIJO_MARCA}`);
+  // Sólo se calla si la marca ajena es INEQUÍVOCA. Sin etiquetas, o con las de
+  // las dos, contesta: quedarse callado con un paciente real es peor que que
+  // conteste el bot equivocado.
+  return ajenas.some(t => tags.includes(t)) && !propias.some(t => tags.includes(t));
+}
+
+
 // Moved to ai/tags.js so every sender of model output shares one cleaner —
 // the recoveryJob was sending raw output and leaked a literal referral tag to
 // a patient (confirmed live 2026-07-29).
@@ -149,6 +180,11 @@ async function flushTextQueue(conversationId) {
 
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
+
+    if (RUTEO_POR_ETIQUETA && esDeOtraMarca(tags)) {
+      console.log(`[ruteo] ${contactId} entró por un formulario de la otra marca — no se responde`);
+      return;
+    }
 
     if (tags.includes('escalado nhck')) {
       triggerAsesorAnalysis(conversationId, contactId);
