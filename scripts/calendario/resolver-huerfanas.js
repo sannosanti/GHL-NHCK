@@ -68,7 +68,10 @@ if (fs.existsSync(registro)) {
       } else {
         if (actual.appointmentStatus === 'cancelled') {
           saltados++;
-          anotar({ eventId: h.ghl_event_id, estado: 'ya-estaba' });
+          // Sólo se anota si esto es una corrida real. Antes anotaba también en
+          // simulacro, así que un ensayo dejaba entradas en el registro y la
+          // siguiente corrida las daba por resueltas sin haberlas mirado.
+          if (aplicar) anotar({ eventId: h.ghl_event_id, estado: 'ya-estaba' });
           console.log(`${prefijo} YA ESTABA  "${actual.title}" ya figuraba cancelada`);
           continue;
         }
