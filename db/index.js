@@ -3,9 +3,18 @@
 const { Pool } = require('pg');
 const { env } = require('../config');
 
+// `max` estaba sin definir, así que quedaba el valor por defecto de la librería:
+// 10 conexiones. No fue una decisión, fue un descuido — y con más de diez
+// respuestas simultáneas las consultas hacen fila y el bot se demora.
+//
+// 20 por servicio: son dos bots contra la misma base, o sea 40 de las 97
+// utilizables (Postgres permite 100 y reserva 3), y quedan ~57 libres para los
+// scripts de mantenimiento, que abren sus propias conexiones. Medido el
+// 2026-08-25: con el tráfico actual había 2 conexiones abiertas.
 const pool = new Pool({
   connectionString: env.databaseUrl,
   ssl: { rejectUnauthorized: false },
+  max: 20,
 });
 
 async function initDB() {
