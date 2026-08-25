@@ -34,7 +34,14 @@ function codigoDeAmbosBots() {
 }
 
 (async () => {
-  const paginas = Number(process.argv[2]) || 60;
+  const args = process.argv.slice(2);
+  const borrar = args.includes('--borrar');
+  const limite = args.includes('--limite') ? Number(args[args.indexOf('--limite') + 1]) : Infinity;
+  const conservar = (args.includes('--conservar') ? args[args.indexOf('--conservar') + 1] : '')
+    .split(',').map(x => x.trim()).filter(Boolean);
+  // Con bandera explícita: leer "el primer número de los argumentos" tomaba el
+  // valor de --limite como cantidad de páginas y dejaba el muestreo en 100.
+  const paginas = args.includes('--paginas') ? Number(args[args.indexOf('--paginas') + 1]) : 60;
   const r = await fetch(`https://services.leadconnectorhq.com/locations/${loc}/customFields`, { headers: H });
   const campos = (await r.json()).customFields || [];
   const codigo = codigoDeAmbosBots();
@@ -79,4 +86,32 @@ function codigoDeAmbosBots() {
   for (const [n, v] of conDatos) console.log(`  ${String(v).padStart(5)} contactos   ${n}`);
   console.log(`\n=== VACÍOS en los ${vistos} contactos — borrarlos no pierde nada (${vacios.length}) ===`);
   for (const [n] of vacios) console.log(`        —          ${n}`);
+
+  if (!borrar) return;
+
+  // Sólo se borra lo que ESTE recorrido vio vacío. Si el muestreo se cortó,
+  // declarar "vacío" con pocos contactos revisados es como no haber mirado.
+  if (vistos < 1000) {
+    console.error(`
+ABORTADO: sólo se revisaron ${vistos} contactos, muy pocos para afirmar que un campo está vacío.`);
+    process.exit(1);
+  }
+
+  const objetivo = aRevisar
+    .filter(c => vacios.some(([n]) => n === c.name) && !conservar.includes(c.name))
+    .slice(0, limite);
+  console.log(`
+A borrar ahora: ${objetivo.length}  (conservando: ${conservar.join(', ') || 'nada'})`);
+  let ok = 0, fallos = 0;
+  for (const c of objetivo) {
+    const d = await fetch(`https://services.leadconnectorhq.com/locations/${loc}/customFields/${c.id}`, { method: 'DELETE', headers: H });
+    await dormir(400);
+    if (d.ok) { ok++; console.log(`  BORRADO   ${c.name}`); }
+    else { fallos++; console.error(`  FALLO     ${c.name} — HTTP ${d.status}`); }
+  }
+  const r2 = await fetch(`https://services.leadconnectorhq.com/locations/${loc}/customFields`, { headers: H });
+  console.log(`
+borrados: ${ok} | fallidos: ${fallos}`);
+  console.log(`campos en el CRM ahora: ${((await r2.json()).customFields || []).length}`);
+
 })().catch(e => { console.error('ERROR:', e.message); process.exit(1); });
