@@ -13,6 +13,14 @@
 //                    profesional. Esto sí hay que resolverlo a mano.
 //
 //   node scripts/calendario/detectar-solapes.js 2026-08-25 2026-09-07
+// Calendarios donde atender a varios pacientes a la vez es lo NORMAL, no un
+// error: la sala tiene varias estaciones. Confirmado por la clínica el
+// 2026-08-25. Sin esto el informe marcaba 328 "conflictos" en Neurotecnologías
+// que eran sesiones en paralelo, y un informe con cientos de falsos positivos
+// no lo lee nadie.
+const ATIENDEN_EN_PARALELO = [/neurotecnolog/i];
+const enParalelo = nombre => ATIENDEN_EN_PARALELO.some(re => re.test(nombre));
+
 const H = { Authorization: `Bearer ${process.env.GHL_API_KEY}`, Version: '2021-04-15' };
 const loc = process.env.GHL_LOCATION_ID;
 const dormir = ms => new Promise(r => setTimeout(r, ms));
@@ -96,6 +104,8 @@ const hora = t => new Date(t).toLocaleString('es-CO', { timeZone: 'America/Bogot
           // Dos bloqueos pisándose no le quitan el turno a nadie: uno puede ser
           // el cierre de la jornada y el otro una reserva puntual.
           tipo = 'DOS BLOQUEOS';
+        } else if (a.clase === 'cita' && b.clase === 'cita' && enParalelo(cal.name)) {
+          tipo = 'PARALELO NORMAL';
         } else if (a.clase === 'cita' && b.clase === 'cita') {
           // Dos pacientes a la vez con el mismo profesional. NO se afirma que
           // sea un error: depende de si ese calendario atiende en paralelo.
@@ -113,6 +123,7 @@ const hora = t => new Date(t).toLocaleString('es-CO', { timeZone: 'America/Bogot
       nombre: cal.name, eventos: vivos.length,
       dup: cuenta('DUPLICADO'), tapada: cuenta('CITA TAPADA'),
       franja: cuenta('MISMA FRANJA'), pago: cuenta('RESERVA DE PAGO'),
+      paralelo: cuenta('PARALELO NORMAL'),
     });
 
     // Sólo se listan las accionables. Reserva de pago, dos bloqueos y misma
@@ -129,9 +140,9 @@ const hora = t => new Date(t).toLocaleString('es-CO', { timeZone: 'America/Bogot
   }
 
   console.log(`\n\n--- RESUMEN ${desdeISO} .. ${hastaISO} ---`);
-  console.log('calendario'.padEnd(38), 'eventos', 'DUPL', 'TAPADA', '| franja', 'pago');
+  console.log('calendario'.padEnd(38), 'eventos', 'DUPL', 'TAPADA', '| franja', 'pago', 'paralelo');
   for (const r of resumen.sort((a, b) => (b.dup + b.tapada) - (a.dup + a.tapada))) {
-    console.log(r.nombre.slice(0, 36).padEnd(38), String(r.eventos).padStart(7), String(r.dup).padStart(5), String(r.tapada).padStart(6), '|', String(r.franja).padStart(6), String(r.pago).padStart(4));
+    console.log(r.nombre.slice(0, 36).padEnd(38), String(r.eventos).padStart(7), String(r.dup).padStart(5), String(r.tapada).padStart(6), '|', String(r.franja).padStart(6), String(r.pago).padStart(4), String(r.paralelo).padStart(8));
   }
   console.log('');
   console.log('DUPL   = mismo titulo y misma hora, creado dos veces. Es error.');
