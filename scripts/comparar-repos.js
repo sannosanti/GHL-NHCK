@@ -17,7 +17,16 @@ const crypto = require('crypto');
 
 const A = { nombre: 'Carolina', raiz: path.join(__dirname, '..') };
 const B = { nombre: 'Luisa', raiz: 'C:/Users/sanch/GHL-NHC-temp' };
-const ARCHIVOS = ['services/zoho.js', 'services/ghl.js', 'webhooks/ghl.js', 'webhooks/zoho.js', 'db/index.js', 'ai/prompt.js'];
+// Se comparan TODOS los archivos de comportamiento, no sólo los seis obvios.
+// La primera version dejaba fuera ai/claude.js, los jobs, pagos y server.js —
+// justo donde puede esconderse un arreglo sin portar.
+const ARCHIVOS = [
+  'services/zoho.js', 'services/ghl.js', 'services/pagos.js', 'services/cliqBot.js',
+  'webhooks/ghl.js', 'webhooks/zoho.js', 'webhooks/wompi.js',
+  'db/index.js', 'ai/prompt.js', 'ai/claude.js', 'ai/tags.js',
+  'jobs/insightJob.js', 'jobs/recoveryJob.js', 'jobs/weeklyReport.js', 'jobs/dailyReport.js',
+  'server.js', 'config/index.js',
+];
 
 // Se normaliza lo que legítimamente difiere entre marcas: si no, TODO sale
 // distinto y el informe no sirve para encontrar lo que de verdad quedó sin portar.
@@ -59,6 +68,7 @@ function funciones(ruta) {
 const hash = t => crypto.createHash('sha1').update(normalizar(t)).digest('hex').slice(0, 8);
 
 const detalle = process.argv.includes('--detalle') ? process.argv[process.argv.indexOf('--detalle') + 1] : null;
+const todas = process.argv.includes('--diff');
 let distintas = 0, soloA = 0, soloB = 0, iguales = 0;
 
 for (const rel of ARCHIVOS) {
@@ -75,6 +85,17 @@ for (const rel of ARCHIVOS) {
       distintas++;
       const dl = Math.abs(a.split('\n').length - b.split('\n').length);
       lineasArchivo.push(`  DISTINTA           ${n}   (${a.split('\n').length} vs ${b.split('\n').length} líneas${dl ? `, ${dl} de diferencia` : ''})`);
+      if (todas) {
+        // Diferencia por lineas, ignorando comentarios y nombres de marca: es
+        // lo unico que permite triar 16 funciones sin leerlas enteras.
+        const setA = new Set(a.split(String.fromCharCode(10)).map(normalizar).filter(Boolean));
+        const setB = new Set(b.split(String.fromCharCode(10)).map(normalizar).filter(Boolean));
+        const soloEnA = [...setA].filter(l => !setB.has(l));
+        const soloEnB = [...setB].filter(l => !setA.has(l));
+        for (const l of soloEnA.slice(0, 6)) lineasArchivo.push(`      solo ${A.nombre}: ${l.slice(0, 96)}`);
+        for (const l of soloEnB.slice(0, 6)) lineasArchivo.push(`      solo ${B.nombre}   : ${l.slice(0, 96)}`);
+        if (!soloEnA.length && !soloEnB.length) lineasArchivo.push('      (solo cambian comentarios o nombres de marca)');
+      }
       if (detalle === n) {
         console.log(`\n===== ${n} en ${A.nombre} =====\n${a}\n\n===== ${n} en ${B.nombre} =====\n${b}\n`);
       }
