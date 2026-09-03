@@ -113,32 +113,35 @@ const LINEA_TAG = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
 
 // ─── RUTEO POR MARCA ─────────────────────────────────────────────────────────
 //
-// La automatización de GHL etiqueta el lead según de qué formulario vino: las
-// etiquetas SIN sufijo son de NHC (Luisa) y las que terminan en " nhck" son de
-// NHC Kids (Carolina).
+// Los dos bots reciben TODOS los eventos de GHL y ninguno sabía cuál debía
+// contestar; por eso un lead que recibió la bienvenida de Luisa terminaba
+// respondido por Carolina.
 //
-// Hasta ahora ningún bot miraba esto: contestaba todo lo que le llegara al
-// webhook, y quien decidía era GHL según a qué URL apuntaba la automatización.
-// Por eso un lead que recibió la bienvenida de Luisa terminaba respondido por
-// Carolina (reportado 2026-08-23, contacto Darcy Pacheco).
+// La señal es la etiqueta de LÍNEA, no la del formulario. La de línea la pone
+// cada bot para sí mismo en el primer mensaje entrante, sin depender de ninguna
+// automatización externa.
 //
-// El filtro está detrás de RUTEO_POR_ETIQUETA a propósito: mientras la
-// automatización de Kids no publique las etiquetas con sufijo, activarlo
-// dejaría a Carolina muda con todos sus leads. Se enciende cuando ambos lados
-// de la convención existen.
-const SUFIJO_MARCA = env.agentName === 'luisa' ? '' : ' nhck';
-const SUFIJO_AJENO = env.agentName === 'luisa' ? ' nhck' : '';
-const ETIQUETAS_FORMULARIO = ['lead-formulario', 'formulario-declinado', 'formulario-sin-respuesta', 'whatsapp-no-entregado'];
+// La primera versión usaba las etiquetas de formulario asumiendo que las que no
+// llevan sufijo eran de NHC. Estaba al revés: medido sobre 6000 contactos el
+// 2026-09-01, las 780 que existen pertenecen TODAS a contactos con `linea-nhck`
+// y ninguna a `linea-nhc`. Con esa regla Carolina se quedaba muda con sus
+// propios leads — pasó con un lead real antes de que se midiera.
+//
+// Reparto de la etiqueta de línea en esa misma medición:
+//   solo linea-nhck  3660 · solo linea-nhc 1440 · las dos 180 · ninguna 720
+// O sea que decide el 85% de los casos.
+const LINEA_PROPIA = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
+const LINEA_AJENA  = env.agentName === 'luisa' ? 'linea-nhck' : 'linea-nhc';
 const RUTEO_POR_ETIQUETA = process.env.RUTEO_POR_ETIQUETA === '1';
 
-/** ¿El contacto entró por un formulario de la OTRA marca? */
+/** ¿La conversación pertenece a la OTRA marca? */
 function esDeOtraMarca(tags) {
-  const ajenas = ETIQUETAS_FORMULARIO.map(b => `${b}${SUFIJO_AJENO}`);
-  const propias = ETIQUETAS_FORMULARIO.map(b => `${b}${SUFIJO_MARCA}`);
+  // `tags` es un arreglo, así que includes compara exacto: 'linea-nhc' NO
+  // coincide dentro de 'linea-nhck'. Con texto en vez de arreglo, sí lo haría.
   // Sólo se calla si la marca ajena es INEQUÍVOCA. Sin etiquetas, o con las de
   // las dos, contesta: quedarse callado con un paciente real es peor que que
   // conteste el bot equivocado.
-  return ajenas.some(t => tags.includes(t)) && !propias.some(t => tags.includes(t));
+  return tags.includes(LINEA_AJENA) && !tags.includes(LINEA_PROPIA);
 }
 
 
