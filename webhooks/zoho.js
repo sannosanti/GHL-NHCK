@@ -240,6 +240,8 @@ async function propagarCambios({ zohoCitaID, calendarId, startISO, endISO, inici
         title: actual?.title, appointmentStatus: actual?.appointmentStatus,
         description: actual?.description, contactId: actual?.contactId,
       });
+      // The reminder reads this field, so a moved cita has to move with it.
+      await ghl.guardarFechaCitaTextoGHL(actual.contactId, startISO);
     }
   }
 
@@ -393,6 +395,9 @@ async function zohoCitaWebhookHandler(req, res) {
     }
 
     const title = tituloGHL([tipo, contacto.Nombre_Completo || 'NHC'], 'Cita');
+    // Creating the appointment fires the confirmation workflow immediately, so
+    // the Spanish date has to be on the contact before that, not after.
+    await ghl.guardarFechaCitaTextoGHL(ghlContactId, startISO);
     const appt = await ghl.crearCitaEnCalendario({ contactId: ghlContactId, calendarId, startISO, endISO, title, description: obs });
     await db.confirmarCitaZoho(zohoCitaID, appt?.id, calendarId, b.Inicio, b.Fin, 'cita');
     console.log('ZOHO-CITA: appointment creado en GHL:', JSON.stringify(appt));

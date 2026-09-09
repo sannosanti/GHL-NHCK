@@ -128,6 +128,46 @@ async function guardarCiudadGHL(contactId, ciudad) {
   } catch (err) { console.error('Error guardando ciudad GHL:', err.message); }
 }
 
+// GoHighLevel renders {{appointment.start_time}} in English and gives no way to
+// localise it. Confirmed live 2026-09-09: switching the location's Platform
+// Language to Spanish translated the whole interface but left the merge field
+// reading "Thursday, September 10, 2026". So the patient-facing wording is
+// composed here, in Bogota time, and parked on the contact for the reminder
+// templates to read instead.
+//
+// One value per contact: a second upcoming cita overwrites the first. That is
+// acceptable for mapeos, which are one per patient, and is why this field must
+// not be relied on for anything that has to survive.
+const CAMPO_FECHA_CITA = 'x9MUWySqnd50WSJTLkwM'; // contact.cita_fecha_texto
+
+function fechaCitaEnEspanol(startISO) {
+  const d = new Date(startISO);
+  if (Number.isNaN(d.getTime())) return '';
+  const dia = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long',
+  }).format(d).replace(',', '');
+  const hora = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(d);
+  return `${dia} a las ${hora}`;
+}
+
+// Written BEFORE the appointment exists on purpose: creating it fires the
+// confirmation workflow immediately, and that message would otherwise render an
+// empty field.
+async function guardarFechaCitaTextoGHL(contactId, startISO) {
+  const texto = fechaCitaEnEspanol(startISO);
+  if (!texto) return;
+  try {
+    await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customFields: [{ id: CAMPO_FECHA_CITA, value: texto }] }),
+    });
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+  } catch (err) { console.error('Error guardando fecha de cita GHL:', err.message); }
+}
+
 // ─── GHL API HELPERS ─────────────────────────────────────────────────────────
 async function getContact(contactId, skipCache = false) {
   if (!skipCache) {
@@ -430,6 +470,8 @@ module.exports = {
   crearOportunidad,
   actualizarEtapaOportunidad,
   buscarOCrearContactoPorTelefono,
+  guardarFechaCitaTextoGHL,
+  fechaCitaEnEspanol,
   crearCitaEnCalendario,
   crearBloqueoEnCalendario,
 };
