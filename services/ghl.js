@@ -149,7 +149,10 @@ function fechaCitaEnEspanol(startISO) {
   const hora = new Intl.DateTimeFormat('es-CO', {
     timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true,
   }).format(d);
-  return `${dia} a las ${hora}`;
+  // es-CO renders the meridiem as "p. m." with a trailing dot, and every template
+  // body already closes the sentence with its own period — leaving both produces
+  // "a las 6:37 p. m..". The template's period is the one that stays.
+  return `${dia} a las ${hora}`.replace(/\.$/, '');
 }
 
 // Written BEFORE the appointment exists on purpose: creating it fires the
