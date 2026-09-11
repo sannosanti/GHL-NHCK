@@ -130,18 +130,39 @@ const LINEA_TAG = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
 // Reparto de la etiqueta de línea en esa misma medición:
 //   solo linea-nhck  3660 · solo linea-nhc 1440 · las dos 180 · ninguna 720
 // O sea que decide el 85% de los casos.
-const LINEA_PROPIA = env.agentName === 'luisa' ? 'linea-nhc' : 'linea-nhck';
-const LINEA_AJENA  = env.agentName === 'luisa' ? 'linea-nhck' : 'linea-nhc';
+// `linea-*` sólo se escribe en el PRIMER mensaje entrante, así que un paciente
+// que nunca le escribió a este bot —o que llegó por un recordatorio— no la
+// tiene, y el filtro era ciego con él. Confirmado en vivo 2026-09-10: una
+// paciente de adultos (cliente-nhc, escalado nhc, ninguna linea-*) respondió un
+// recordatorio que salió por la línea de Kids, y Carolina la saludó como lead
+// nuevo pidiéndole el nombre.
+//
+// `cliente-*` y `escalado *` las escribe cada bot sobre sus propios contactos,
+// así que significan lo mismo que la etiqueta de línea. Medido sobre 6000
+// contactos ese día:
+//   sólo linea-*   : 1958 Kids · 1028 adultos · 2838 SIN clasificar
+//   señal ampliada : 2796 Kids · 1674 adultos · 287 ambiguos · 1243 sin señal
+// Son 1533 contactos que antes caían en el vacío.
+//
+// Las de derivación ('escalado nhc-a-nhck' y su simétrica) quedan fuera a
+// propósito: son cadenas distintas y la comparación es exacta, así que no
+// cuentan como marca de origen.
+const SENALES_KIDS    = ['linea-nhck', 'cliente-nhck', 'escalado nhck'];
+const SENALES_ADULTOS = ['linea-nhc',  'cliente-nhc',  'escalado nhc'];
+const SENALES_PROPIAS = env.agentName === 'luisa' ? SENALES_ADULTOS : SENALES_KIDS;
+const SENALES_AJENAS  = env.agentName === 'luisa' ? SENALES_KIDS    : SENALES_ADULTOS;
 const RUTEO_POR_ETIQUETA = process.env.RUTEO_POR_ETIQUETA === '1';
 
 /** ¿La conversación pertenece a la OTRA marca? */
 function esDeOtraMarca(tags) {
-  // `tags` es un arreglo, así que includes compara exacto: 'linea-nhc' NO
+  // Comparación exacta contra el arreglo: 'linea-nhc' NO
   // coincide dentro de 'linea-nhck'. Con texto en vez de arreglo, sí lo haría.
-  // Sólo se calla si la marca ajena es INEQUÍVOCA. Sin etiquetas, o con las de
+  // Sólo se calla si la marca ajena es INEQUÍVOCA. Sin señales, o con las de
   // las dos, contesta: quedarse callado con un paciente real es peor que que
   // conteste el bot equivocado.
-  return tags.includes(LINEA_AJENA) && !tags.includes(LINEA_PROPIA);
+  const propias = tags.some(t => SENALES_PROPIAS.includes(t));
+  const ajenas  = tags.some(t => SENALES_AJENAS.includes(t));
+  return ajenas && !propias;
 }
 
 
