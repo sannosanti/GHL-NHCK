@@ -713,14 +713,15 @@ app.get('/admin/updates', async (req, res) => {
       [env.agentName]
     );
     const cards = rows.map(r => {
-      const approveBtn = r.status === 'pending'
-        ? `<a href="/admin/update/${r.id}?key=${r.approval_key}" style="background:#22c55e;color:#fff;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:14px">✅ Aprobar</a>`
-        : `<span style="color:#888;font-size:13px">${r.status === 'approved' ? '✅ Aprobada' : r.status}</span>`;
+      const acciones = r.status === 'pending'
+        ? `<a href="/admin/update/${r.id}?key=${r.approval_key}" style="background:#22c55e;color:#fff;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:14px">✅ Aprobar</a>
+           <a href="/admin/update/${r.id}/rechazar?key=${r.approval_key}" style="background:#ef4444;color:#fff;padding:8px 20px;border-radius:6px;text-decoration:none;font-size:14px;margin-left:10px">❌ Rechazar</a>`
+        : `<span style="color:#888;font-size:13px">${r.status === 'approved' ? '✅ Aprobada' : (r.status === 'rejected' ? '❌ Rechazada' : r.status)}</span>`;
       return `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px;margin-bottom:16px">
         <div style="font-size:12px;color:#6b7280;margin-bottom:6px">${new Date(r.created_at).toLocaleString('es-CO')} · Patrón: <strong>${r.root_cause}</strong></div>
         <p style="margin:0 0 8px;font-size:14px;color:#374151"><strong>Motivo:</strong> ${r.reason}</p>
         <p style="margin:0 0 14px;font-size:14px;background:#f9fafb;padding:12px;border-radius:6px;border-left:3px solid #6366f1">${r.recommendation}</p>
-        ${approveBtn}
+        ${acciones}
       </div>`;
     }).join('');
     const empty = rows.length === 0 ? '<p style="color:#6b7280">No hay recomendaciones todavía.</p>' : '';
@@ -746,13 +747,15 @@ app.get('/admin/test-learning', async (req, res) => {
     const rootCause = 'precio';
     await db.savePendingUpdate(id, approvalKey, rootCause, recommendation, reason);
     const approvalUrl = `https://miraculous-solace-production-47dd.up.railway.app/admin/update/${id}?key=${approvalKey}`;
+    const rejectUrl = `https://miraculous-solace-production-47dd.up.railway.app/admin/update/${id}/rechazar?key=${approvalKey}`;
     await notify(
       `🧠 *Sugerencia de aprendizaje para Carolina* _(PRUEBA)_\n\n` +
       `*Patrón detectado:* 5 conversaciones con causa raíz "precio"\n\n` +
       `*Motivo:* ${reason}\n\n` +
       `*Recomendación:*\n${recommendation}\n\n` +
       `✅ *Aprobar:* ${approvalUrl}\n\n` +
-      `_Si no hacés nada, la sugerencia queda pendiente._`
+      `❌ *Rechazar:* ${rejectUrl}\n\n` +
+      `_Mientras quede pendiente, no se generan nuevas sugerencias para este patrón._`
     );
     res.send('✓ Prueba enviada a Cliq. Revisá el canal logcarolinanhck.');
   } catch (err) {
@@ -780,6 +783,26 @@ app.get('/admin/update/:id', async (req, res) => {
     `);
   } catch (err) {
     res.status(500).send('Error al aprobar: ' + err.message);
+  }
+});
+
+app.get('/admin/update/:id/rechazar', async (req, res) => {
+  const { id } = req.params;
+  const { key } = req.query;
+  if (!key) return res.status(400).send('Clave de aprobación requerida.');
+  try {
+    const update = await db.rejectUpdate(id, key);
+    if (!update) return res.status(404).send('Sugerencia no encontrada o ya procesada.');
+    res.send(`
+      <html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
+        <h2>❌ Rechazada</h2>
+        <p><strong>Patrón:</strong> ${update.root_cause}</p>
+        <blockquote style="background:#f5f5f5;padding:16px;border-left:4px solid #ef4444">${update.recommendation}</blockquote>
+        <p style="color:#666">La regla no se aplicó. El patrón queda en pausa 14 días y después vuelve a generar sugerencias.</p>
+      </body></html>
+    `);
+  } catch (err) {
+    res.status(500).send('Error al rechazar: ' + err.message);
   }
 });
 

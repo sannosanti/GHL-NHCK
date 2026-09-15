@@ -544,10 +544,27 @@ async function countInsightsByRootCause(rootCause, days = 30) {
   } catch { return 0; }
 }
 
+// Days a rejected pattern stays muted. Without this, rejecting would unblock the
+// root cause and the next analysed conversation would immediately regenerate a
+// near-identical suggestion, which is how the queue got abandoned in the first place.
+const REJECTION_COOLDOWN_DAYS = 14;
+
 async function hasPendingUpdateForRootCause(rootCause) {
   try {
     const res = await pool.query(
       `SELECT id FROM prompt_updates WHERE root_cause=$1 AND status='pending' AND agent=$2`,
+      [rootCause, env.agentName]
+    );
+    return res.rows.length > 0;
+  } catch { return false; }
+}
+
+async function wasRecentlyRejected(rootCause) {
+  try {
+    const res = await pool.query(
+      `SELECT id FROM prompt_updates
+       WHERE root_cause=$1 AND agent=$2 AND status='rejected'
+         AND approved_at > NOW() - INTERVAL '${REJECTION_COOLDOWN_DAYS} days'`,
       [rootCause, env.agentName]
     );
     return res.rows.length > 0;
@@ -579,6 +596,19 @@ async function approveUpdate(id, approvalKey) {
     );
     return update;
   } catch (err) { console.error('Error aprobando update:', err.message); return null; }
+}
+
+// Reuses approved_at as the decision timestamp to avoid a migration: any query
+// over approved_at must filter by status, or it will count rejections too.
+async function rejectUpdate(id, approvalKey) {
+  try {
+    const res = await pool.query(
+      `UPDATE prompt_updates SET status='rejected', approved_at=NOW()
+       WHERE id=$1 AND approval_key=$2 AND status='pending' RETURNING *`,
+      [id, approvalKey]
+    );
+    return res.rows[0] || null;
+  } catch (err) { console.error('Error rechazando update:', err.message); return null; }
 }
 
 async function getLearnedRules(overrideAgent) {
@@ -891,8 +921,10 @@ module.exports = {
   getKnowledgeGaps,
   countInsightsByRootCause,
   hasPendingUpdateForRootCause,
+  wasRecentlyRejected,
   savePendingUpdate,
   approveUpdate,
+  rejectUpdate,
   getLearnedRules,
   getRecentInsightSuggestions,
   hasAsesorAnalysis,

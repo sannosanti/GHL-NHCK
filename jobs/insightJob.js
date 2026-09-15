@@ -98,6 +98,8 @@ async function maybeGenerateRecommendation(rootCause) {
     const alreadyPending = await db.hasPendingUpdateForRootCause(rootCause);
     if (alreadyPending) return;
 
+    if (await db.wasRecentlyRejected(rootCause)) return;
+
     const insights = await db.getRecentInsightSuggestions(rootCause);
     if (!insights.length) return;
 
@@ -136,13 +138,15 @@ Generá una recomendación concreta para mejorar el comportamiento de Carolina. 
     await db.savePendingUpdate(id, approvalKey, rootCause, result.recommendation, result.reason);
 
     const approvalUrl = `${SERVER_URL}/admin/update/${id}?key=${approvalKey}`;
+    const rejectUrl   = `${SERVER_URL}/admin/update/${id}/rechazar?key=${approvalKey}`;
     await notify(
       `🧠 *Sugerencia de aprendizaje para Carolina*\n\n` +
       `*Patrón detectado:* ${count} conversaciones con causa raíz "${rootCause}"\n\n` +
       `*Motivo:* ${result.reason}\n\n` +
       `*Recomendación:*\n${result.recommendation}\n\n` +
       `✅ *Aprobar:* ${approvalUrl}\n\n` +
-      `_Si no hacés nada, la sugerencia queda pendiente._`
+      `❌ *Rechazar:* ${rejectUrl}\n\n` +
+      `_Mientras quede pendiente, no se generan nuevas sugerencias para este patrón._`
     );
     console.log(`[insightJob] Recomendación generada y enviada a Cliq — root_cause: ${rootCause}, id: ${id}`);
   } catch (err) {
@@ -216,12 +220,14 @@ Analizá si Carolina podría haber manejado esto sin escalar y respondé con est
 
     const SERVER_URL = 'https://miraculous-solace-production-47dd.up.railway.app';
     const approvalUrl = `${SERVER_URL}/admin/update/${id}?key=${approvalKey}`;
+    const rejectUrl   = `${SERVER_URL}/admin/update/${id}/rechazar?key=${approvalKey}`;
     await notify(
       `🎓 *Aprendizaje del asesor detectado*\n\n` +
       `*Caso:* ${result.motivo_escalacion}\n\n` +
       `*Qué hizo el asesor:* ${result.que_hizo_el_asesor}\n\n` +
       `*Regla propuesta para Carolina:*\n${result.regla_para_carolina}\n\n` +
       `✅ *Aprobar:* ${approvalUrl}\n\n` +
+      `❌ *Rechazar:* ${rejectUrl}\n\n` +
       `_Si aprobás, Carolina aprende esto para futuros casos similares._`
     );
   } catch (err) {
