@@ -12,6 +12,7 @@ const { callClaude } = require('../ai/claude');
 const { triggerAnalysis, triggerAsesorAnalysis } = require('../jobs/insightJob');
 const { notifyError } = require('../services/notifier');
 const whisper = require('../services/whisper');
+const comprobante = require('../ai/comprobante');
 
 // ─── MODULE-LOCAL STATE ───────────────────────────────────────────────────────
 
@@ -923,6 +924,33 @@ async function ghlWebhookHandler(req, res) {
 
     if (isImage && esperabaComprobante) {
       console.log('IMAGEN RECIBIDA — procesando comprobante', { estado, antesCierre: convData?.estado_antes_cierre, hayPagoPendiente: !!pagoPendiente });
+      // Hasta ahora bastaba con que llegara un adjunto para darlo por pagado:
+      // una foto del carne o una captura de la conversacion creaban la cita en
+      // Zoho igual. Ahora la imagen se lee antes de tratarla como pago.
+      //
+      // Leer un monto NO es validar el pago: eso lo sigue haciendo contabilidad.
+      // Lo que se gana es distinguir un comprobante de lo que no lo es, y darle
+      // al asesor el monto y el banco en vez de "llego una imagen".
+      const lectura = await comprobante.leerComprobante(imageUrl);
+      const notaAsesor = comprobante.resumirParaAsesor(lectura);
+      if (notaAsesor) await ghl.sendInternalNote(conversationId, contactId, notaAsesor).catch(() => {});
+
+      // Si no se pudo leer, `lectura` es null y se sigue como antes: un fallo
+      // del lector no puede hacer que se pierda un pago.
+      if (lectura && lectura.esComprobante === false) {
+        console.log('IMAGEN NO ES COMPROBANTE — escalando:', lectura.descripcion);
+        await db.logEvent(contactId, conversationId, 'imagen_no_es_comprobante', { imageUrl, descripcion: lectura.descripcion });
+        await ghl.addTag(contactId, 'escalado nhck').catch(() => {});
+        // Si ya hay un asesor en la conversacion, la nota interna le basta:
+        // pedirselo nosotros seria volver a hablar por encima de el.
+        if (!yaEstabaEscalado) {
+          await ghl.sendMessage(conversationId,
+            'Recibí tu imagen 📸 pero no alcanzo a ver ahí el comprobante de pago. ¿Me lo puedes reenviar?',
+            contactId, channel).catch(() => {});
+        }
+        return;
+      }
+
       await humanDelay();
       const nombre = contact.firstName || '';
       const triaje = convData?.triaje || {};
