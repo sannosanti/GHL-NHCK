@@ -887,8 +887,13 @@ async function ghlWebhookHandler(req, res) {
       }
     }
 
-    // If escalated, do not reply (except image in esperando_pago)
-    if (tags.includes('escalado nhck') && !(isImage && estado === 'esperando_pago')) return;
+    // Escalado ANTES de este mensaje significa que ya hay un asesor en la
+    // conversacion. El comprobante se sigue procesando —si no, se pierde el
+    // pago y la cita no se crea en Zoho— pero el bot deja de conversar: acusa
+    // recibo y le cede el turno a la persona asignada. Se metia en medio de
+    // conversaciones que un humano ya estaba atendiendo (reportado 2026-09-14).
+    const yaEstabaEscalado = tags.includes('escalado nhck');
+    if (yaEstabaEscalado && !(isImage && estado === 'esperando_pago')) return;
 
     let lastMsg = messageBody;
     let lastMsgId = messageId;
@@ -961,19 +966,19 @@ async function ghlWebhookHandler(req, res) {
         await db.logEvent(contactId, conversationId, 'comprobante_recibido', { imageUrl });
         await db.saveConversationData(conversationId, contactId, history, triaje, 'escalado', lastMsgId, phone);
         triggerAnalysis(conversationId, contactId, 'pago_manual');
-        await ghl.sendMessages(conversationId, [
-          `¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
-          `Ahora mismo no te puedo confirmar el pago porque el área contable no se encuentra disponible. En cuanto lo validen, te confirmamos tu cita para el ${fechaL} a las ${horaL} 🙌`,
-          `¡Que tengas un excelente día! 😊`,
-        ], contactId, channel);
+        await ghl.sendMessages(conversationId, yaEstabaEscalado
+          ? [`¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`]
+          : [`¡Gracias ${nombrePago}! Recibimos tu comprobante 📋`,
+             `Ahora mismo no te puedo confirmar el pago porque el área contable no se encuentra disponible. En cuanto lo validen, te confirmamos tu cita para el ${fechaL} a las ${horaL} 🙌`,
+          `¡Que tengas un excelente día! 😊`,], contactId, channel);
       } else {
         await ghl.addTag(contactId, 'escalado nhck');
         await ghl.addTag(contactId, 'validar pago nhck');
         await db.saveConversationData(conversationId, contactId, convData?.messages || [], convData?.triaje || {}, 'escalado', lastMsgId, contact.phone || '');
-        await ghl.sendMessages(conversationId, [
-          `¡Gracias! Recibimos tu comprobante 📋`,
-          `Ahora mismo no te lo puedo confirmar porque el área contable no se encuentra disponible. En cuanto lo validen, te confirmamos tu cita 🙌`,
-        ], contactId, channel);
+        await ghl.sendMessages(conversationId, yaEstabaEscalado
+          ? [`¡Gracias! Recibimos tu comprobante 📋`]
+          : [`¡Gracias! Recibimos tu comprobante 📋`,
+             `Ahora mismo no te lo puedo confirmar porque el área contable no se encuentra disponible. En cuanto lo validen, te confirmamos tu cita 🙌`,], contactId, channel);
       }
       return;
     }
