@@ -85,6 +85,12 @@ if (fs.existsSync(registro)) {
         if (!contactId) throw new Error('no se pudo resolver el contacto en GHL');
 
         const title = `${t.tipo} - ${contacto.Nombre_Completo || t.contacto}`;
+        // Crear la cita dispara la confirmación al instante, y esa plantilla lee
+        // contact.cita_fecha_texto. Sin esto el paciente recibe la confirmación
+        // con la fecha de otra cita: el campo es del contacto, no del evento, y
+        // guarda lo último que se le escribió. Mismo orden que el webhook.
+        await ghl.guardarFechaCitaTextoGHL(contactId, startISO);
+        await dormir(PAUSA);
         const r = await ghl.crearCitaEnCalendario({ contactId, calendarId: t.calendarId, startISO, endISO, title });
         creados++; seguidilla = 0;
         console.log(`${prefijo} CITA     ${t.terapeuta.padEnd(24)} ${t.inicio}  ${t.contacto}`);
