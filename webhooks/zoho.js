@@ -30,6 +30,33 @@ async function avisarDegradacion(motivo, { zohoCitaID, calendarId, inicio, fin, 
   ).catch(() => {});
 }
 
+// A cita that fails to mirror used to leave a console line and nothing else.
+// Zoho already got its 200 and never resends, so that line was the only trace
+// anywhere — and an audit on 2026-09-17 found 65 of 348 appointments over three
+// weeks that had silently never reached GHL. Neither the Cliq alert nor the log
+// row recovers the cita; they make the loss countable and visible the same day
+// instead of surfacing when a patient shows up to an empty slot.
+async function avisarCitaPerdida(err, { zohoCitaID, cuerpo }) {
+  await db.logEvent(null, null, 'cita_zoho_no_sincronizada', {
+    zohoCitaID: zohoCitaID || null,
+    motivo: err?.message || String(err),
+    inicio: cuerpo?.Inicio || null,
+    fin: cuerpo?.Fin || null,
+    consultor: cuerpo?.Consultor?.display_value || null,
+  }).catch(() => {});
+  await notify(
+    `Cita de Zoho NO sincronizada a GHL\n` +
+    `Cita Zoho: ${zohoCitaID || 'sin ID'}\n` +
+    `Horario: ${cuerpo?.Inicio || '?'} a ${cuerpo?.Fin || '?'}\n` +
+    `Consultor: ${cuerpo?.Consultor?.display_value || '?'}\n` +
+    `Motivo: ${err?.message || err}\n\n` +
+    `La cita no existe en el CRM: ese paciente no va a recibir confirmación ` +
+    `ni recordatorio, y nadie la ve en la agenda de GHL. Hay que crearla con ` +
+    `scripts/calendario/crear-faltantes.js o reprogramarla en Zoho.\n` +
+    new Date().toLocaleString('es-CO')
+  ).catch(() => {});
+}
+
 // Dedicated GHL calendars for the Zoho -> GHL sync, one per real Zoho
 // Consultor/resource — see engram ghl-nhck/sync-zoho-ghl-calendario. Kept
 // deliberately separate from the personal calendars already in GHL. Both
@@ -290,7 +317,11 @@ async function zohoCitaWebhookHandler(req, res) {
 
     const startISO = parseZohoDateTime(b.Inicio);
     const endISO = parseZohoDateTime(b.Fin);
-    if (!startISO) { console.error('ZOHO-CITA: no se pudo interpretar Inicio:', b.Inicio); return; }
+    if (!startISO) {
+      console.error('ZOHO-CITA: no se pudo interpretar Inicio:', b.Inicio);
+      await avisarCitaPerdida(new Error(`no se pudo interpretar Inicio: ${b.Inicio}`), { zohoCitaID, cuerpo: b });
+      return;
+    }
 
     const contactoRef = refZoho(b.Contacto);
 
@@ -410,6 +441,10 @@ async function zohoCitaWebhookHandler(req, res) {
     // llegó a asociarse un evento, así un fallo posterior a la creación no
     // reabre la puerta al duplicado que la reserva vino a evitar.
     await db.liberarCitaZoho(zohoCitaID);
+    // El aviso va después de liberar: es lo que menos urge y lo único que sale
+    // a la red, así un notify colgado no retrasa la liberación de la reserva.
+    // `b` vive dentro del try, así que acá se lee el cuerpo original.
+    await avisarCitaPerdida(err, { zohoCitaID, cuerpo: req.body || {} });
   }
 }
 
