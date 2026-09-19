@@ -448,4 +448,8 @@ async function zohoCitaWebhookHandler(req, res) {
   }
 }
 
-module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho, tituloGHL, ESTADOS_GHL };
+// CALENDARIOS y CALENDAR_GENERAL se exportan para que el job de reconciliación
+// rutee igual que el webhook. Tener dos copias del mapa era peor que el acople:
+// un consultor nuevo se agrega en un lado, se olvida en el otro, y sus citas
+// terminan en CALENDAR_GENERAL sin que nadie lo note.
+module.exports = { zohoCitaWebhookHandler, parseZohoDateTime, refZoho, tituloGHL, ESTADOS_GHL, CALENDARIOS, CALENDAR_GENERAL };

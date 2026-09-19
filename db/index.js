@@ -260,10 +260,24 @@ async function confirmarCitaZoho(zohoCitaId, ghlEventId, calendarId, inicio, fin
 
 // Lo ya espejado para este registro: contra esto se compara un disparo repetido
 // para saber si es un reenvío igual o una reprogramación real.
+//
+// edad_segundos se calcula acá, en SQL, y no restando `created_at` en Node.
+// `created_at` es TIMESTAMP WITHOUT TIME ZONE, y pg lo interpreta con la zona
+// horaria local del proceso Node — si el proceso y Postgres no coinciden en
+// zona, `Date.now() - new Date(created_at)` queda desfasado por horas enteras.
+// jobs/reconciliacionCitasJob.js usa esta edad para decidir si una reserva sin
+// evento todavía está en vuelo o ya se puede soltar; un desfase la hace ver
+// "vieja" cuando no lo es, y el job termina soltando la reserva de OTRO
+// worker y creando la cita por duplicado. EXTRACT(EPOCH ...) resuelve la resta
+// dentro de Postgres, contra su propio reloj, sin pasar por la zona de Node.
 async function getCitaSync(zohoCitaId) {
   if (!zohoCitaId) return null;
   try {
-    const { rows } = await pool.query(`SELECT * FROM citas_sync WHERE zoho_cita_id = $1`, [zohoCitaId]);
+    const { rows } = await pool.query(
+      `SELECT *, EXTRACT(EPOCH FROM (NOW() - created_at)) AS edad_segundos
+         FROM citas_sync WHERE zoho_cita_id = $1`,
+      [zohoCitaId]
+    );
     return rows[0] || null;
   } catch (err) {
     console.error('[citas_sync] no se pudo leer', zohoCitaId, '—', err.message);

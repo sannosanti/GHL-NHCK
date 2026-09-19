@@ -447,6 +447,43 @@ async function actualizarBloqueoEnCalendario({ eventId, calendarId, startISO, en
   return verificarRespuestaGHL(res, data, 'actualizarBloqueoEnCalendario', { calendarId, startISO });
 }
 
+// Sólo lectura: lista los eventos de un calendario en una ventana de tiempo y
+// busca uno de ESTA cita puntual — no cualquier cita de este contacto. Usada
+// únicamente por jobs/reconciliacionCitasJob.js como chequeo de seguridad
+// antes de crear una cita: citas_sync puede tener filas faltantes para citas
+// que los scripts de migración de agosto espejaron directo (ver
+// scripts/calendario/poblar-citas-sync.js), así que una fila ausente en esa
+// tabla NO prueba que GHL no tenga ya el evento. Perder una pasada de
+// reconciliación es recuperable; crear una segunda cita para el mismo
+// paciente no lo es.
+//
+// El match NO puede ser sólo por contactId dentro de una ventana de tiempo:
+// la clínica agenda hermanos y controles del mismo paciente en horarios
+// consecutivos (caso real: un mismo padre con citas a las 09:00 y a las 10:00
+// del mismo día, mismo consultor — ambas resuelven al mismo contacto GHL por
+// teléfono). Si a la de las 10:00 le faltara la fila en citas_sync, un match
+// por contactId dentro de ±1h encontraría el evento de las 9:00, lo daría por
+// "ya existe", confirmaría citas_sync con el eventId equivocado, y la cita de
+// las 10:00 quedaría descartada para siempre (la próxima pasada la ve con
+// ghl_event_id y la salta). El rango de la CONSULTA puede ser amplio porque
+// la API de GHL lo exige, pero el MATCH tiene que ser exacto: mismo contacto
+// Y mismo minuto de inicio.
+async function buscarCitaExistenteEnCalendario({ calendarId, contactId, startISO, endISO }) {
+  const margenMs = 60 * 60 * 1000; // margen de la consulta, no del match — ver comentario arriba
+  const desde = new Date(startISO).getTime() - margenMs;
+  const hasta = new Date(endISO || startISO).getTime() + margenMs;
+  const { res, data } = await fetchGHL(
+    `https://services.leadconnectorhq.com/calendars/events?locationId=${env.ghlLocationId}&calendarId=${calendarId}&startTime=${desde}&endTime=${hasta}`,
+    { headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15' } }
+  );
+  if (!res.ok) throw new Error(`buscarCitaExistenteEnCalendario falló con HTTP ${res.status} — calendario=${calendarId}`);
+  const eventos = data?.events || [];
+  const inicioBuscadoMin = Math.floor(new Date(startISO).getTime() / 60000); // al minuto, no al milisegundo
+  return eventos.find(e =>
+    e.contactId === contactId && Math.floor(new Date(e.startTime).getTime() / 60000) === inicioBuscadoMin
+  ) || null;
+}
+
 module.exports = {
   getCitaEnCalendario,
   actualizarCitaEnCalendario,
@@ -477,4 +514,5 @@ module.exports = {
   fechaCitaEnEspanol,
   crearCitaEnCalendario,
   crearBloqueoEnCalendario,
+  buscarCitaExistenteEnCalendario,
 };
