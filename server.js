@@ -27,6 +27,7 @@ const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
 const { startPendingWebhookJob } = require('./jobs/pendingWebhookJob');
 const { startReconciliacionCitasJob } = require('./jobs/reconciliacionCitasJob');
+const { startReporteSaludJob } = require('./jobs/reporteSaludJob');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
 const { getZohoAccessToken, crearTriajeInfantil, buscarOCrearContactoAnamnesisClinica, crearAnamnesisNinos } = require('./services/zoho');
@@ -839,5 +840,6 @@ db.initDB().then(() => {
   startDailyReport();
   startPendingWebhookJob();
   startReconciliacionCitasJob();
+  startReporteSaludJob();
   app.listen(env.port, () => console.log(`Servidor corriendo en puerto ${env.port}`));
 }).catch(err => { console.error('Error DB:', err); process.exit(1); });

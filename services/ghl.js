@@ -485,6 +485,12 @@ async function buscarCitaExistenteEnCalendario({ calendarId, contactId, startISO
 }
 
 module.exports = {
+  // Se exporta para jobs que consultan endpoints de GHL que este módulo todavía
+  // no envuelve (p. ej. la lista de calendarios y la búsqueda de
+  // conversaciones del reporte de salud). Sigue siendo el único camino a GHL:
+  // un fetch suelto se saltaría el drenado del cuerpo y el reintento, que es lo
+  // que evita los "Premature close" en una llamada posterior no relacionada.
+  fetchGHL,
   getCitaEnCalendario,
   actualizarCitaEnCalendario,
   actualizarBloqueoEnCalendario,
