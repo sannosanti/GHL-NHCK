@@ -20,6 +20,7 @@ const { removeTag } = require('./services/ghl');
 const { ghlWebhookHandler, ghlCrearEnCreatorHandler, ghlCrearEnCreatorNHCHandler } = require('./webhooks/ghl');
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
 const { zohoCitaWebhookHandler } = require('./webhooks/zoho');
+const { fechaRecordatorioHandler } = require('./webhooks/recordatorio');
 const analyticsRouter = require('./analytics');
 const tokenDashboardRouter = require('./analytics/tokens');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
@@ -820,6 +821,9 @@ app.post('/webhook/ghl-crear-contacto', ghlCrearEnCreatorHandler);
 app.post('/webhook/ghl-crear-contacto-nhc', ghlCrearEnCreatorNHCHandler);
 app.post('/webhook/wompi', wompiWebhookHandler);
 app.post('/webhook/zoho-cita', zohoCitaWebhookHandler);
+// Lo llama el workflow "Recordatorio 24h" entre la espera y el envío, para que
+// el mensaje lea la fecha de ESA cita y no la última que quedó en el contacto.
+app.post('/webhook/recordatorio-fecha', fechaRecordatorioHandler);
 app.get('/pago-exitoso', pagoExitosoHandler);
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────

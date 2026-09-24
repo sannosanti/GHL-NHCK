@@ -158,9 +158,13 @@ function fechaCitaEnEspanol(startISO) {
 // Written BEFORE the appointment exists on purpose: creating it fires the
 // confirmation workflow immediately, and that message would otherwise render an
 // empty field.
+// Devuelve el texto escrito, o null si no se pudo. Los dos llamadores viejos lo
+// ignoran y siguen igual, pero el webhook del recordatorio necesita saberlo: si
+// la escritura falla en silencio, el mensaje sale con la fecha de otra cita y
+// nadie se entera hasta que el paciente se queja.
 async function guardarFechaCitaTextoGHL(contactId, startISO) {
   const texto = fechaCitaEnEspanol(startISO);
-  if (!texto) return;
+  if (!texto) return null;
   try {
     await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
       method: 'PUT',
@@ -168,7 +172,8 @@ async function guardarFechaCitaTextoGHL(contactId, startISO) {
       body: JSON.stringify({ customFields: [{ id: CAMPO_FECHA_CITA, value: texto }] }),
     });
     await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
-  } catch (err) { console.error('Error guardando fecha de cita GHL:', err.message); }
+    return texto;
+  } catch (err) { console.error('Error guardando fecha de cita GHL:', err.message); return null; }
 }
 
 // ─── GHL API HELPERS ─────────────────────────────────────────────────────────
