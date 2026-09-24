@@ -53,24 +53,33 @@ async function fechaRecordatorioHandler(req, res) {
   // Se responde con el detalle porque el registro de ejecución del workflow en
   // GHL muestra el cuerpo de la respuesta: cuando esto falle, la causa tiene que
   // estar a la vista de quien mira el workflow, no sólo en nuestros logs.
+  // Un rechazo tiene que dejar rastro igual que un éxito. Sin esto, "GHL mandó
+  // algo que no entiendo" y "GHL nunca me llamó" se ven idénticos desde la base,
+  // que es exactamente la ceguera que este endpoint vino a cerrar.
+  const rechazar = async (estado, error, extra = {}) => {
+    console.error(`RECORDATORIO-FECHA: ${contactId || '(sin contacto)'} — ${error}`);
+    await db.logEvent(contactId || null, null, 'recordatorio_fecha_rechazada',
+      { error, inicio: inicio || null, ...extra }).catch(() => {});
+    return res.status(estado).json({ ok: false, error, ...extra });
+  };
+
   if (!contactId) {
-    console.error('RECORDATORIO-FECHA: llegó sin contactId —', JSON.stringify(Object.keys(b)));
-    return res.status(400).json({ ok: false, error: 'falta contactId', clavesRecibidas: Object.keys(b) });
+    return rechazar(400, 'falta contactId', { clavesRecibidas: Object.keys(b) });
   }
   if (!inicio) {
-    console.error(`RECORDATORIO-FECHA: ${contactId} llegó sin fecha de inicio`);
-    return res.status(400).json({ ok: false, error: 'falta la fecha de inicio de la cita' });
+    // Se guardan las claves recibidas: cuando el mapeo del workflow esté mal,
+    // esto dice qué nombres llegaron y ahorra abrir GHL para adivinarlo.
+    return rechazar(400, 'falta la fecha de inicio de la cita',
+      { clavesRecibidas: Object.keys(b), clavesCustomData: Object.keys(cd) });
   }
 
   const cuando = new Date(inicio).getTime();
   if (Number.isNaN(cuando)) {
-    console.error(`RECORDATORIO-FECHA: ${contactId} fecha ilegible —`, inicio);
-    return res.status(400).json({ ok: false, error: `fecha ilegible: ${inicio}` });
+    return rechazar(400, `fecha ilegible: ${inicio}`);
   }
   const ahora = Date.now();
   if (cuando > ahora + MAX_ADELANTO_MS || cuando < ahora - MAX_ATRASO_MS) {
-    console.error(`RECORDATORIO-FECHA: ${contactId} fecha fuera de rango —`, inicio);
-    return res.status(400).json({ ok: false, error: `fecha fuera de rango: ${inicio}` });
+    return rechazar(400, `fecha fuera de rango: ${inicio}`);
   }
 
   // La respuesta sale DESPUÉS de escribir, nunca antes. Es lo contrario de lo
