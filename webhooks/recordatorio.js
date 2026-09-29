@@ -21,11 +21,10 @@ const { env } = require('../config');
 const ghl = require('../services/ghl');
 const db = require('../db');
 
-// Una fecha fuera de este rango no es una cita: es un campo mal mapeado en el
+// Una fecha más lejana que esto no es una cita: es un campo mal mapeado en el
 // workflow, o una plantilla que llegó sin resolver. Escribirla sería reemplazar
 // una fecha vieja por una basura.
 const MAX_ADELANTO_MS = 400 * 24 * 60 * 60 * 1000;
-const MAX_ATRASO_MS = 2 * 24 * 60 * 60 * 1000;
 
 const MESES_EN = {
   january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
@@ -164,6 +163,20 @@ async function fechaRecordatorioHandler(req, res) {
   let normalizada = inicio ? conZonaBogota(inicio) : null;
   let origen = 'workflow';
 
+  // Una cita que ya pasó nunca puede ser la del recordatorio: el mensaje dice
+  // "mañana" y sale un día antes. Cuando llega una, lo que se está vaciando es
+  // la cola de inscripciones vencidas —publicar el workflow la suelta entera, y
+  // el 29/09 salieron 25 de golpe por eso—. Escribirla anunciaría el lunes
+  // pasado como si fuera mañana.
+  //
+  // No se rechaza de una: se cae al respaldo, que busca la cita real de mañana.
+  // Si el paciente tiene una, la inscripción vieja termina diciendo la verdad.
+  let vencida = false;
+  if (normalizada && new Date(normalizada).getTime() <= Date.now()) {
+    vencida = true;
+    normalizada = null;
+  }
+
   if (!normalizada) {
     let respaldo;
     try {
@@ -175,24 +188,26 @@ async function fechaRecordatorioHandler(req, res) {
     if (respaldo.candidatas.length !== 1) {
       // El texto crudo viaja en el evento y en la respuesta: es el único modo de
       // saber qué manda GHL sin volver a adivinarlo.
+      const motivo = vencida
+        ? `el workflow mandó una cita que ya pasó (${inicio})`
+        : 'el workflow no mandó una fecha usable';
       return rechazar(400,
         respaldo.candidatas.length === 0
-          ? `el workflow no mandó una fecha usable y el paciente no tiene ninguna cita el ${respaldo.manana}`
-          : `el workflow no mandó una fecha usable y el paciente tiene ${respaldo.candidatas.length} citas el ${respaldo.manana}`,
-        { formatoRecibido: inicio || null, citasManana: respaldo.candidatas.length,
+          ? `${motivo} y el paciente no tiene ninguna cita el ${respaldo.manana}`
+          : `${motivo} y el paciente tiene ${respaldo.candidatas.length} citas el ${respaldo.manana}`,
+        { formatoRecibido: inicio || null, citasManana: respaldo.candidatas.length, vencida,
           clavesRecibidas: Object.keys(b), clavesCustomData: Object.keys(cd) });
     }
     normalizada = respaldo.candidatas[0].inicio;
-    origen = 'calendario';
+    origen = vencida ? 'calendario-tras-vencida' : 'calendario';
   }
 
   const cuando = new Date(normalizada).getTime();
   if (Number.isNaN(cuando)) {
     return rechazar(400, `no interpreto esta fecha: ${inicio}`, { formatoRecibido: String(inicio) });
   }
-  const ahora = Date.now();
-  if (cuando > ahora + MAX_ADELANTO_MS || cuando < ahora - MAX_ATRASO_MS) {
-    return rechazar(400, `fecha fuera de rango: ${normalizada}`, { origen });
+  if (cuando > Date.now() + MAX_ADELANTO_MS) {
+    return rechazar(400, `fecha demasiado lejana: ${normalizada}`, { origen });
   }
 
   // La respuesta sale DESPUÉS de escribir, nunca antes. Es lo contrario de lo
