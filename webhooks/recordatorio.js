@@ -36,11 +36,20 @@ const MAX_ATRASO_MS = 2 * 24 * 60 * 60 * 1000;
 //
 // Si el texto YA trae zona (una Z, o +05:00, o -0500) se respeta tal cual: ahí
 // el emisor ya dijo a qué hora absoluta se refiere y no hay nada que suponer.
+// Devuelve null cuando NO puede interpretar el texto con certeza. El intento
+// anterior lo devolvía tal cual, y ahí estuvo el daño del 29/09: GHL manda el
+// formato de EE.UU. ("09/30/2026 10:30 am"), esta función no lo reconocía, lo
+// dejaba pasar, y Node lo leía como UTC. Una cita de 10:30 a. m. se anunció a
+// las 5:30 a. m. — 18 de 25 recordatorios de ese día salieron con -5 horas.
+//
+// Preferir rechazar antes que suponer: un rechazo deja el campo como estaba y el
+// mensaje sale con la fecha anterior, que puede estar vieja pero nunca es una
+// hora recién inventada. Adivinar el formato ya costó dos incidentes.
 function conZonaBogota(texto) {
   const s = String(texto).trim();
-  if (/(Z|[+-]\d{2}:?\d{2})$/.test(s)) return s;
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)/);
-  return m ? `${m[1]}T${m[2]}-05:00` : s;
+  if (/(Z|[+-]\d{2}:?\d{2})$/.test(s)) return s;             // el emisor ya fijó la hora absoluta
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)$/);
+  return m ? `${m[1]}T${m[2]}-05:00` : null;                 // cualquier otra forma: no se supone
 }
 
 function primero(...valores) {
@@ -90,9 +99,12 @@ async function fechaRecordatorioHandler(req, res) {
       { clavesRecibidas: Object.keys(b), clavesCustomData: Object.keys(cd) });
   }
 
-  const cuando = new Date(conZonaBogota(inicio)).getTime();
+  const normalizada = conZonaBogota(inicio);
+  const cuando = normalizada === null ? NaN : new Date(normalizada).getTime();
   if (Number.isNaN(cuando)) {
-    return rechazar(400, `fecha ilegible: ${inicio}`);
+    // El texto crudo viaja en el evento y en la respuesta: es el único modo de
+    // saber qué formato manda GHL sin volver a adivinarlo.
+    return rechazar(400, `no interpreto esta fecha: ${inicio}`, { formatoRecibido: String(inicio) });
   }
   const ahora = Date.now();
   if (cuando > ahora + MAX_ADELANTO_MS || cuando < ahora - MAX_ATRASO_MS) {
