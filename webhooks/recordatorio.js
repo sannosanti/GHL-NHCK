@@ -26,6 +26,23 @@ const db = require('../db');
 const MAX_ADELANTO_MS = 400 * 24 * 60 * 60 * 1000;
 const MAX_ATRASO_MS = 2 * 24 * 60 * 60 * 1000;
 
+// GHL manda la hora de la cita en hora de Bogotá y SIN zona: "2026-09-28
+// 14:00:00". new Date() la interpreta como UTC porque el servidor corre en UTC,
+// y al formatearla de vuelta a Bogotá queda cinco horas antes — una cita de las
+// 2 p. m. se anuncia a las 9 a. m. Eso es lo que recibieron los pacientes el
+// 28/09, y el error era constante de 5 horas en 4 de los 5 recordatorios
+// revisados. Colombia es UTC-5 todo el año, sin horario de verano, así que el
+// desplazamiento es fijo y seguro de asumir.
+//
+// Si el texto YA trae zona (una Z, o +05:00, o -0500) se respeta tal cual: ahí
+// el emisor ya dijo a qué hora absoluta se refiere y no hay nada que suponer.
+function conZonaBogota(texto) {
+  const s = String(texto).trim();
+  if (/(Z|[+-]\d{2}:?\d{2})$/.test(s)) return s;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)/);
+  return m ? `${m[1]}T${m[2]}-05:00` : s;
+}
+
 function primero(...valores) {
   for (const v of valores) {
     if (v === undefined || v === null) continue;
@@ -73,7 +90,7 @@ async function fechaRecordatorioHandler(req, res) {
       { clavesRecibidas: Object.keys(b), clavesCustomData: Object.keys(cd) });
   }
 
-  const cuando = new Date(inicio).getTime();
+  const cuando = new Date(conZonaBogota(inicio)).getTime();
   if (Number.isNaN(cuando)) {
     return rechazar(400, `fecha ilegible: ${inicio}`);
   }
