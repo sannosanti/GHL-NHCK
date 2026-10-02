@@ -28,6 +28,23 @@ const textQueues = {};
 const humanDelay = () => new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 3000));
 
 /**
+ * La agenda de un día, con caché. Lo usan los dos lados que tienen que ver lo
+ * mismo: el barrido que arma el texto de disponibilidad para el prompt, y la
+ * validación que comprueba el horario que el modelo eligió. Si cada uno
+ * consultara por su cuenta podrían discrepar, que es justo el hueco que la
+ * validación viene a tapar.
+ *
+ * Lanza si Zoho falla — "no pude preguntar" no es "está libre".
+ */
+async function citasDelDia(fechaISO) {
+  const cacheado = await db.getCachedDisponibilidad(fechaISO);
+  if (cacheado) return cacheado;
+  const citas = await zoho.getDisponibilidad(fechaISO);
+  await db.setCachedDisponibilidad(fechaISO, citas);
+  return citas;
+}
+
+/**
  * ¿Este contacto ya es paciente, aunque nuestro estado diga 'nuevo'?
  *
  * Dos senales, en orden de costo:
@@ -250,11 +267,16 @@ async function flushTextQueue(conversationId) {
 
       const diaConCupo = async (offset) => {
         const f = new Date(hoy); f.setDate(hoy.getDate() + offset);
-        const ds = f.getDay();
+        // El dia se nombra en hora de Bogota, no con toISOString(). Railway corre
+        // en UTC: despues de las 7 p. m. de Colombia el servidor ya paso de dia y
+        // el barrido arrancaba un dia mas tarde, quitandole al paciente la
+        // primera fecha con cupo cada tarde. La semana del 02/10 se midio:
+        //   18:00 Col -> barrido desde el 02/10
+        //   19:00 Col -> barrido desde el 03/10
+        const fISO = zoho.diaEnBogota(f);
+        const ds = new Date(`${fISO}T00:00:00`).getDay();
         if (!constants.HORARIOS_NHCK[ds]) return null;
-        const fISO = f.toISOString().split('T')[0];
-        let citas = await db.getCachedDisponibilidad(fISO);
-        if (!citas) { citas = await zoho.getDisponibilidad(fISO); await db.setCachedDisponibilidad(fISO, citas); }
+        const citas = await citasDelDia(fISO);
 
         // Un festivo no cuenta como dia habil, pero tampoco frena el barrido:
         // se salta y se sigue buscando.
@@ -269,7 +291,10 @@ async function flushTextQueue(conversationId) {
         if (!alcanzaAnticipacion) return null;
         const slots = zoho.calcularSlotsLibres(citas, fISO);
         if (!slots.length) return null;
-        return `${diasN[ds]} ${f.getDate()} de ${mesesN[f.getMonth()]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
+        // Dia y mes salen de fISO, no de `f`: `f` sigue siendo un instante UTC y
+        // despues de las 7 p. m. de Colombia nombraria el dia siguiente.
+        const [, mm, dd] = fISO.split('-');
+        return `${diasN[ds]} ${Number(dd)} de ${mesesN[Number(mm) - 1]} (${fISO}): ${slots.slice(0, 4).map(s => s.label).join(', ')}\n`;
       };
 
       // Un fallo de Zoho no es una agenda libre. Si no se pudo leer, se corta:
@@ -394,6 +419,50 @@ async function flushTextQueue(conversationId) {
       const extract = f => { const m = rawReply.match(new RegExp(`${f}:\\s*(.+)`)); return m ? m[1].trim() : ''; };
       const esAdultoCita = derivadoA === 'luisa';
       const fechaCita = extract('fecha'), horaCita = extract('hora');
+
+      // LA AGENDA MANDA, NO EL MODELO.
+      //
+      // Hasta acá la disponibilidad era texto en el prompt y nada comprobaba lo
+      // que el modelo elegía. El 01/10 ofreció las 10:00 del día siguiente y las
+      // 9:00 del sábado: ninguna de las dos estaba en los datos que recibió, las
+      // dos tenían bloqueo de Mapeos desde el 23/09, y la de las 10:00 ni
+      // siquiera es un comienzo legal un viernes. Una paciente llegó a la sede a
+      // un cupo que no existía.
+      //
+      // Va ANTES de todo lo que tiene efecto: el link de pago se genera unas
+      // líneas más abajo, así que un horario inventado no era sólo una cita
+      // falsa — era cobrarle a alguien por un cupo que no estaba.
+      //
+      // Un fallo de Zoho también escala. No se puede comprobar, y entre cobrar a
+      // ciegas y que un asesor lo cierre a mano, lo segundo se arregla con una
+      // llamada. El motivo viaja distinto para poder separarlos después.
+      let cupo;
+      try {
+        cupo = await zoho.validarCupo({ fechaISO: fechaCita, horaISO: horaCita, obtenerCitas: citasDelDia });
+      } catch (err) {
+        cupo = { ok: false, motivo: `no pude comprobar la agenda en Zoho: ${err.message}`, noComprobado: true };
+      }
+
+      if (!cupo.ok) {
+        console.error(`CITA RECHAZADA: ${contactId} pidió ${fechaCita} ${horaCita} — ${cupo.motivo}`);
+        await db.logEvent(contactId, conversationId, 'cita_rechazada_sin_cupo',
+          { fechaCita, horaCita, motivo: cupo.motivo, noComprobado: !!cupo.noComprobado });
+        await ghl.addTag(contactId, 'escalado nhck');
+        // La nota interna lleva el motivo exacto: el asesor que reciba el chat
+        // tiene que saber qué horario pidió el paciente y por qué no se tomó,
+        // sin tener que reconstruirlo.
+        ghl.sendInternalNote(conversationId, contactId,
+          `Cita NO agendada automáticamente.\nEl paciente pidió: ${fechaCita} ${horaCita}\nMotivo: ${cupo.motivo}\nHay que confirmar el horario y agendar a mano.`).catch(() => {});
+
+        const aviso = `Dejame confirmar ese horario con el equipo antes de apartarlo — no quiero darte un cupo y que después no esté disponible. Un asesor te escribe ${proximoHorarioComercial()} para cerrarlo 🙌`;
+        history.push({ role: 'assistant', content: [{ type: 'text', text: aviso }] });
+        await db.saveConversationData(conversationId, contactId, history, nuevoTriaje, 'escalado', null, phone);
+        triggerAnalysis(conversationId, contactId, 'escalado');
+        await humanDelay();
+        await ghl.sendMessage(conversationId, aviso, contactId, channel);
+        return;
+      }
+
       const edad = extract('edad');
       const genero = extract('genero');
       const emailCita = extract('email') || contact.email || '';

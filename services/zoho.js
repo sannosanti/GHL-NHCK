@@ -645,6 +645,118 @@ function calcularSlotsLibres(citas, fechaISO) {
   return slots;
 }
 
+// "2026-10-02" en hora de Bogotá. Railway corre en UTC, así que después de las
+// 7 p. m. de Colombia `new Date().toISOString()` ya devuelve el día siguiente:
+// contar la anticipación desde ahí corre la ventana entera un día.
+// en-CA porque rinde el año primero, que es lo que hace comparables dos fechas
+// como texto.
+const diaEnBogota = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date(ms));
+
+/**
+ * "9:00", "09:00", "9:00am", "2:00 p. m." -> "09:00" / "14:00". null si no se
+ * entiende.
+ *
+ * El prompt le pide al modelo HH:MM, pero pedir no es garantizar: si escribe
+ * "9:00" y acá se exigiera "09:00", una cita perfectamente buena terminaría
+ * escalada. La validación existe para frenar horarios que no existen, no para
+ * castigar el formato.
+ *
+ * Una hora sin sufijo se lee como 24 h, que es lo que pide el prompt. Si el
+ * modelo escribiera "2:00" queriendo decir las 2 de la tarde, sale 02:00 y se
+ * rechaza: equivocarse hacia el rechazo cuesta una llamada, hacia la aceptación
+ * cuesta un paciente parado en la sede.
+ */
+function normalizarHora(texto) {
+  const m = String(texto || '').trim().toLowerCase()
+    .match(/^(\d{1,2}):(\d{2})\s*(?:([ap])\.?\s*m\.?)?$/);
+  if (!m) return null;
+  let h = Number(m[1]);
+  if (m[3]) {
+    if (h < 1 || h > 12) return null;
+    h = (h % 12) + (m[3] === 'p' ? 12 : 0);
+  }
+  if (h > 23 || Number(m[2]) > 59) return null;
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
+
+/**
+ * ¿Se puede agendar REALMENTE en esta fecha y hora?
+ *
+ * calcularSlotsLibres se usaba en un solo lugar: armar el texto de
+ * disponibilidad que va al prompt. Nada comprobaba después lo que el modelo
+ * elegía, así que la agenda era una sugerencia y no una restricción. El 01/10
+ * el modelo ofreció las 10:00 del día siguiente y las 9:00 del sábado: ninguna
+ * de las dos estaba en los datos que recibió —la anticipación mínima empujaba
+ * todo al 6 de octubre— y las dos tenían bloqueo de Mapeos desde el 23/09. Una
+ * paciente llegó a la sede a un cupo que no existía.
+ *
+ * Esto cierra ese hueco del lado de los datos, que es el único lado que no
+ * depende de que el modelo se porte bien.
+ *
+ * `obtenerCitas(fechaISO)` se inyecta para que el caché siga viviendo donde ya
+ * vive (webhooks/ghl.js) y para poder probar esto sin tocar Zoho.
+ *
+ * LANZA si no pudo comprobar. "No pude preguntarle a Zoho" y "ese horario está
+ * libre" son cosas distintas y tienen que viajar distinto: devolver `false` ante
+ * un fallo bloquearía toda la agenda, y devolver `true` reabriría el hueco. Que
+ * decida quien llama — ver el manejo en webhooks/ghl.js.
+ */
+async function validarCupo({ fechaISO, horaISO, obtenerCitas, hoyISO = diaEnBogota() }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fechaISO || ''))) {
+    return { ok: false, motivo: `la fecha no tiene forma de fecha: "${fechaISO}"` };
+  }
+  const hora = normalizarHora(horaISO);
+  if (!hora) {
+    return { ok: false, motivo: `la hora no tiene forma de hora: "${horaISO}"` };
+  }
+  horaISO = hora;
+  if (fechaISO <= hoyISO) {
+    return { ok: false, motivo: `${fechaISO} es hoy o ya pasó (hoy en Colombia es ${hoyISO})` };
+  }
+
+  // Anticipación mínima, contada igual que el barrido que arma el texto del
+  // prompt: un día suma como hábil sólo si la clínica abre ese día de la semana
+  // y Zoho no tiene un cierre de jornada completa, y el día de la cita NO cuenta
+  // como margen — por eso se compara antes de sumar.
+  let habilesPrevios = 0;
+  const unDia = 24 * 60 * 60 * 1000;
+  // Mediodía como ancla: sumar 24 h sobre medianoche es lo que se rompe en los
+  // bordes del día.
+  let cursor = Date.parse(`${hoyISO}T12:00:00-05:00`);
+  for (let offset = 1; offset <= 70; offset++) {
+    cursor += unDia;
+    const fISO = diaEnBogota(cursor);
+    if (fISO === fechaISO) {
+      if (habilesPrevios < constants.MIN_DIAS_HABILES_ANTICIPACION) {
+        return { ok: false, motivo: `${fechaISO} queda a ${habilesPrevios} día(s) hábil(es), y se piden ${constants.MIN_DIAS_HABILES_ANTICIPACION}` };
+      }
+      break;
+    }
+    if (habilesPrevios >= constants.MIN_DIAS_HABILES_ANTICIPACION) break;  // ya alcanza, no hace falta seguir preguntando
+    if (!constants.HORARIOS_NHCK[new Date(`${fISO}T00:00:00`).getDay()]) continue;
+    if (esCierreTotal(await obtenerCitas(fISO), fISO)) continue;
+    habilesPrevios++;
+  }
+
+  const citas = await obtenerCitas(fechaISO);
+  if (esCierreTotal(citas, fechaISO)) {
+    return { ok: false, motivo: `la clínica no atiende el ${fechaISO}` };
+  }
+
+  const libres = calcularSlotsLibres(citas, fechaISO);
+  if (!libres.some(s => s.horaISO === horaISO)) {
+    return {
+      ok: false,
+      motivo: libres.length
+        ? `${horaISO} no está libre el ${fechaISO} — ese día sólo hay: ${libres.map(s => s.label).join(', ')}`
+        : `el ${fechaISO} no queda ningún cupo`,
+    };
+  }
+  return { ok: true };
+}
+
 // ─── HISTORIA CLÍNICA: lookup / create contacto ───────────────────────────────
 async function buscarContactoPorNombre(nombre) {
   try {
@@ -752,5 +864,7 @@ module.exports = {
   buscarCitaPorInicio,
   getDisponibilidad,
   calcularSlotsLibres,
+  validarCupo,
+  diaEnBogota,
   esCierreTotal,
 };
