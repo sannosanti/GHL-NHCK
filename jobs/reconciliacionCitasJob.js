@@ -34,6 +34,19 @@ const { refZoho, parseZohoDateTime, tituloGHL, CALENDARIOS, CALENDAR_GENERAL } =
 // of firing dozens of "tu cita está confirmada" messages at once.
 const MAX_POR_PASADA = 10;
 
+// El tope global no protege a UNA persona. Un paciente con varias citas
+// pendientes en la ventana las recibiría todas en la misma pasada, separadas por
+// medio segundo: eso es exactamente la ráfaga del 21/09, cuando Laura Caterine
+// González recibió cuatro confirmaciones con fechas distintas en menos de 90
+// segundos. Una por pasada y por paciente; el resto espera media hora, que para
+// una cita que es dentro de días no le cuesta nada a nadie.
+//
+// Se cuenta por contacto de ZOHO, que es el dato disponible antes de tocar nada.
+// Dos registros duplicados del mismo paciente en Zoho (pasa: ver los dos Vicente
+// Betancur) cuentan como dos, así que el tope real por persona es el de la
+// pasada. Es un techo imperfecto pero acotado, y no cuesta una llamada extra.
+const MAX_POR_CONTACTO = 1;
+
 // Space out the GHL calls that each fire an instant confirmation message, so a
 // backlog doesn't read as a burst of messages arriving together.
 const PAUSA_ENTRE_CREACIONES_MS = 500;
@@ -177,7 +190,10 @@ async function runReconciliacionCitasJob() {
 }
 
 async function ejecutarPasada() {
-  const stats = { faltantes: 0, creadas: 0, fallidas: 0, sinMovil: 0, sinMovilNuevos: [] };
+  const stats = { faltantes: 0, creadas: 0, fallidas: 0, sinMovil: 0, sinMovilNuevos: [],
+                  eranBloqueo: 0, diferidasPorContacto: 0 };
+  // Cuántas se crearon ya en ESTA pasada para cada contacto de Zoho — ver MAX_POR_CONTACTO.
+  const creadasPorContacto = new Map();
   let fallosConsecutivos = 0;
   let diasFallidos = 0;
   const diasTotal = DIAS_VENTANA + 1;
@@ -215,9 +231,31 @@ async function ejecutarPasada() {
       if (!zohoCitaID) continue;
 
       const previo = await db.getCitaSync(zohoCitaID);
-      if (previo?.ghl_event_id) continue; // ya espejada
 
-      if (previo) {
+      // Una fila con clase 'bloqueo' NO es una cita espejada. La clínica usa los
+      // bloqueos como recordatorio mientras falta pago o datos ("Bloqueo - pago
+      // de Elisabeth", "Bloqueo - faltan datos felipe") y después convierte ese
+      // mismo registro de Zoho en cita. La conversión es una edición, las
+      // ediciones no disparan el webhook, y la fila se queda apuntando a una
+      // franja bloqueada: sin contacto, sin confirmación, sin recordatorio. Como
+      // la fila SÍ tenía ghl_event_id, este job la saltaba para siempre — la red
+      // de seguridad era ciega justo al caso que más se usa. Medido el 02/10:
+      // 5 pacientes en quince días, invisibles.
+      //
+      // Llegamos acá sólo si el registro de Zoho ya tiene Contacto (se filtró
+      // arriba), así que la conversión ya ocurrió y la cita es real.
+      if (previo?.ghl_event_id && previo.clase === 'bloqueo') {
+        const bloqueoPrevio = await db.descartarEspejadoComoBloqueo(zohoCitaID);
+        console.log(`[reconciliacionCitasJob] ${zohoCitaID} estaba espejada como bloqueo (evento ${bloqueoPrevio}) y ahora es cita — se vuelve a espejar`);
+        stats.eranBloqueo++;
+        // La franja bloqueada se deja en pie a propósito: la escribió alguien del
+        // equipo y dice POR QUÉ se apartó el cupo. Crear la cita encima funciona
+        // porque crearCitaEnCalendario manda ignoreFreeSlotValidation.
+      } else if (previo?.ghl_event_id) {
+        continue; // ya espejada de verdad
+      }
+
+      if (previo && !previo.ghl_event_id) {
         // edad_segundos viene calculado en SQL (ver db/index.js getCitaSync) y
         // no se resta acá con `created_at`: esa columna es TIMESTAMP WITHOUT
         // TIME ZONE y pg la interpreta con la zona horaria local del proceso
@@ -233,6 +271,10 @@ async function ejecutarPasada() {
       stats.faltantes++;
 
       if (stats.creadas >= MAX_POR_PASADA) continue; // tope alcanzado — se cuenta y se deja para la próxima pasada
+      if ((creadasPorContacto.get(contactoRef) || 0) >= MAX_POR_CONTACTO) {
+        stats.diferidasPorContacto++;
+        continue; // este paciente ya recibió una en esta pasada — la próxima es en media hora
+      }
 
       const consultorID = refZoho(c.Consultor);
       const calendarId = CALENDARIOS[consultorID] || CALENDAR_GENERAL;
@@ -242,6 +284,7 @@ async function ejecutarPasada() {
         fallosConsecutivos = 0;
         if (resultado === 'creada') {
           stats.creadas++;
+          creadasPorContacto.set(contactoRef, (creadasPorContacto.get(contactoRef) || 0) + 1);
           await new Promise(r => setTimeout(r, PAUSA_ENTRE_CREACIONES_MS));
         } else if (resultado === 'sin-movil') {
           stats.sinMovil++;
@@ -287,6 +330,8 @@ async function ejecutarPasada() {
       `Reconciliación de citas Zoho -> GHL\n` +
       `Faltantes detectadas: ${stats.faltantes}\n` +
       `Creadas: ${stats.creadas}\n` +
+      (stats.eranBloqueo ? `Eran bloqueo y ya son cita: ${stats.eranBloqueo} (la franja bloqueada queda en pie)\n` : '') +
+      (stats.diferidasPorContacto ? `Aplazadas a la próxima pasada (una por paciente): ${stats.diferidasPorContacto}\n` : '') +
       `Fallidas: ${stats.fallidas}\n` +
       `Sin Movil (no se crearon): ${stats.sinMovil}` +
       (stats.sinMovilNuevos.length ? ` — nuevas: ${stats.sinMovilNuevos.join(', ')}` : '') + `\n` +

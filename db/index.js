@@ -296,6 +296,35 @@ async function liberarCitaZoho(zohoCitaId) {
   }
 }
 
+/**
+ * Borra la fila de un registro que se espejó como BLOQUEO para que pueda volver
+ * a espejarse, ahora como cita. Devuelve el ghl_event_id que tenía, o null.
+ *
+ * La clínica usa los bloqueos como recordatorio mientras falta algo ("Bloqueo -
+ * pago de Elisabeth", "Bloqueo - faltan datos felipe") y después convierte ese
+ * mismo registro en cita. La conversión es una EDICIÓN en Zoho y las ediciones
+ * no disparan el webhook, así que citas_sync se queda con clase='bloqueo' y el
+ * id de una franja bloqueada — que no tiene contacto, y de una franja no sale ni
+ * confirmación ni recordatorio. Peor: como la fila SÍ tiene ghl_event_id, la
+ * reconciliación la daba por resuelta para siempre.
+ *
+ * liberarCitaZoho no sirve acá: sólo borra filas sin ghl_event_id, justamente
+ * para no pisar una reserva ya confirmada.
+ */
+async function descartarEspejadoComoBloqueo(zohoCitaId) {
+  if (!zohoCitaId) return null;
+  try {
+    const { rows } = await pool.query(
+      `DELETE FROM citas_sync WHERE zoho_cita_id = $1 AND clase = 'bloqueo' RETURNING ghl_event_id`,
+      [zohoCitaId]
+    );
+    return rows[0]?.ghl_event_id || null;
+  } catch (err) {
+    console.error('[citas_sync] no se pudo descartar el bloqueo', zohoCitaId, '—', err.message);
+    return null;
+  }
+}
+
 async function getConversationData(conversationId) {
   try {
     const res = await pool.query('SELECT * FROM conversations WHERE conversation_id = $1 AND agent = $2', [conversationId, env.agentName]);
@@ -954,5 +983,6 @@ module.exports = {
   reclamarCitaZoho,
   confirmarCitaZoho,
   liberarCitaZoho,
+  descartarEspejadoComoBloqueo,
   getCitaSync,
 };
