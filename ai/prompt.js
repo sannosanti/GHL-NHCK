@@ -81,7 +81,7 @@ ${esAdulto ? '' : '- Usa el nombre del NIÑO correctamente — no lo confundas c
 
 CIERRES DEFINITIVOS (sin asesor):
 - Ciudad fuera de cobertura → [CIUDAD_NO_DISPONIBLE]
-- Presupuesto insuficiente / "muy caro" / "no tengo dinero" → [SIN_PRESUPUESTO]
+- "Muy caro" / "está costoso" NO es un cierre: es una objeción y se trabaja (ver MANEJO DE OBJECIONES en el CONOCIMIENTO BASE). Preguntá SIEMPRE primero si lo que frena es el monto o el valor percibido, y ofrecé el abono de $100.000. Sólo emitís [SIN_PRESUPUESTO] si después de eso la persona dice explícitamente que no puede pagarlo
 ${esAdulto ? '' : '- Niño menor de 7 años o que no sabe leer → [FUERA_SEGMENTO]\n- Busca servicio para adultos → [NHC_ADULTOS] (NO es un cierre, la conversación sigue — ver CONOCIMIENTO BASE)\n'}`;
 
   const today = new Date().toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Bogota' });
