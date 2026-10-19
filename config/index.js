@@ -5,6 +5,12 @@ const env = {
   groqKey: process.env.GROQ_API_KEY,
   ghlKey: process.env.GHL_API_KEY,
   ghlLocationId: process.env.GHL_LOCATION_ID,
+  // Marketing API de Meta. Sirve para una sola cosa: resolver el nombre de
+  // campana, conjunto y anuncio de los leads de Click-to-WhatsApp, que llegan
+  // con adId y sin nombres. Sin el token el sello de atribucion igual funciona
+  // (los leads de formulario ya traen los nombres resueltos); esos contactos
+  // quedan sin nombre en lugar de con uno inventado.
+  metaToken: process.env.META_ACCESS_TOKEN,
   zohoClientId: process.env.ZOHO_CLIENT_ID,
   zohoClientSecret: process.env.ZOHO_CLIENT_SECRET,
   zohoRefreshToken: process.env.ZOHO_REFRESH_TOKEN,

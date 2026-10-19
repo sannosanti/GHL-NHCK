@@ -21,6 +21,7 @@ const { ghlWebhookHandler, ghlCrearEnCreatorHandler, ghlCrearEnCreatorNHCHandler
 const { wompiWebhookHandler, pagoExitosoHandler } = require('./webhooks/wompi');
 const { zohoCitaWebhookHandler } = require('./webhooks/zoho');
 const { fechaRecordatorioHandler } = require('./webhooks/recordatorio');
+const { atribucionHandler } = require('./webhooks/atribucion');
 const analyticsRouter = require('./analytics');
 const tokenDashboardRouter = require('./analytics/tokens');
 const { startRecoveryJob } = require('./jobs/recoveryJob');
@@ -824,6 +825,10 @@ app.post('/webhook/zoho-cita', zohoCitaWebhookHandler);
 // Lo llama el workflow "Recordatorio 24h" entre la espera y el envío, para que
 // el mensaje lea la fecha de ESA cita y no la última que quedó en el contacto.
 app.post('/webhook/recordatorio-fecha', fechaRecordatorioHandler);
+// Lo llama el workflow "Sello de atribucion" cuando se crea el contacto.
+// Copia el origen del PRIMER toque a campos personalizados, que son los unicos
+// que se pueden filtrar en listas inteligentes y graficar en tableros.
+app.post('/webhook/atribucion', atribucionHandler);
 app.get('/pago-exitoso', pagoExitosoHandler);
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
