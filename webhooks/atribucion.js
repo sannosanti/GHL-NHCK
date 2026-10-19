@@ -108,8 +108,17 @@ async function atribucionHandler(req, res) {
     b.contactId, b.contact_id, cd.contactId, cd.contact_id, b.contact && b.contact.id, b.id,
   );
 
+  // Un rechazo tiene que dejar rastro. GHL manda en el cuerpo sólo la clave
+  // customData — los "datos estándar" que promete la pantalla del workflow no
+  // llegan —, así que si nadie configuró el par contactId el endpoint no recibe
+  // nada útil. Sin este registro, un workflow mal configurado y uno que nunca
+  // disparó se ven exactamente igual: silencio. Es la trampa que costó días en
+  // el workflow de recordatorios; acá se paga una fila de log por evitarla.
   if (!contactId) {
-    return res.status(400).json({ ok: false, error: 'falta contactId', clavesRecibidas: Object.keys(b) });
+    const claves = { clavesRecibidas: Object.keys(b), clavesCustomData: Object.keys(cd) };
+    console.error(`ATRIBUCION: llamada sin contactId ${JSON.stringify(claves)}`);
+    await db.logEvent(null, null, 'atribucion_sin_contacto', claves).catch(() => {});
+    return res.status(400).json({ ok: false, error: 'falta contactId', ...claves });
   }
 
   let contacto;
@@ -125,7 +134,17 @@ async function atribucionHandler(req, res) {
     return res.status(502).json({ ok: false, error: `no se pudo leer el contacto: ${err.message}` });
   }
 
-  if (!contacto) return res.status(404).json({ ok: false, error: 'contacto no encontrado' });
+  // En "Probar flujo de trabajo" GHL manda la plantilla sin resolver, así que
+  // acá cae un contactId literal "{{contact.id}}". Es la forma barata de saber
+  // que el cableado quedó bien antes de que entre un paciente de verdad: este
+  // evento significa que la llamada llegó con su dato, sólo que ese contacto no
+  // existe. El id va en el payload y no en la columna de contacto, que espera
+  // uno real.
+  if (!contacto) {
+    console.error(`ATRIBUCION: el contacto ${contactId} no existe en la location`);
+    await db.logEvent(null, null, 'atribucion_contacto_no_hallado', { contactId }).catch(() => {});
+    return res.status(404).json({ ok: false, error: 'contacto no encontrado', contactId });
+  }
 
   const atribucion = contacto.attributionSource || {};
   const valores = desdeAtribucion(atribucion);
