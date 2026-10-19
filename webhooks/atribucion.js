@@ -94,6 +94,17 @@ async function nombresDeMeta(adId) {
   return datos;
 }
 
+// Un identificador crudo o un enlace no son el nombre de nada. Diez dígitos o
+// más porque los ids de Meta rondan los dieciocho y así ninguna edad, documento
+// ni número corto cae por accidente.
+const SOLO_DIGITOS = /^\d{10,}$/;
+const ES_ENLACE = /^(https?:\/\/|fb\.me\/|wa\.me\/|m\.me\/)/i;
+
+function esMarcadorSinNombre(valor) {
+  const s = String(valor == null ? '' : valor).trim();
+  return s !== '' && (SOLO_DIGITOS.test(s) || ES_ENLACE.test(s));
+}
+
 function primero(...valores) {
   for (const v of valores) {
     if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
@@ -166,14 +177,29 @@ async function atribucionHandler(req, res) {
 
   // El candado del primer toque. Un campo ausente del array viene vacío en GHL,
   // así que "no está" y "está en blanco" son el mismo caso.
+  //
+  // El tercer caso lo encontramos midiendo: en 307 contactos recientes, 137
+  // tenían ad_name con el adId crudo ("120245631464650710") y campaign_name con
+  // el enlace de Click-to-WhatsApp ("https://fb.me/7WDbPjxZ9"). Eso no lo
+  // escribe este endpoint; lo deja la integración nativa de Facebook cuando no
+  // resuelve el nombre. Si el candado los contara como sellados, esos contactos
+  // se quedarían con un identificador donde va un nombre PARA SIEMPRE, porque
+  // ninguna pasada posterior volvería a tocarlos — ni siquiera una con el token
+  // de Meta, que es justamente la que puede traducir ese adId.
+  //
+  // Por eso un valor que es sólo dígitos o una URL cuenta como reemplazable: no
+  // es el nombre de nada. El reemplazo es seguro en una dirección sola — sólo se
+  // pisa cuando hay un nombre real para poner en su lugar, y ningún anuncio se
+  // llama "120245631464650710" ni ninguna campaña "https://fb.me/7WDbPjxZ9".
   const actuales = new Map((contacto.customFields || []).map(f => [f.id, f.value]));
-  const estaVacio = (id) => {
+  const sePuedeEscribir = (id) => {
     const v = actuales.get(id);
-    return v === undefined || v === null || String(v).trim() === '';
+    if (v === undefined || v === null || String(v).trim() === '') return true;
+    return esMarcadorSinNombre(v);
   };
 
   const aEscribir = Object.entries(valores)
-    .filter(([id, valor]) => valor && estaVacio(id))
+    .filter(([id, valor]) => valor && sePuedeEscribir(id))
     .map(([id, value]) => ({ id, value }));
 
   if (!aEscribir.length) {
@@ -210,4 +236,4 @@ async function atribucionHandler(req, res) {
   return res.json({ ok: true, escritos: aEscribir.length, ...resumen });
 }
 
-module.exports = { atribucionHandler, desdeAtribucion, nombresDeMeta, CAMPO };
+module.exports = { atribucionHandler, desdeAtribucion, nombresDeMeta, esMarcadorSinNombre, CAMPO };
