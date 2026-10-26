@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { env, constants, proximoHorarioComercial } = require('../config');
+const { env, constants, proximoHorarioComercial , limpiarNombre } = require('../config');
 const db = require('../db');
 const ghl = require('../services/ghl');
 const zoho = require('../services/zoho');
@@ -375,13 +375,19 @@ async function flushTextQueue(conversationId) {
       const nombreCapturado = matchNombrePadre[1].trim();
       nuevoEstado = 'triaje_p1';
       try {
-        const partes = nombreCapturado.split(' ');
-        await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
-          method: 'PUT',
-          headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ firstName: partes[0], lastName: partes.slice(1).join(' ') || '' }),
-        });
-        await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+        // Si de lo capturado no sobrevive un nombre, el contacto se queda con el
+        // que tenia: el estado igual avanza, pero no se pisa un nombre bueno con
+        // un numero de documento.
+        const nombreLimpio = limpiarNombre(nombreCapturado);
+        if (nombreLimpio) {
+          const partes = nombreLimpio.split(' ');
+          await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ firstName: partes[0], lastName: partes.slice(1).join(' ') || '' }),
+          });
+          await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+        }
       } catch (e) {}
     }
 
@@ -480,8 +486,9 @@ async function flushTextQueue(conversationId) {
       const ghlUpdate = {};
       if (emailCita && emailCita !== contact.email) ghlUpdate.email = emailCita;
       if (ciudadCita) ghlUpdate.city = ciudadCita;
-      if (nombreContactoCita) {
-        const partes = nombreContactoCita.trim().split(' ');
+      const nombreCitaLimpio = limpiarNombre(nombreContactoCita);
+      if (nombreCitaLimpio) {
+        const partes = nombreCitaLimpio.split(' ');
         ghlUpdate.firstName = partes[0] || contact.firstName || '';
         ghlUpdate.lastName = partes.slice(1).join(' ') || contact.lastName || '';
       }

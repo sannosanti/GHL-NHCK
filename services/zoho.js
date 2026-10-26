@@ -1,7 +1,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
-const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino, mapearComoSupoAnamnesis } = require('../config');
+const { env, constants, mapearSintoma, mapearGenero, mapearOcupacionNino, mapearComoSupoAnamnesis , limpiarNombre } = require('../config');
 const db = require('../db');
 
 // ─── ZOHO TOKEN (module-scoped, private) ─────────────────────────────────────
@@ -805,7 +805,9 @@ async function buscarOCrearContactoAnamnesisClinica({ nombre, movil, email, edad
   let ghlId = '';
   if (env.ghlKey && env.ghlLocationId) {
     try {
-      const parts = nombre.trim().split(/\s+/);
+      // Se cae al nombre crudo solo si limpiarlo no deja nada: en ese caso lo
+      // unico que venia era el documento, y un contacto sin nombre es peor.
+      const parts = (limpiarNombre(nombre) || nombre.trim()).split(/\s+/);
       const ghlRes = await fetch('https://services.leadconnectorhq.com/contacts/', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },

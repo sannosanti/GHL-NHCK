@@ -661,10 +661,41 @@ function proximoHorarioComercial() {
   return 'a partir de las 8am';
 }
 
+
+
+// --- NOMBRES PEGADOS CON EL DOCUMENTO ---------------------------------------
+// El paciente casi nunca contesta una pregunta por vez: manda un bloque con el
+// nombre, el documento, la ciudad y la fecha, todo junto. Lo que el modelo
+// capture de ahi entra tal cual al contacto de GHL, y de ahi se replica al
+// "Nombre del consultante" de Zoho, que es donde lo lee el equipo. El 23/10
+// un contacto quedo con el tipo y el numero de documento pegados al apellido.
+//
+// El corte es el primer pedazo que tenga digitos, porque un nombre no tiene
+// numeros. La sigla que lo precede se va con el (TI, CC, RC): anuncia el
+// documento, no es parte del nombre. Se mira SOLO en esa posicion y no en
+// cualquier lugar, para no mutilar un apellido que por casualidad se escriba
+// igual que una sigla. La sigla puede venir con puntos adentro (C.C., T.I.),
+// asi que se le quitan todos antes de compararla, no solo los del final.
+//
+// El tipo y el numero de documento no se pierden: ya se extraen aparte, cada
+// uno a su propio campo.
+const SIGLAS_DOCUMENTO = /^(ti|cc|ce|rc|nit|nuip|pp|pa|pas|cedula|c\u00e9dula|tarjeta|documento|doc|id)\.?$/i;
+
+function limpiarNombre(texto) {
+  if (!texto) return '';
+  // Un nombre no cruza un salto de linea: lo que sigue ya es otro dato.
+  const palabras = String(texto).split(/[\r\n]/)[0].trim().split(/\s+/).filter(Boolean);
+  let corte = palabras.findIndex((p) => /\d/.test(p));
+  if (corte === -1) corte = palabras.length;
+  if (corte > 0 && SIGLAS_DOCUMENTO.test(palabras[corte - 1].replace(/[.,;:]/g, ''))) corte -= 1;
+  return palabras.slice(0, corte).join(' ').trim();
+}
+
 module.exports = {
   env, constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS,
   mapearSintoma, mapearGenero, mapearOcupacionNino, mapearSintomaAdulto,
   mapearComoSupoAnamnesis,
   equipoComercialDisponible,
   proximoHorarioComercial,
+  limpiarNombre,
 };
