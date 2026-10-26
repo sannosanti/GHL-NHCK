@@ -41,18 +41,41 @@ const CAMPO = {
   adName: 'UfYfC2uGPaCDWWLuXDYz',
   formName: 'RLZL7VubNPLBbPfEi7Ze',
   utmSource: '2oY8zViexx4PwnkEVpJv',
+  platform: '0tjGbBWLYS3seNVph95C',
 };
 
 // GHL acomoda la jerarquía de Meta en claves que engañan: el nombre del
 // conjunto viaja en utmMedium y el del anuncio en utmContent. No son los utm
 // que uno esperaría por el nombre; son la jerarquía de Meta con otra etiqueta.
+//
+// Y hay DOS formas distintas según por dónde entró el lead, que es lo que esta
+// función concilia:
+//
+//   formulario   campaign + utmMedium + utmContent + formName + adSetId
+//                nombres tal como se llaman en el administrador de anuncios
+//                ("3.2.1. VID_DEPRE_FORM+COD_130826").
+//
+//   Click-to-WhatsApp  adName + adId + ctwaClid + url, medium "whatsapp".
+//                el título del anuncio, legible ("🧠 Comprender antes de
+//                intervenir"). No trae campaña ni conjunto: Meta no los manda
+//                por ese canal.
+//
+// Medido sobre 196 contactos recientes: 88 por formulario, 83 por CTWA y los 83
+// traían adName. Ninguno sin nombre. Leer sólo utmContent, como hacía esta
+// función antes, dejaba fuera a la mitad del volumen creyendo que esos contactos
+// no se podían nombrar sin la API de Meta — y sí se podía, el nombre ya estaba.
 function desdeAtribucion(a) {
   return {
     [CAMPO.campaignName]: a.campaign || a.utmCampaign || '',
     [CAMPO.adsetName]: a.utmMedium || '',
-    [CAMPO.adName]: a.utmContent || '',
+    [CAMPO.adName]: a.utmContent || a.adName || '',
     [CAMPO.formName]: a.formName || '',
     [CAMPO.utmSource]: a.utmSource || a.source || '',
+    // No es la plataforma al estilo Meta (fb / ig) sino el canal por el que
+    // entró: "facebook" en los de formulario, "whatsapp" en los de CTWA. Vale
+    // como campo porque es exactamente el corte que hoy no se puede filtrar:
+    // cuántos entran por formulario y cuántos por anuncio de WhatsApp.
+    [CAMPO.platform]: a.medium || '',
   };
 }
 
