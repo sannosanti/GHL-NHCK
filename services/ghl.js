@@ -489,6 +489,48 @@ async function buscarCitaExistenteEnCalendario({ calendarId, contactId, startISO
   ) || null;
 }
 
+// --- TELEFONO COMPARTIDO EN LA CONVERSACION ---------------------------------
+// El prompt pide el celular desde siempre, pero no existia ninguna etiqueta
+// para guardarlo: el bot preguntaba, el paciente contestaba, el bot respondia
+// "ya quedo registrado tu numero" y el campo seguia vacio. Le decia al paciente
+// algo que no era cierto.
+//
+// Importa sobre todo en los leads de Facebook e Instagram, que llegan sin
+// numero: sin el no hay recordatorio, no hay forma de retomar si la
+// conversacion se corta, y el panel que mira el equipo queda en blanco.
+
+// Un celular colombiano son diez digitos que empiezan en 3. Puede llegar con
+// +57, con espacios, puntos o guiones. Cualquier otra cosa NO se escribe: un
+// numero mal formado en este campo rompe el recordatorio y nadie se entera.
+function normalizarCelularCo(texto) {
+  const d = String(texto == null ? '' : texto).replace(/\D/g, '');
+  const sin57 = (d.length === 12 && d.startsWith('57')) ? d.slice(2) : d;
+  return (sin57.length === 10 && sin57.startsWith('3')) ? `+57${sin57}` : null;
+}
+
+async function guardarTelefonoGHL(contactId, texto, telefonoActual) {
+  const nuevo = normalizarCelularCo(texto);
+  if (!nuevo) return false;
+  // No se pisa un telefono que ya existe: ese es el numero por el que el
+  // paciente escribe por WhatsApp, y cambiarlo cortaria el hilo de la
+  // conversacion. Esto es para el lead que llega sin numero.
+  if (telefonoActual && String(telefonoActual).trim()) return false;
+  try {
+    const { res } = await fetchGHL(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${env.ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: nuevo }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await db.pool.query('DELETE FROM contact_cache WHERE contact_id=$1', [contactId]).catch(() => {});
+    console.log(`Telefono guardado en GHL para ${contactId}`);
+    return true;
+  } catch (err) {
+    console.error('No se pudo guardar el telefono en GHL:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   // Se exporta para jobs que consultan endpoints de GHL que este módulo todavía
   // no envuelve (p. ej. la lista de calendarios y la búsqueda de
@@ -502,6 +544,7 @@ module.exports = {
   mapearSintoma,
   mapearGenero,
   mapearOcupacionNino,
+  guardarTelefonoGHL,
   guardarCamposNinoGHL,
   guardarCamposPacienteGHL,
   guardarSintomaGHL,

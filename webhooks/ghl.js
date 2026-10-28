@@ -349,6 +349,12 @@ async function flushTextQueue(conversationId) {
       // rastro, y por eso la caída de Zoho del 2026-08-20 estuvo horas sin que
       // saltara una sola alarma.
       console.error('DISPONIBILIDAD: no se pudo consultar Zoho —', err.message);
+      // Queda en la base y no solo en consola. Cuando esto falla el prompt
+      // manda escalar, asi que una escalacion por agenda y un fallo de Zoho se
+      // ven iguales desde afuera: el equipo reporta "no lleva al cierre" y no
+      // hay forma de saber si el bot se rindio o si se quedo sin datos. Con
+      // este evento se puede contar.
+      await db.logEvent(contactId, null, 'disponibilidad_fallida', { error: err.message }).catch(() => {});
       disponibilidadTexto = 'No consultada. Intenta más tarde.';
     }
 
@@ -394,6 +400,14 @@ async function flushTextQueue(conversationId) {
     const matchCiudad = rawReply.match(/\[CIUDAD_VALIDA:\s*(.+?)\]/);
     if (matchCiudad) {
       ghl.guardarCiudadGHL(contactId, matchCiudad[1].trim()).catch(() => {});
+    }
+
+    // El celular que comparte el paciente. Antes el bot decia "ya quedo
+    // registrado" y no lo escribia nadie, porque esta etiqueta no existia.
+    // guardarTelefonoGHL valida el formato y nunca pisa un numero ya cargado.
+    const matchCelular = rawReply.match(/\[CELULAR:\s*([^\]]+)\]/);
+    if (matchCelular) {
+      ghl.guardarTelefonoGHL(contactId, matchCelular[1], contact.phone).catch(() => {});
     }
 
     const matchP1 = rawReply.match(/\[TRIAJE_P1:\s*(.+?)\]/);
