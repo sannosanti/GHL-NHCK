@@ -1,6 +1,6 @@
 'use strict';
 
-const { constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS, proximoHorarioComercial } = require('../config');
+const { env, constants, CONOCIMIENTO_NHC, CONOCIMIENTO_NHC_ADULTOS, proximoHorarioComercial } = require('../config');
 const db = require('../db');
 
 // Cached separately per brand: a conversation handed off to Luisa needs HER
