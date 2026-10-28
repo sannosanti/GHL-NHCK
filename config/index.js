@@ -1,5 +1,16 @@
 'use strict';
 
+// Un valor que no es un telefono NO se usa. El 28/10 quedo cargado el
+// placeholder "573XXXXXXXXX" en produccion: con el, el bot habria mandado a los
+// pacientes de Facebook a escribirle a un numero que no existe, y eso es peor
+// que no ofrecer ninguno, porque la persona se va creyendo que la atendimos.
+// Entre diez y trece digitos, que cubre el movil colombiano con indicativo y
+// sin el. Cualquier otra cosa apaga la funcion en vez de ensuciarla.
+function soloNumeroUsable(valor) {
+  const d = String(valor == null ? '' : valor).replace(/\D/g, '');
+  return (d.length >= 10 && d.length <= 13) ? d : undefined;
+}
+
 const env = {
   anthropicKey: process.env.ANTHROPIC_API_KEY,
   groqKey: process.env.GROQ_API_KEY,
@@ -15,8 +26,8 @@ const env = {
   // Facebook o Instagram: en esos canales no se puede agendar ni cobrar. Sin
   // configurar, el bot sigue atendiendo en el canal como hasta ahora en vez de
   // inventar un numero.
-  waNhck: process.env.WHATSAPP_NHCK,
-  waNhc: process.env.WHATSAPP_NHC,
+  waNhck: soloNumeroUsable(process.env.WHATSAPP_NHCK),
+  waNhc: soloNumeroUsable(process.env.WHATSAPP_NHC),
   zohoClientId: process.env.ZOHO_CLIENT_ID,
   zohoClientSecret: process.env.ZOHO_CLIENT_SECRET,
   zohoRefreshToken: process.env.ZOHO_REFRESH_TOKEN,
