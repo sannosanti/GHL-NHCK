@@ -171,8 +171,35 @@ const SENALES_PROPIAS = env.agentName === 'luisa' ? SENALES_ADULTOS : SENALES_KI
 const SENALES_AJENAS  = env.agentName === 'luisa' ? SENALES_KIDS    : SENALES_ADULTOS;
 const RUTEO_POR_ETIQUETA = process.env.RUTEO_POR_ETIQUETA === '1';
 
+// Campos de atribucion sellados en el contacto. El nombre del formulario y de
+// la campaña dicen la marca desde el primer segundo: "LEADS_NHC-SM_130826" es
+// adultos, "LEADS_NHCK-SM_250826" es kids.
+const CAMPO_FORM_NAME = 'RLZL7VubNPLBbPfEi7Ze';
+const CAMPO_CAMPAIGN_NAME = 'Z3sbxlZn4Po0rofMSMK6';
+const MI_MARCA = env.agentName === 'luisa' ? 'adultos' : 'kids';
+
+/**
+ * Que marca dice la atribucion del contacto, o null si no dice nada.
+ * Se mira primero attributionSource, que viene en el contacto desde que se
+ * crea, y despues los campos personalizados, que los sella un workflow cinco
+ * minutos mas tarde: un lead que escribe enseguida todavia no los tiene.
+ */
+function marcaPorAtribucion(contact) {
+  const a = contact?.attributionSource || {};
+  const campos = new Map((contact?.customFields || []).map(f => [f.id, String(f.value == null ? '' : f.value)]));
+  const texto = [
+    a.formName, a.campaign, a.utmCampaign,
+    campos.get(CAMPO_FORM_NAME), campos.get(CAMPO_CAMPAIGN_NAME),
+  ].filter(Boolean).join(' ');
+  if (!texto.trim()) return null;
+  // NHCK contiene NHC, asi que se pregunta primero por la mas especifica.
+  if (/NHCK/i.test(texto)) return 'kids';
+  if (/NHC/i.test(texto)) return 'adultos';
+  return null;
+}
+
 /** ¿La conversación pertenece a la OTRA marca? */
-function esDeOtraMarca(tags) {
+function esDeOtraMarca(tags, contact) {
   // Comparación exacta contra el arreglo: 'linea-nhc' NO
   // coincide dentro de 'linea-nhck'. Con texto en vez de arreglo, sí lo haría.
   // Sólo se calla si la marca ajena es INEQUÍVOCA. Sin señales, o con las de
@@ -180,7 +207,23 @@ function esDeOtraMarca(tags) {
   // conteste el bot equivocado.
   const propias = tags.some(t => SENALES_PROPIAS.includes(t));
   const ajenas  = tags.some(t => SENALES_AJENAS.includes(t));
-  return ajenas && !propias;
+  if (ajenas && !propias) return true;
+
+  // Las etiquetas de marca las pone nuestro propio flujo, asi que un lead
+  // recien creado por un formulario NO tiene ninguna todavia: justo ahi el
+  // ruteo era ciego y contestaba el bot equivocado. El 21/10 un hombre que
+  // venia de la campaña de adultos recibio a Carolina preguntandole que edad
+  // tenia su hijo; contesto "no tengo hijos". Su atribucion decia
+  // "Leads_forms_sintomas_nhc_abo_170126" desde el primer momento.
+  //
+  // Solo decide cuando no hay ninguna etiqueta de marca: con etiquetas manda la
+  // regla de arriba, porque una etiqueta la puso una persona del equipo y sabe
+  // mas que el formulario por el que entro.
+  if (!propias && !ajenas) {
+    const marca = marcaPorAtribucion(contact);
+    if (marca && marca !== MI_MARCA) return true;
+  }
+  return false;
 }
 
 
@@ -223,7 +266,7 @@ async function flushTextQueue(conversationId) {
     const contact = contactData.contact || {};
     const tags = contact.tags || [];
 
-    if (RUTEO_POR_ETIQUETA && esDeOtraMarca(tags)) {
+    if (RUTEO_POR_ETIQUETA && esDeOtraMarca(tags, contact)) {
       console.log(`[ruteo] ${contactId} entró por un formulario de la otra marca — no se responde`);
       return;
     }
@@ -359,7 +402,7 @@ async function flushTextQueue(conversationId) {
     }
 
     const derivadoA = convData?.derivado_a || null;
-    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA, desdeFormulario: tags.includes('lead-formulario') });
+    const systemPrompt = await buildSystemPrompt(estado, { nombre, triaje, disponibilidadTexto, derivadoA, desdeFormulario: tags.includes('lead-formulario'), canal: channel });
     const rawReply = await callClaude(systemPrompt, history);
 
     // The Claude call above can take several seconds — an advisor may have
@@ -984,7 +1027,11 @@ async function ghlWebhookHandler(req, res) {
     // recibo y le cede el turno a la persona asignada. Se metia en medio de
     // conversaciones que un humano ya estaba atendiendo (reportado 2026-09-14).
     const yaEstabaEscalado = tags.includes('escalado nhck');
-    if (yaEstabaEscalado && !(isImage && estado === 'esperando_pago')) return;
+    // Una imagen NUNCA se descarta por estar escalada. La excepcion valia solo
+    // con estado 'esperando_pago', asi que un comprobante que llegaba despues
+    // de que el bot cerro la conversacion no producia nada: ni evento, ni
+    // etiqueta, ni aviso. El equipo solo lo veia si abria el chat a mano.
+    if (yaEstabaEscalado && !isImage) return;
 
     let lastMsg = messageBody;
     let lastMsgId = messageId;
@@ -1107,11 +1154,20 @@ async function ghlWebhookHandler(req, res) {
     // hablando solo — que es lo que pasaba antes.
     if (isImage) {
       console.log('IMAGEN en estado no esperado — escalando para revisión:', estado);
-      await db.logEvent(contactId, conversationId, 'imagen_fuera_de_flujo', { estado });
+      await db.logEvent(contactId, conversationId, 'imagen_fuera_de_flujo', { estado, yaEstabaEscalado });
       await ghl.addTag(contactId, 'escalado nhck').catch(() => {});
-      await ghl.sendMessage(conversationId,
-        'Recibí tu imagen 📸 Un asesor la revisa y te confirma en un momento 🙌',
-        contactId).catch(() => {});
+      // Una imagen donde no se esperaba casi siempre es un comprobante que
+      // llego tarde. La etiqueta lo pone en la cola de validacion en vez de
+      // dejarlo esperando a que alguien abra el chat por casualidad.
+      await ghl.addTag(contactId, 'validar pago nhck').catch(() => {});
+      // Si la conversacion ya era de un asesor NO se le escribe al paciente: el
+      // hilo es de esa persona y dos voces a la vez confunden. La etiqueta y el
+      // evento alcanzan para que el equipo lo vea.
+      if (!yaEstabaEscalado) {
+        await ghl.sendMessage(conversationId,
+          'Recibí tu imagen 📸 Un asesor la revisa y te confirma en un momento 🙌',
+          contactId).catch(() => {});
+      }
       return;
     }
     if (!lastMsg) return;

@@ -31,7 +31,19 @@ async function refreshLearnedRules() {
  */
 async function buildSystemPrompt(estado, ctx) {
   await refreshLearnedRules();
-  const { nombre = '', triaje = {}, disponibilidadTexto = '', derivadoA = null, desdeFormulario = false } = ctx;
+  const { nombre = '', triaje = {}, disponibilidadTexto = '', derivadoA = null, desdeFormulario = false, canal = 'WhatsApp' } = ctx;
+
+  // Facebook e Instagram no sirven para cerrar: no hay agenda, no hay cobro y
+  // el hilo se pierde. Hasta ahora el bot atendia el flujo completo ahi mismo.
+  // Si no hay numeros configurados no se dice nada: mejor seguir como antes que
+  // mandar a la persona a un numero inventado.
+  const esRedSocial = canal === 'FB' || canal === 'IG';
+  const bloqueRedSocial = (esRedSocial && (env.waNhck || env.waNhc)) ? `
+
+CANAL ACTUAL: ${canal === 'FB' ? 'Facebook' : 'Instagram'} — esta conversación NO es por WhatsApp.
+- Saludá y respondé la duda puntual si es corta, pero llevá la conversación a WhatsApp: por acá no podés consultar la agenda, ni agendar, ni cobrar.
+- Pasá UN solo número, el que corresponda: si la consulta es por un niño o adolescente → ${env.waNhck || '(no configurado)'}. Si es por una persona adulta → ${env.waNhc || '(no configurado)'}. Si todavía no sabés para quién es, preguntalo ANTES de pasar el número.
+- El número se pasa una sola vez. No lo repitas en cada mensaje.` : '';
 
   // derivadoA === 'luisa' means: this conversation started with Carolina, but
   // the patient turned out to be an adult. We keep answering on Carolina's
@@ -105,7 +117,7 @@ ${conocimientoActivo}`;
 PRÓXIMO CONTACTO (horario exacto a usar cuando escalás — ver regla de [ESCALAR] arriba): ${proximoContacto}
 
 DISPONIBILIDAD (usa SOLO estos horarios, NUNCA inventes):
-${disponibilidadTexto}
+${disponibilidadTexto}${bloqueRedSocial}
 Si el bloque dice que no hay cupo en los próximos 14 días, ofrecé igual las fechas que sí aparecen: son las más próximas reales. Una agenda ocupada nunca es motivo para despedir a alguien sin darle una fecha concreta.`;
 
   if (estado === 'nuevo' && desdeFormulario) {

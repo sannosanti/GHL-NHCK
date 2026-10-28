@@ -11,6 +11,12 @@ const env = {
   // (los leads de formulario ya traen los nombres resueltos); esos contactos
   // quedan sin nombre en lugar de con uno inventado.
   metaToken: process.env.META_ACCESS_TOKEN,
+  // Numeros de WhatsApp de cada linea, para mandar ahi a quien escribe por
+  // Facebook o Instagram: en esos canales no se puede agendar ni cobrar. Sin
+  // configurar, el bot sigue atendiendo en el canal como hasta ahora en vez de
+  // inventar un numero.
+  waNhck: process.env.WHATSAPP_NHCK,
+  waNhc: process.env.WHATSAPP_NHC,
   zohoClientId: process.env.ZOHO_CLIENT_ID,
   zohoClientSecret: process.env.ZOHO_CLIENT_SECRET,
   zohoRefreshToken: process.env.ZOHO_REFRESH_TOKEN,
