@@ -1,123 +1,43 @@
 'use strict';
 
-// Barrido de citas fantasma: eventos vivos en GHL cuyo registro de Zoho ya no
-// existe.
+// Corre a mano el barrido de citas fantasma que el servidor ya ejecuta solo
+// todos los días (jobs/barridoFantasmasJob.js). Sirve para mirar el estado en el
+// momento o para forzar una pasada después de limpiar algo en Creator.
 //
-// POR QUE HACE FALTA. La sincronizacion Zoho -> GHL viaja por avisos: creacion,
-// modificacion y los botones de estado. Un BORRADO no tiene por donde viajar,
-// porque al borrarse el registro desaparece lo unico que podria avisarnos. El
-// evento queda vivo en GHL, ocupa la franja, y el workflow de recordatorios le
-// manda al paciente un mensaje por una cita que no existe. Paso el 28/10 con un
-// paciente que recibio dos recordatorios con horas distintas.
+// La lógica NO está acá: está en el job. Una copia se desincroniza del original
+// en la primera corrección y termina cancelando con un criterio distinto al que
+// corre en producción.
 //
-// QUE HACE. Lee las citas de Zoho del rango, arma el conjunto de IDs que siguen
-// existiendo, y marca como fantasma toda fila de citas_sync cuya cita futura
-// apunte a un ID que ya no esta.
-//
-// Por defecto NO escribe. Con --cancelar pone el evento en 'cancelled' en vez
-// de borrarlo: cancelar deja rastro en la agenda y es reversible; borrar no.
-const fs = require('fs');
-const path = require('path');
-const db = require('../../db');
-const ghl = require('../../services/ghl');
-const zoho = require('../../services/zoho');
+//   node scripts/calendario/barrido-fantasmas.js              simulacro
+//   node scripts/calendario/barrido-fantasmas.js --cancelar   aplica
+//   node scripts/calendario/barrido-fantasmas.js --dias=60    otro rango
+const { barrerFantasmas } = require('../../jobs/barridoFantasmasJob');
 
-const CANCELAR = process.argv.includes('--cancelar');
-const DIAS = Number((process.argv.find((a) => a.startsWith('--dias=')) || '--dias=45').split('=')[1]);
-
-const MESES_ZOHO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const dos = (n) => String(n).padStart(2, '0');
-const aZoho = (d) => `${dos(d.getDate())}-${MESES_ZOHO[d.getMonth()]}-${d.getFullYear()}`;
-
-// Zoho pagina de a 200. Se recorre dia por dia para no toparse con el tope en
-// un rango largo y para que un fallo puntual no invalide todo el barrido.
-async function idsDeZoho(desde, dias) {
-  const tok = await zoho.getZohoAccessToken();
-  const vivos = new Set();
-  let diasLeidos = 0;
-  for (let i = 0; i < dias; i++) {
-    const d = new Date(desde.getTime() + i * 86400000);
-    const crit = `Inicio >= "${aZoho(d)} 00:00:00" && Inicio <= "${aZoho(d)} 23:59:59"`;
-    const url = `https://creator.zoho.com/api/v2/visionintegralceo/calendario/report/Citas_Report`
-      + `?criteria=${encodeURIComponent(crit)}&max_records=200`;
-    const r = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${tok}` } });
-    if (r.status === 404) { diasLeidos++; continue; }   // 404 = sin registros ese dia
-    if (!r.ok) {
-      // Un dia que no se pudo leer NO puede tratarse como "sin citas": cada
-      // registro de ese dia pareceria borrado y se cancelarian citas reales.
-      throw new Error(`Zoho respondio HTTP ${r.status} para ${aZoho(d)} — se aborta el barrido`);
-    }
-    const j = await r.json();
-    for (const c of (j.data || [])) vivos.add(String(c.ID));
-    diasLeidos++;
-    await new Promise((res) => setTimeout(res, 150));
-  }
-  return { vivos, diasLeidos };
-}
+const cancelar = process.argv.includes('--cancelar');
+const argDias = process.argv.find((a) => a.startsWith('--dias='));
+const dias = argDias ? Number(argDias.split('=')[1]) : 30;
 
 (async () => {
-  console.log(CANCELAR ? '=== BARRIDO REAL (cancela en GHL)' : '=== SIMULACRO (no escribe). Pasá --cancelar para aplicar.');
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
+  console.log(cancelar
+    ? `=== BARRIDO REAL — cancela en GHL (${dias} días)`
+    : `=== SIMULACRO — no escribe nada (${dias} días). Pasá --cancelar para aplicar.`);
 
-  console.log(`leyendo ${DIAS} dias de Zoho desde ${aZoho(hoy)}...`);
-  const { vivos, diasLeidos } = await idsDeZoho(hoy, DIAS);
-  console.log(`   dias leidos: ${diasLeidos} | citas vivas en Zoho: ${vivos.size}`);
-
-  // Solo citas de paciente: un bloqueo no tiene contacto ni manda recordatorio,
-  // asi que un bloqueo huerfano no le llega a nadie.
-  const q = await db.pool.query(`
-    SELECT zoho_cita_id, ghl_event_id, calendar_id, inicio, fin, clase
-    FROM citas_sync
-    WHERE ghl_event_id IS NOT NULL
-      AND clase = 'cita'
-      AND to_timestamp(inicio, 'DD-Mon-YYYY HH24:MI:SS') >= now()::date
-      AND to_timestamp(inicio, 'DD-Mon-YYYY HH24:MI:SS') < now()::date + $1::int
-    ORDER BY to_timestamp(inicio, 'DD-Mon-YYYY HH24:MI:SS')`, [DIAS]);
-
-  console.log(`   citas futuras espejadas en GHL: ${q.rows.length}`);
-
-  const fantasmas = q.rows.filter((r) => !vivos.has(String(r.zoho_cita_id)));
-  console.log(`\n=== FANTASMAS: ${fantasmas.length}`);
-  for (const f of fantasmas) {
-    console.log(`   ${f.inicio}  zoho ${f.zoho_cita_id}  ghl ${f.ghl_event_id}`);
-  }
-  if (!fantasmas.length) { console.log('   nada que hacer'); process.exit(0); }
-
-  if (!CANCELAR) {
-    console.log('\n(simulacro: no se cancelo ninguna)');
-    process.exit(0);
+  let stats;
+  try {
+    stats = await barrerFantasmas({ dias, cancelar });
+  } catch (err) {
+    // El job aborta entero si un día de Zoho no se pudo leer, para no cancelar
+    // citas reales de un día que simplemente no respondió.
+    console.error('\nABORTADO:', err.message);
+    process.exit(1);
   }
 
-  let ok = 0, fallos = 0;
-  for (const f of fantasmas) {
-    try {
-      // Se relee el evento para no pisar su calendario, titulo ni contacto: el
-      // PUT de GHL reemplaza el recurso entero.
-      const actual = await ghl.getCitaEnCalendario(f.ghl_event_id);
-      if (!actual) { console.log(`   ${f.ghl_event_id}: ya no esta en GHL`); await db.pool.query('DELETE FROM citas_sync WHERE ghl_event_id=$1', [f.ghl_event_id]); ok++; continue; }
-      const r = await ghl.actualizarCitaEnCalendario({
-        eventId: f.ghl_event_id,
-        calendarId: actual.calendarId,
-        contactId: actual.contactId,
-        startISO: actual.startTime,
-        endISO: actual.endTime,
-        title: actual.title,
-        description: actual.notes || actual.description || '',
-        appointmentStatus: 'cancelled',
-      });
-      if (r === false) throw new Error('GHL rechazo la actualizacion');
-      await db.pool.query('DELETE FROM citas_sync WHERE ghl_event_id=$1', [f.ghl_event_id]);
-      await db.logEvent(actual.contactId || null, null, 'cita_fantasma_cancelada',
-        { ghl_event_id: f.ghl_event_id, zoho_cita_id: f.zoho_cita_id, inicio: f.inicio }).catch(() => {});
-      console.log(`   cancelada ${f.ghl_event_id} (${f.inicio})`);
-      ok++;
-    } catch (err) {
-      console.error(`   FALLO ${f.ghl_event_id}: ${err.message}`);
-      fallos++;
-    }
-    await new Promise((res) => setTimeout(res, 250));
+  console.log(`\ncitas futuras espejadas: ${stats.revisadas}`);
+  console.log(`fantasmas encontrados  : ${stats.fantasmas}`);
+  for (const d of stats.detalle) {
+    console.log(`   ${d.inicio}  zoho ${d.zoho}  ghl ${d.ghl}${d.contacto ? `  contacto ${d.contacto}` : ''}`);
   }
-  console.log(`\ncanceladas: ${ok} | fallos: ${fallos}`);
+  if (cancelar) console.log(`\ncanceladas: ${stats.canceladas} | fallidas: ${stats.fallidas}`);
+  else if (stats.fantasmas) console.log('\n(simulacro: no se canceló ninguna)');
   process.exit(0);
 })();

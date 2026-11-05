@@ -29,6 +29,7 @@ const { startWeeklyReport } = require('./jobs/weeklyReport');
 const { startDailyReport } = require('./jobs/dailyReport');
 const { startPendingWebhookJob } = require('./jobs/pendingWebhookJob');
 const { startReconciliacionCitasJob } = require('./jobs/reconciliacionCitasJob');
+const { startBarridoFantasmasJob } = require('./jobs/barridoFantasmasJob');
 const { startReporteSaludJob } = require('./jobs/reporteSaludJob');
 const { notify, notifyError } = require('./services/notifier');
 const { answerQuestion } = require('./services/cliqBot');
@@ -849,6 +850,7 @@ db.initDB().then(() => {
   startDailyReport();
   startPendingWebhookJob();
   startReconciliacionCitasJob();
+startBarridoFantasmasJob();
   startReporteSaludJob();
   app.listen(env.port, () => console.log(`Servidor corriendo en puerto ${env.port}`));
 }).catch(err => { console.error('Error DB:', err); process.exit(1); });
